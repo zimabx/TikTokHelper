@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name            TikTokHelper
 // @namespace       https://github.com/zimabx/TikTokHelper
-// @version         0.3.0
-// @description     save TikTok media from the web.
+// @version         0.4.0
+// @description     Add download tools to TikTok web pages.
 // @author          zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -27,7 +27,7 @@
   const MEDIA_READY_COLD_START_ATTEMPTS = 24;
   const MEDIA_READY_COLD_START_INTERVAL_MS = 200;
   const MEDIA_READY_COLD_START_WINDOW_MS = 8000;
-
+  
   const DEFAULT_VIDEO_SOURCE_COLUMNS = ["quality", "resolution", "codec", "fps", "bitrate", "size"];
   const VIDEO_SOURCE_COLUMN_DEFINITIONS = [
     { key: "quality", messageKey: "quality" },
@@ -47,6 +47,7 @@
   const DEFAULT_CONFIG = {
     filename_template: "${nickname}_${short_id}_${tags}_${desc}",
     filename_max_length: 80,
+    album_index_format: "_01",
     video_quality: "highest_resolution",
     video_source_columns: [...DEFAULT_VIDEO_SOURCE_COLUMNS],
     download_method: "browser",
@@ -152,13 +153,16 @@
     { value: " ", display: "Space", en: "Space", zh: "空格" },
   ];
 
+  // Values only: display labels always come from t(`quality_${value}`) via getMessage(),
+  // never from a second tuple element (unlike LANGUAGE_OPTIONS/THEME_OPTIONS below, whose
+  // labels are shown as-is without translation).
   const VIDEO_QUALITY_OPTIONS = [
-    ["highest_resolution", "Highest resolution"],
-    ["highest_bitrate", "Highest bitrate"],
-    ["1080p", "1080p"],
-    ["720p", "720p"],
-    ["540p", "540p"],
-    ["lowest", "Lowest resolution"],
+    "highest_resolution",
+    "highest_bitrate",
+    "1080p",
+    "720p",
+    "540p",
+    "lowest",
   ];
 
   const LANGUAGE_OPTIONS = [
@@ -173,12 +177,26 @@
     ["light", "Light / 白天"],
   ];
 
-  const DOWNLOAD_METHOD_OPTIONS = [["browser", "browser"]];
+  // Values only, same reasoning as VIDEO_QUALITY_OPTIONS above: label comes from
+  // t(`download_method_${value}`).
+  const DOWNLOAD_METHOD_OPTIONS = ["browser"];
+
+  const ALBUM_INDEX_FORMAT_OPTIONS = [
+    { value: "_01", label: "_01", template: "_{nn}" },
+    { value: "_1", label: "_1", template: "_{n}" },
+    { value: "-01", label: "-01", template: "-{nn}" },
+    { value: "-1", label: "-1", template: "-{n}" },
+    { value: "(01)", label: "(01)", template: "({nn})" },
+    { value: "(1)", label: "(1)", template: "({n})" },
+  ];
 
   const MESSAGES = {
     en: {
-      menu: "TikScope menu",
+      menu: "TikTok Helper menu",
       download: "Download",
+      download_video: "Download Video",
+      download_album: "Download Album",
+      download_image: "Download Image",
       details: "Details",
       settings: "Settings",
       close: "Close",
@@ -193,9 +211,9 @@
       download_failed: "Download failed",
       settings_saved: "Settings saved.",
       media_json_copied: "Media JSON copied.",
-      settings_title: "TikScope Settings",
+      settings_title: "TikTok Helper Settings",
       settings_subtitle: "Appearance, video quality, and filename rules.",
-      details_title: "TikScope Details",
+      details_title: "TikTok Helper Details",
       appearance_section: "Appearance",
       download_section: "Download",
       filename_section: "Filename",
@@ -235,6 +253,7 @@
       available_fields: "Available attributes",
       filename_template: "Filename Template",
       filename_max_length: "Filename Max Length",
+      album_index_format: "Album Increment",
       copy: "Copy",
       remove: "Remove",
       reset: "Reset",
@@ -251,6 +270,7 @@
       tooltip_available_fields: "All filename attributes supported by this script. Click one to append its `${name}` token to the filename template.",
       tooltip_custom_template: "Plain filename template. Click an available attribute below to append it at the end. Example: `${nickname}_${short_id}_${desc}`.",
       tooltip_filename_max_length: "Maximum filename length before the extension is added. Invalid filename characters are replaced automatically.",
+      tooltip_album_index_format: "Numbering style appended to each image in an album.",
       tooltip_browser_downloads_only: "Downloads use the browser flow with a userscript request fallback. Additional host settings are intentionally omitted.",
       quality_highest_resolution: "Highest resolution",
       quality_highest_bitrate: "Highest bitrate",
@@ -258,10 +278,77 @@
       quality_720p: "720p",
       quality_540p: "540p",
       quality_lowest: "Lowest resolution",
+      // -- merged from former Object.assign(MESSAGES.en, {...}) patch blocks --
+      details_tab_media: "Media Resources",
+      details_tab_author: "Author Info",
+      details_tab_post: "Post Info",
+      video_cover: "Video Cover",
+      background_music: "Background Music",
+      author_info: "Author Info",
+      data_stats: "Data Stats",
+      id_info: "ID Info",
+      permissions_status: "Permissions / Status",
+      new_tab_open: "Open in new tab",
+      download_cover: "Download cover",
+      fps: "Frame Rate",
+      bitrate_kbps: "Bitrate (kbps)",
+      select_all: "Select all",
+      console_log: "Console Log",
+      json_logged: "JSON written to console.",
+      copied: "Copied.",
+      uid: "UID",
+      sec_uid: "SecUID",
+      nickname: "Nickname",
+      avatar: "Avatar",
+      visit_profile: "Visit profile",
+      verification: "Verification",
+      followers: "Followers",
+      likes_received: "Likes received",
+      share_link: "Share link",
+      video_id: "Video ID",
+      group_id: "Group ID",
+      allow_comment: "Allow comments",
+      allow_share: "Allow share",
+      allow_download: "Allow download",
+      allow_duet: "Allow duet",
+      allow_stitch: "Allow Stitch",
+      private_video: "Private video",
+      yes: "Yes",
+      no: "No",
+      frame_capture: "Video Frame",
+      frame_title: "Video Frame",
+      copy_frame: "Copy image",
+      save_frame: "Save image",
+      frame_copied: "Frame copied.",
+      frame_copy_failed: "Frame copy failed.",
+      frame_failed: "Could not capture the current frame.",
+      frame_copy_unsupported: "Image clipboard copy is unavailable in this browser.",
+      filename_preview: "Current filename",
+      downloader_config: "Downloader",
+      video_download_settings: "Video Download Settings",
+      browser_downloader_note: "Only browser downloads are enabled. External downloader host settings are hidden.",
+      source_properties: "Available source properties",
+      source_columns: "Video source columns",
+      shortcut_section: "Shortcuts",
+      shortcut_download: "Download shortcut",
+      shortcut_frame: "Video frame shortcut",
+      shortcut_details: "Details shortcut",
+      shortcut_settings: "Settings shortcut",
+      shortcut_hint: "Focus a shortcut field and press a key combination. Backspace clears it.",
+      gear_name: "Gear name",
+      quality_type: "Quality type",
+      width: "Width",
+      height: "Height",
+      format: "Format",
+      url_id: "URL ID",
+      template: "Template",
     },
     zh: {
-      menu: "TikScope 菜单",
+      menu: "TikTok Helper 菜单",
       download: "下载",
+      download_video: "下载视频",
+      download_album: "下载图集",
+      download_image: "下载图片",
       details: "详情",
       settings: "设置",
       close: "关闭",
@@ -276,9 +363,9 @@
       download_failed: "下载失败",
       settings_saved: "设置已保存。",
       media_json_copied: "媒体 JSON 已复制。",
-      settings_title: "TikScope 设置",
+      settings_title: "TikTok Helper 设置",
       settings_subtitle: "外观、视频质量和文件名规则。",
-      details_title: "TikScope 详情",
+      details_title: "TikTok Helper 详情",
       appearance_section: "外观",
       download_section: "下载",
       filename_section: "文件名",
@@ -318,6 +405,7 @@
       available_fields: "可用属性",
       filename_template: "文件名模板",
       filename_max_length: "文件名最大长度",
+      album_index_format: "图集递增",
       copy: "复制",
       remove: "移除",
       reset: "重置",
@@ -334,6 +422,7 @@
       tooltip_available_fields: "脚本支持的全部文件名属性。点击属性会把 `${name}` 追加到文件名模板末尾。",
       tooltip_custom_template: "手动填写普通文件名模板。点击下方可用属性会追加到末尾。示例：`${nickname}_${short_id}_${desc}`。",
       tooltip_filename_max_length: "扩展名前的文件名最大长度。非法文件名字符会自动替换。",
+      tooltip_album_index_format: "图集中每张图片追加的序号样式。",
       tooltip_browser_downloads_only: "只使用浏览器下载，并保留用户脚本请求兜底。不显示额外主机设置。",
       quality_highest_resolution: "最高分辨率",
       quality_highest_bitrate: "最高码率",
@@ -341,147 +430,72 @@
       quality_720p: "720p",
       quality_540p: "540p",
       quality_lowest: "最低分辨率",
+      // -- merged from former Object.assign(MESSAGES.zh, {...}) patch blocks --
+      details_tab_media: "媒体资源",
+      details_tab_author: "作者信息",
+      details_tab_post: "作品信息",
+      video_cover: "视频封面",
+      background_music: "背景音乐",
+      author_info: "作者信息",
+      data_stats: "数据统计",
+      id_info: "ID 信息",
+      permissions_status: "权限 / 状态",
+      new_tab_open: "新标签打开",
+      download_cover: "下载封面",
+      fps: "帧率",
+      bitrate_kbps: "码率 (kbps)",
+      select_all: "全选",
+      console_log: "Console Log",
+      json_logged: "JSON 已输出到控制台。",
+      copied: "已复制。",
+      uid: "UID",
+      sec_uid: "SecUID",
+      nickname: "昵称",
+      avatar: "头像",
+      visit_profile: "访问主页",
+      verification: "认证",
+      followers: "粉丝数",
+      likes_received: "获赞数",
+      share_link: "分享链接",
+      video_id: "Video ID",
+      group_id: "Group ID",
+      allow_comment: "允许评论",
+      allow_share: "允许分享",
+      allow_download: "允许下载",
+      allow_duet: "允许合拍",
+      allow_stitch: "允许 Stitch",
+      private_video: "私密视频",
+      yes: "是",
+      no: "否",
+      frame_capture: "视频帧",
+      frame_title: "视频帧",
+      copy_frame: "复制图片",
+      save_frame: "保存图片",
+      frame_copied: "视频帧已复制。",
+      frame_copy_failed: "复制视频帧失败。",
+      frame_failed: "无法获取当前视频帧。",
+      frame_copy_unsupported: "当前浏览器不可用图片剪贴板复制。",
+      filename_preview: "当前文件名",
+      downloader_config: "下载器",
+      video_download_settings: "视频下载设置",
+      browser_downloader_note: "当前仅启用浏览器下载，外部下载器主机配置已隐藏。",
+      source_properties: "可用源属性",
+      source_columns: "视频源列",
+      shortcut_section: "快捷键",
+      shortcut_download: "下载快捷键",
+      shortcut_frame: "视频帧快捷键",
+      shortcut_details: "详情快捷键",
+      shortcut_settings: "设置快捷键",
+      shortcut_hint: "聚焦快捷键输入框后按组合键。Backspace 可清空。",
+      gear_name: "档位名",
+      quality_type: "清晰度类型",
+      width: "宽度",
+      height: "高度",
+      format: "格式",
+      url_id: "URL ID",
+      template: "模板",
     },
   };
-
-  Object.assign(MESSAGES.en, {
-    details_tab_media: "Media Resources",
-    details_tab_author: "Author Info",
-    details_tab_post: "Post Info",
-    video_cover: "Video Cover",
-    background_music: "Background Music",
-    author_info: "Author Info",
-    data_stats: "Data Stats",
-    id_info: "ID Info",
-    permissions_status: "Permissions / Status",
-    new_tab_open: "Open in new tab",
-    download_cover: "Download cover",
-    fps: "Frame Rate",
-    bitrate_kbps: "Bitrate (kbps)",
-    select_all: "Select all",
-    console_log: "Console Log",
-    json_logged: "JSON written to console.",
-    copied: "Copied.",
-    uid: "UID",
-    sec_uid: "SecUID",
-    nickname: "Nickname",
-    avatar: "Avatar",
-    visit_profile: "Visit profile",
-    verification: "Verification",
-    followers: "Followers",
-    likes_received: "Likes received",
-    share_link: "Share link",
-    video_id: "Video ID",
-    group_id: "Group ID",
-    allow_comment: "Allow comments",
-    allow_share: "Allow share",
-    allow_download: "Allow download",
-    allow_duet: "Allow duet",
-    allow_stitch: "Allow Stitch",
-    private_video: "Private video",
-    yes: "Yes",
-    no: "No",
-  });
-
-  Object.assign(MESSAGES.zh, {
-    details_tab_media: "媒体资源",
-    details_tab_author: "作者信息",
-    details_tab_post: "作品信息",
-    video_cover: "视频封面",
-    background_music: "背景音乐",
-    author_info: "作者信息",
-    data_stats: "数据统计",
-    id_info: "ID 信息",
-    permissions_status: "权限 / 状态",
-    new_tab_open: "新标签打开",
-    download_cover: "下载封面",
-    fps: "帧率",
-    bitrate_kbps: "码率 (kbps)",
-    select_all: "全选",
-    console_log: "Console Log",
-    json_logged: "JSON 已输出到控制台。",
-    copied: "已复制。",
-    uid: "UID",
-    sec_uid: "SecUID",
-    nickname: "昵称",
-    avatar: "头像",
-    visit_profile: "访问主页",
-    verification: "认证",
-    followers: "粉丝数",
-    likes_received: "获赞数",
-    share_link: "分享链接",
-    video_id: "Video ID",
-    group_id: "Group ID",
-    allow_comment: "允许评论",
-    allow_share: "允许分享",
-    allow_download: "允许下载",
-    allow_duet: "允许合拍",
-    allow_stitch: "允许 Stitch",
-    private_video: "私密视频",
-    yes: "是",
-    no: "否",
-  });
-
-  Object.assign(MESSAGES.en, {
-    frame_capture: "Video Frame",
-    frame_title: "Video Frame",
-    copy_frame: "Copy image",
-    save_frame: "Save image",
-    frame_copied: "Frame copied.",
-    frame_copy_failed: "Frame copy failed.",
-    frame_failed: "Could not capture the current frame.",
-    frame_copy_unsupported: "Image clipboard copy is unavailable in this browser.",
-    filename_preview: "Current filename",
-    downloader_config: "Downloader",
-    video_download_settings: "Video Download Settings",
-    browser_downloader_note: "Only browser downloads are enabled. External downloader host settings are hidden.",
-    source_properties: "Available source properties",
-    source_columns: "Video source columns",
-    shortcut_section: "Shortcuts",
-    shortcut_download: "Download shortcut",
-    shortcut_frame: "Video frame shortcut",
-    shortcut_details: "Details shortcut",
-    shortcut_settings: "Settings shortcut",
-    shortcut_hint: "Focus a shortcut field and press a key combination. Backspace clears it.",
-    gear_name: "Gear name",
-    quality_type: "Quality type",
-    width: "Width",
-    height: "Height",
-    format: "Format",
-    url_id: "URL ID",
-  });
-
-  Object.assign(MESSAGES.zh, {
-    frame_capture: "视频帧",
-    frame_title: "视频帧",
-    copy_frame: "复制图片",
-    save_frame: "保存图片",
-    frame_copied: "视频帧已复制。",
-    frame_copy_failed: "复制视频帧失败。",
-    frame_failed: "无法获取当前视频帧。",
-    frame_copy_unsupported: "当前浏览器不可用图片剪贴板复制。",
-    filename_preview: "当前文件名",
-    downloader_config: "下载器",
-    video_download_settings: "视频下载设置",
-    browser_downloader_note: "当前仅启用浏览器下载，外部下载器主机配置已隐藏。",
-    source_properties: "可用源属性",
-    source_columns: "视频源列",
-    shortcut_section: "快捷键",
-    shortcut_download: "下载快捷键",
-    shortcut_frame: "视频帧快捷键",
-    shortcut_details: "详情快捷键",
-    shortcut_settings: "设置快捷键",
-    shortcut_hint: "聚焦快捷键输入框后按组合键。Backspace 可清空。",
-    gear_name: "档位名",
-    quality_type: "清晰度类型",
-    width: "宽度",
-    height: "高度",
-    format: "格式",
-    url_id: "URL ID",
-  });
-
-  MESSAGES.en.template = "Template";
-  MESSAGES.zh.template = "模板";
 
   function resolveLanguage(config = {}, navigatorLike = root?.navigator) {
     const value = String(config.language || DEFAULT_CONFIG.language);
@@ -515,7 +529,15 @@
   }
 
   function stripTemplateBackticks(template = "") {
-    const value = String(template || DEFAULT_CONFIG.filename_template).trim();
+    // Pure sanitizer: strips a single pair of wrapping backticks (and any stray backticks)
+    // from whatever string is given. Deliberately does NOT fall back to the default
+    // template when `template` is empty/falsy — callers that are editing a live textarea
+    // value (appendFilenameTemplateToken/appendFilenameTemplateLiteral) need an empty
+    // input to stay empty, otherwise clicking an available-field chip while the template
+    // box is empty would silently prepend the default template before appending the token.
+    // Callers that want "the effective template, falling back to default when unset"
+    // should use getFilenameTemplate() below instead.
+    const value = String(template ?? "").trim();
     let next = value;
     if (value.length >= 2 && value.startsWith("`") && value.endsWith("`")) {
       next = value.slice(1, -1);
@@ -524,7 +546,7 @@
   }
 
   function getFilenameTemplate(config = {}) {
-    return stripTemplateBackticks(config.filename_template || DEFAULT_CONFIG.filename_template);
+    return stripTemplateBackticks(config.filename_template) || DEFAULT_CONFIG.filename_template;
   }
 
   function appendFilenameTemplateToken(template = "", field = "") {
@@ -635,15 +657,40 @@
     }
     next.filename_template = getFilenameTemplate(next);
     next.filename_max_length = Number(next.filename_max_length || 80);
+    next.album_index_format = normalizeAlbumIndexFormat(next.album_index_format);
     next.video_source_columns = normalizeVideoSourceColumns(next.video_source_columns);
     next.shortcut_download = normalizeHotkey(next.shortcut_download);
     next.shortcut_frame = normalizeHotkey(next.shortcut_frame);
     next.shortcut_details = normalizeHotkey(next.shortcut_details);
     next.shortcut_settings = normalizeHotkey(next.shortcut_settings);
-    if (!DOWNLOAD_METHOD_OPTIONS.some(([value]) => value === next.download_method)) {
+    if (!DOWNLOAD_METHOD_OPTIONS.includes(next.download_method)) {
       next.download_method = DEFAULT_CONFIG.download_method;
     }
     return next;
+  }
+
+  function normalizeAlbumIndexFormat(format) {
+    const value = String(format || "");
+    return ALBUM_INDEX_FORMAT_OPTIONS.some((option) => option.value === value)
+      ? value
+      : DEFAULT_CONFIG.album_index_format;
+  }
+
+  function getAlbumIndexFormatOption(format) {
+    const value = normalizeAlbumIndexFormat(format);
+    return (
+      ALBUM_INDEX_FORMAT_OPTIONS.find((option) => option.value === value) ||
+      ALBUM_INDEX_FORMAT_OPTIONS[0]
+    );
+  }
+
+  function formatAlbumIndex(index = 0, format = DEFAULT_CONFIG.album_index_format) {
+    const numericIndex = Math.floor(Number(index || 0));
+    const number = Number.isFinite(numericIndex) ? Math.max(1, numericIndex + 1) : 1;
+    const padded = String(number).padStart(2, "0");
+    return getAlbumIndexFormatOption(format).template
+      .replace("{nn}", padded)
+      .replace("{n}", String(number));
   }
 
   function unique(values) {
@@ -672,6 +719,14 @@
 
   function firstDefined(...values) {
     return values.find((value) => value !== undefined && value !== null && value !== "");
+  }
+
+  function firstPositiveNumber(...values) {
+    for (const value of values.flatMap(ensureArray)) {
+      const number = Number(value);
+      if (Number.isFinite(number) && number > 0) return number;
+    }
+    return 0;
   }
 
   function normalizeBoolFlag(value) {
@@ -1197,20 +1252,9 @@
     );
     return images
       .map((image, index) => {
-        const address =
-          image?.imageURL ||
-          image?.imageUrl ||
-          image?.originImage ||
-          image?.displayImage ||
-          image?.downloadAddr ||
-          image;
+        const address = getImageAddress(image);
         const urls = getAddressUrls(address);
-        const width =
-          Number(image?.width || image?.Width || 0) ||
-          getAddressDimension(address, "Width");
-        const height =
-          Number(image?.height || image?.Height || 0) ||
-          getAddressDimension(address, "Height");
+        const { width, height } = getImageDimensions(image, address);
         return {
           index: index + 1,
           url: urls[0] || "",
@@ -1221,6 +1265,66 @@
         };
       })
       .filter((image) => image.url);
+  }
+
+  function getImageAddress(image = {}) {
+    if (!image || typeof image !== "object") return image;
+    return (
+      image.imageURL ||
+      image.imageUrl ||
+      image.image_url ||
+      image.originImage ||
+      image.origin_image ||
+      image.displayImage ||
+      image.display_image ||
+      image.downloadAddr ||
+      image.download_addr ||
+      image
+    );
+  }
+
+  function getImageDimensions(image = {}, address = getImageAddress(image)) {
+    return {
+      width: firstPositiveNumber(
+        image?.width,
+        image?.Width,
+        image?.imageWidth,
+        image?.image_width,
+        image?.displayWidth,
+        image?.display_width,
+        getAddressDimension(address, "Width"),
+      ),
+      height: firstPositiveNumber(
+        image?.height,
+        image?.Height,
+        image?.imageHeight,
+        image?.image_height,
+        image?.displayHeight,
+        image?.display_height,
+        getAddressDimension(address, "Height"),
+      ),
+    };
+  }
+
+  function getImagePostCoverInfo(imagePost = {}, images = []) {
+    const cover =
+      imagePost?.cover ||
+      imagePost?.Cover ||
+      imagePost?.coverImage ||
+      imagePost?.cover_image ||
+      imagePost?.thumbnail ||
+      imagePost?.thumb ||
+      {};
+    const address = getImageAddress(cover);
+    const urls = getAddressUrls(address);
+    const dimensions = getImageDimensions(cover, address);
+    const fallback = images[0] || {};
+    return {
+      url: urls[0] || fallback.url || "",
+      fallbackUrls: urls.slice(1),
+      width: dimensions.width || fallback.width || 0,
+      height: dimensions.height || fallback.height || 0,
+    };
   }
 
   function getImagePostPayload(item = {}) {
@@ -1394,7 +1498,14 @@
     }
     return items;
   }
-  
+
+  // Shared by RuntimeMediaCache.getMediaByVideoElement() (matches against network-captured
+  // responses) and TikTokMediaExtractor.getCurrentMedia()'s page-data fallback (matches
+  // against SSR/window JSON). Given a pool of raw item objects, find the one that best
+  // corresponds to the currently visible <video> element: first by comparing actual media
+  // resource URLs (cover/poster/playAddr), falling back to a fuzzy score against the
+  // surrounding DOM text (author name, description) when the element's URLs are unusable
+  // (e.g. a blob: URL from MSE-based playback, which carries no resource identity at all).
   function findBestMediaMatch(items = [], videoElement = null, contextText = "", config = {}, pageUrl = "") {
     const elementUrls = getVideoElementResourceUrls(videoElement);
     let bestTextMatch = null;
@@ -1485,6 +1596,10 @@
       if (typeof originalFetch !== "function") return;
       const cache = this.cache;
       win.fetch = function patchedFetch(...args) {
+        // Always bind to `win`, not the call-site `this`: some app bundles read
+        // `window.fetch` into a bare reference (e.g. `const f = window.fetch`) and invoke
+        // it without a receiver, which would make `this` undefined here and cause the
+        // native fetch implementation to throw "Illegal invocation".
         return originalFetch.apply(win, args).then((response) => {
           try {
             const url = response?.url || String(args[0]?.url || args[0] || "");
@@ -1552,6 +1667,7 @@
     const secUid = author.secUid || author.sec_uid || "";
     const imagePost = getImagePostPayload(item);
     const images = extractImageSources(imagePost);
+    const imagePostCover = getImagePostCoverInfo(imagePost, images);
 
     return {
       id,
@@ -1624,8 +1740,10 @@
         size: Number(primarySource.size || video.size || 0),
       },
       cover: {
-        url: firstString(video.cover, video.originCover, item.video?.cover),
+        url: firstString(video.cover, video.originCover, item.video?.cover, imagePostCover.url),
         dynamicUrl: firstString(video.dynamicCover),
+        width: firstPositiveNumber(imagePostCover.width, video.width),
+        height: firstPositiveNumber(imagePostCover.height, video.height),
       },
       music: {
         id: String(music.id || ""),
@@ -1784,6 +1902,9 @@
   function truncateAtUtf16Boundary(text, maxLength) {
     if (text.length <= maxLength) return text;
     let sliced = text.slice(0, maxLength);
+    // If the cut falls between a UTF-16 surrogate pair (e.g. mid-emoji), the trailing
+    // code unit is a lone high surrogate (0xD800-0xDBFF) with no following low surrogate.
+    // Drop it instead of keeping a broken/unpaired surrogate in the filename.
     const lastCode = sliced.charCodeAt(sliced.length - 1);
     if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
       sliced = sliced.slice(0, -1);
@@ -1871,15 +1992,16 @@
     });
   }
 
-  function formatNumber(value) {
+  function formatNumber(value, language = "en") {
     const number = Number(value || 0);
     if (!Number.isFinite(number) || !number) return "0";
-    return number.toLocaleString("en-US");
+    const locale = language === "zh" ? "zh-CN" : "en-US";
+    return number.toLocaleString(locale);
   }
 
-  function formatOptionalNumber(value) {
+  function formatOptionalNumber(value, language = "en") {
     if (value === undefined || value === null || value === "") return "-";
-    return formatNumber(value);
+    return formatNumber(value, language);
   }
 
   function formatBytes(value) {
@@ -1971,7 +2093,9 @@
         ),
         codec: source.codec || "-",
         fps: source.fps ? String(source.fps) : "-",
-        bitrate: source.bitrate ? formatNumber(Math.round(Number(source.bitrate) / 1000)) : "-",
+        bitrate: source.bitrate
+          ? formatNumber(Math.round(Number(source.bitrate) / 1000), language)
+          : "-",
         size: formatBytes(source.size),
         gearName: source.gearName || "-",
         qualityType: source.qualityType || "-",
@@ -2023,11 +2147,13 @@
       .map((image, index) => ({
         index: image.index || index + 1,
         resolution: formatResolution(image.width, image.height),
-        size: formatBytes(image.size),
         url: image.url,
         urls: unique([image.url, ...ensureArray(image.fallbackUrls)]),
-        filename: `${baseName}_image_${String(index + 1).padStart(2, "0")}.jpg`,
+        filename: `${baseName}_image${formatAlbumIndex(index, merged.album_index_format)}.jpg`,
       }));
+    const isImagePost = Boolean(media.isImagePost || images.length);
+    const coverWidth = firstPositiveNumber(media.cover?.width, media.video?.width);
+    const coverHeight = firstPositiveNumber(media.cover?.height, media.video?.height);
 
     const author = {
       id: media.author?.id || "",
@@ -2038,8 +2164,8 @@
       avatarUrl: media.author?.avatarUrl || "",
       signature: media.author?.signature || "",
       verification: media.author?.verification || (media.author?.verified ? t("yes") : ""),
-      followerCount: formatOptionalNumber(media.author?.followerCount),
-      totalFavorited: formatOptionalNumber(media.author?.totalFavorited),
+      followerCount: formatOptionalNumber(media.author?.followerCount, language),
+      totalFavorited: formatOptionalNumber(media.author?.totalFavorited, language),
       profileUrl:
         media.author?.profileUrl ||
         (media.author?.uniqueId ? `https://www.tiktok.com/@${media.author.uniqueId}` : ""),
@@ -2048,23 +2174,29 @@
     const stats = {
       playCount: {
         label: t("play_count"),
-        value: formatNumber(getStatValue(media.stats, "playCount", "play_count", "play")),
+        value: formatNumber(getStatValue(media.stats, "playCount", "play_count", "play"), language),
       },
       diggCount: {
         label: t("digg_count"),
-        value: formatNumber(getStatValue(media.stats, "diggCount", "digg_count", "digg")),
+        value: formatNumber(getStatValue(media.stats, "diggCount", "digg_count", "digg"), language),
       },
       commentCount: {
         label: t("comment_count"),
-        value: formatNumber(getStatValue(media.stats, "commentCount", "comment_count", "comment")),
+        value: formatNumber(
+          getStatValue(media.stats, "commentCount", "comment_count", "comment"),
+          language,
+        ),
       },
       shareCount: {
         label: t("share_count"),
-        value: formatNumber(getStatValue(media.stats, "shareCount", "share_count", "share")),
+        value: formatNumber(getStatValue(media.stats, "shareCount", "share_count", "share"), language),
       },
       collectCount: {
         label: t("collect_count"),
-        value: formatNumber(getStatValue(media.stats, "collectCount", "collect_count", "collect")),
+        value: formatNumber(
+          getStatValue(media.stats, "collectCount", "collect_count", "collect"),
+          language,
+        ),
       },
     };
     const permissionRows = [
@@ -2112,12 +2244,13 @@
       videoSources,
       videoSourceColumns,
       videoSourceProperties,
-      isImagePost: Boolean(media.isImagePost || images.length),
+      showVideoSources: !isImagePost,
+      isImagePost,
       cover: {
         url: media.cover?.url || "",
         dynamicUrl: media.cover?.dynamicUrl || "",
-        resolution: formatResolution(media.video?.width, media.video?.height),
-        orientation: getMediaOrientation(media.video?.width, media.video?.height),
+        resolution: formatResolution(coverWidth, coverHeight),
+        orientation: getMediaOrientation(coverWidth, coverHeight),
         filename: coverName,
         dynamicFilename: dynamicName,
       },
@@ -2237,6 +2370,12 @@
       );
       if (hasUsableMedia(cachedVisibleMedia)) return cachedVisibleMedia;
 
+      // Fallback fuzzy match against SSR/window page data (dataCandidates), mirroring the
+      // runtime-cache fuzzy match above. Without this, videos whose data only ever arrives
+      // via the page's initial SSR payload (rather than a later fetch/XHR response captured
+      // into runtimeCache) — typically the first handful of videos in a feed — could never
+      // be resolved once the DOM-based exact-id lookup above fails to find a matching link,
+      // no matter how long you wait or how many times you revisit them.
       for (const data of dataCandidates) {
         const items = collectVideoItemsDeep(data);
         if (!items.length) continue;
@@ -2535,6 +2674,40 @@
     };
   }
 
+  function clampNumber(value, min, max) {
+    if (max < min) return min;
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function calculatePanelMenuPlacement(options = {}) {
+    const gap = Number(options.gap || 10);
+    const margin = Number(options.margin || 8);
+    const viewportWidth = Number(options.viewportWidth || 0);
+    const viewportHeight = Number(options.viewportHeight || 0);
+    const menuWidth = Number(options.menuWidth || 160);
+    const menuHeight = Number(options.menuHeight || 180);
+    const panelRect = options.panelRect;
+    const anchorRect = options.launcherRect || options.buttonRect || panelRect;
+    if (!anchorRect || !viewportWidth || !viewportHeight) {
+      return { placement: "top", left: margin, top: margin };
+    }
+
+    const edges = getRectEdges(anchorRect);
+    const buttonWidth = Number(options.buttonWidth || edges.width || options.buttonSize || 44);
+    const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+    const maxTop = Math.max(margin, viewportHeight - menuHeight - margin);
+
+    return {
+      placement: "top",
+      left: clampNumber(
+        Math.round(edges.left + buttonWidth / 2 - menuWidth / 2),
+        margin,
+        maxLeft,
+      ),
+      top: clampNumber(Math.round(edges.top - menuHeight - gap), margin, maxTop),
+    };
+  }
+
   function isActionBarClassName(className = "") {
     const value = String(className || "");
     return /ActionBarContainer/i.test(value) && !/FeedNavigation|NavigationContainer/i.test(value);
@@ -2659,43 +2832,11 @@
     };
   }
 
-  class TikTokDlApp {
-    constructor(win, runtimeCache = null) {
-      this.window = win;
-      this.document = win.document;
-      this.configStore = new ConfigStore(win.localStorage);
-      this.runtimeCache = runtimeCache;
-      this.extractor = new TikTokMediaExtractor(this.document, win, runtimeCache);
-      this.downloader = new Downloader(win, gmXmlHttpRequest);
-      this.panel = null;
-      this.menu = null;
-      this.launcher = null;
-      this.currentMedia = null;
-      this.currentActionBarHost = null;
-      this.currentActionBarContext = null;
-      this.lastHref = "";
-      this.positionObserver = null;
-      this.positionFrame = null;
-      this.positionPoll = null;
-      this.lastPanelPositionSignature = "";
-      this.outsideMenuBound = false;
-      this.appStartTime = Date.now();
-    }
-
-    start() {
-      this.injectStyles();
-      this.renderPanel();
-      this.refreshMedia();
-      this.bindHotkey();
-      this.watchRouteChanges();
-      this.watchPanelPosition();
-    }
-
-    injectStyles() {
-      if (this.document.getElementById(`${SCRIPT_PREFIX}-style`)) return;
-      const style = createElement(this.document, "style");
-      style.id = `${SCRIPT_PREFIX}-style`;
-      style.textContent = `
+  // Extracted from the TikTokDlApp UI so the ~900 lines of injected CSS live in one
+  // place, independent of DOM/class state (it only interpolates the static
+  // SCRIPT_PREFIX constant). See injectStyles() for where this gets attached.
+  function getPanelStyleSheet() {
+    return `
         .${SCRIPT_PREFIX}-panel {
           position: fixed;
           right: 18px;
@@ -2711,13 +2852,53 @@
           visibility: hidden;
           pointer-events: none;
         }
+        .${SCRIPT_PREFIX}-image-button {
+          /* Standalone element (not part of .panel/.menu) shown only while an image preview
+             is detected as open -- see refreshImageOverlayState(). JS chooses a corner that
+             does not overlap the preview image; if none exists, the button stays hidden. */
+          position: fixed;
+          right: 18px;
+          bottom: 80px;
+          z-index: 2147483200;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 999px;
+          padding: 11px 18px;
+          color: #fff;
+          background: rgba(37, 37, 37, 0.96);
+          font-family: Arial, sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          white-space: nowrap;
+          cursor: pointer;
+          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+          transition: transform 0.12s ease, background 0.12s ease;
+        }
+        .${SCRIPT_PREFIX}-image-button:hover,
+        .${SCRIPT_PREFIX}-image-button:focus-visible {
+          background: #fe2c55;
+          transform: translateY(-1px);
+        }
+        .${SCRIPT_PREFIX}-image-button.light {
+          color: #111;
+          background: rgba(255, 255, 255, 0.96);
+          border-color: rgba(0, 0, 0, 0.12);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+        }
+        .${SCRIPT_PREFIX}-image-button.light:hover,
+        .${SCRIPT_PREFIX}-image-button.light:focus-visible {
+          background: #fe2c55;
+          color: #fff;
+        }
         .${SCRIPT_PREFIX}-panel.embedded {
           position: fixed;
           right: auto !important;
           bottom: auto !important;
           z-index: 2147483200;
-          width: var(--tk-dl-action-size, 48px);
-          height: var(--tk-dl-action-size, 48px);
+          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
+          height: var(--${SCRIPT_PREFIX}-action-size, 48px);
           pointer-events: auto;
           contain: layout style;
           overflow: visible;
@@ -2742,13 +2923,13 @@
           width: 100%;
           height: 100%;
           border: 0;
-          color: var(--tk-dl-action-color, #fff);
-          background: var(--tk-dl-action-bg, #242424);
+          color: var(--${SCRIPT_PREFIX}-action-color, #fff);
+          background: var(--${SCRIPT_PREFIX}-action-bg, #242424);
           box-shadow: none;
         }
         .${SCRIPT_PREFIX}-panel.embedded.light .${SCRIPT_PREFIX}-launcher {
-          color: var(--tk-dl-action-color, #111);
-          background: var(--tk-dl-action-bg, #f1f1f1);
+          color: var(--${SCRIPT_PREFIX}-action-color, #111);
+          background: var(--${SCRIPT_PREFIX}-action-bg, #f1f1f1);
           box-shadow: none;
         }
         .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-launcher {
@@ -2765,8 +2946,8 @@
         }
         .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher:hover,
         .${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher {
-          color: var(--tk-dl-action-color, #fff);
-          background: var(--tk-dl-action-hover-bg, #2f2f2f);
+          color: var(--${SCRIPT_PREFIX}-action-color, #fff);
+          background: var(--${SCRIPT_PREFIX}-action-hover-bg, #2f2f2f);
           transform: none;
         }
         .${SCRIPT_PREFIX}-launcher svg {
@@ -2793,11 +2974,12 @@
         }
         .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-menu { display: block; }
         .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-menu {
-          left: auto;
-          right: calc(100% + 10px);
-          top: 50%;
-          bottom: auto;
-          transform: translateY(-50%);
+          position: absolute;
+          left: 50%;
+          right: auto;
+          top: auto;
+          bottom: calc(100% + 10px);
+          transform: translateX(-50%);
         }
         .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-menu {
           background: rgba(255, 255, 255, 0.98);
@@ -3621,154 +3803,335 @@
           .${SCRIPT_PREFIX}-modal main { padding: 16px; }
           .${SCRIPT_PREFIX}-settings-modal main { padding: 16px; }
         }
-      `;
-      this.document.head.appendChild(style);
+    `;
+  }
+
+  // Best-effort heuristic for detecting an open image preview / lightbox — most commonly
+  // the full-size viewer TikTok shows when a user clicks an image attached to a comment.
+  // TikTok's own CSS class names are hashed and change between deploys, so this can't be a
+  // precise selector; it looks for a large, visible <img> living inside something that looks
+  // like a modal/overlay container. If this stops matching after a TikTok redesign, the fix
+  // is almost always just adding another substring to CANDIDATE_IMAGE_OVERLAY_SELECTORS below
+  // (open the real overlay in DevTools, inspect the ancestor chain of the <img>, and add a
+  // `[class*="..."]` selector for whatever wrapper class it uses).
+  const CANDIDATE_IMAGE_OVERLAY_SELECTORS = [
+    '[class*="ImagePreview"]',
+    '[class*="ImageViewer"]',
+    '[class*="PhotoViewer"]',
+    '[class*="PhotoPreview"]',
+    '[class*="Lightbox"]',
+    '[class*="CommentImage"]',
+    '[class*="CommentPicture"]',
+    '[role="dialog"]',
+  ];
+  // Large images can be detected by viewport ratio alone. Small images need stronger proof
+  // that they are in an opened preview, otherwise comment avatars/stickers/thumbnails would
+  // be too easy to mistake for the active overlay image.
+  const IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO = 0.12;
+  const IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO = 0.18;
+  const IMAGE_OVERLAY_SMALL_MIN_AREA_PX = 6400;
+  const IMAGE_OVERLAY_SMALL_MIN_SIDE_PX = 56;
+  const IMAGE_OVERLAY_RECENT_GESTURE_MS = 5000;
+  const IMAGE_OVERLAY_BUTTON_MARGIN = 18;
+  const IMAGE_OVERLAY_BUTTON_BOTTOM = 80;
+  const IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH = 150;
+  const IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT = 46;
+  const IMAGE_OVERLAY_BUTTON_SAFE_GAP = 8;
+
+  function toPlainRect(rect) {
+    if (!rect) return null;
+    const left = Number(rect.left || 0);
+    const top = Number(rect.top || 0);
+    const width = Number(rect.width || Math.max(0, Number(rect.right || 0) - left));
+    const height = Number(rect.height || Math.max(0, Number(rect.bottom || 0) - top));
+    return {
+      left,
+      top,
+      width,
+      height,
+      right: left + width,
+      bottom: top + height,
+    };
+  }
+
+  function rectArea(rect) {
+    return Math.max(0, Number(rect?.width || 0)) * Math.max(0, Number(rect?.height || 0));
+  }
+
+  function rectsOverlap(first, second, padding = 0) {
+    if (!first || !second) return false;
+    return !(
+      first.right + padding <= second.left ||
+      first.left - padding >= second.right ||
+      first.bottom + padding <= second.top ||
+      first.top - padding >= second.bottom
+    );
+  }
+
+  function getSafeOverlayButtonPlacement(imageRect, options = {}) {
+    const viewportWidth = Number(options.viewportWidth || 0);
+    const viewportHeight = Number(options.viewportHeight || 0);
+    const buttonWidth = Number(options.buttonWidth || IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH);
+    const buttonHeight = Number(options.buttonHeight || IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT);
+    const image = toPlainRect(imageRect);
+    if (!viewportWidth || !viewportHeight || !buttonWidth || !buttonHeight || !image) return null;
+
+    const margin = Number(options.margin || IMAGE_OVERLAY_BUTTON_MARGIN);
+    const bottomOffset = Number(options.bottom || IMAGE_OVERLAY_BUTTON_BOTTOM);
+    const gap = Number(options.gap || IMAGE_OVERLAY_BUTTON_SAFE_GAP);
+    const candidates = [
+      {
+        right: margin,
+        bottom: bottomOffset,
+        rect: toPlainRect({
+          left: viewportWidth - margin - buttonWidth,
+          top: viewportHeight - bottomOffset - buttonHeight,
+          width: buttonWidth,
+          height: buttonHeight,
+        }),
+      },
+      {
+        right: margin,
+        top: margin,
+        rect: toPlainRect({
+          left: viewportWidth - margin - buttonWidth,
+          top: margin,
+          width: buttonWidth,
+          height: buttonHeight,
+        }),
+      },
+      {
+        left: margin,
+        bottom: bottomOffset,
+        rect: toPlainRect({
+          left: margin,
+          top: viewportHeight - bottomOffset - buttonHeight,
+          width: buttonWidth,
+          height: buttonHeight,
+        }),
+      },
+      {
+        left: margin,
+        top: margin,
+        rect: toPlainRect({ left: margin, top: margin, width: buttonWidth, height: buttonHeight }),
+      },
+    ];
+
+    return (
+      candidates.find((candidate) => {
+        const rect = candidate.rect;
+        if (!rect) return false;
+        if (rect.left < 0 || rect.top < 0) return false;
+        if (rect.right > viewportWidth || rect.bottom > viewportHeight) return false;
+        return !rectsOverlap(rect, image, gap);
+      }) || null
+    );
+  }
+
+  function getComputedStyleSafe(win, element) {
+    try {
+      return typeof win?.getComputedStyle === "function" ? win.getComputedStyle(element) : null;
+    } catch (_err) {
+      return null;
     }
+  }
 
-    renderPanel() {
-      if (this.panel) this.panel.remove();
-      const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
-      const launcher = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-launcher`,
-      );
-      launcher.type = "button";
-      launcher.innerHTML = `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path fill="currentColor" d="M11 4a1 1 0 0 1 2 0v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4Z"></path>
-          <path fill="currentColor" d="M5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"></path>
-        </svg>
-      `;
-      launcher.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.toggleMenu();
-      });
+  function parseCssUrl(value) {
+    const match = String(value || "").match(/url\((['"]?)(.*?)\1\)/i);
+    return match?.[2]?.trim() || "";
+  }
 
-      const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
-      menu.addEventListener("pointerdown", (event) => event.stopPropagation());
-      menu.addEventListener("click", (event) => event.stopPropagation());
-      const downloadButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button`,
-        this.t("download"),
-      );
-      downloadButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.downloadVideo();
-      });
+  function getElementImageUrl(element, win) {
+    const directUrl = element?.currentSrc || element?.src || "";
+    if (directUrl) return directUrl;
+    const style = getComputedStyleSafe(win, element);
+    return parseCssUrl(style?.backgroundImage) || parseCssUrl(style?.background);
+  }
 
-      const frameButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("frame_capture"),
-      );
-      frameButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openFrameCapture();
-      });
+  function getDownloadableOverlayImageUrl(url) {
+    const value = String(url || "").trim();
+    if (!value || value.startsWith("blob:") || value.startsWith("data:")) return "";
+    return value;
+  }
 
-      const detailsButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("details"),
-      );
-      detailsButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openDetails();
-      });
+  function isHiddenByStyle(style) {
+    if (!style) return false;
+    return (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity || 1) <= 0.01
+    );
+  }
 
-      const settingsButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("settings"),
-      );
-      settingsButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openSettings();
-      });
-
-      menu.append(downloadButton, frameButton, detailsButton, settingsButton);
-      panel.append(menu, launcher);
-      this.panel = panel;
-      this.menu = menu;
-      this.launcher = launcher;
-      this.applyPanelState();
-      this.mountPanel();
-      this.bindMenuOutsideClose();
-    }
-
-    t(key) {
-      return getMessage(key, this.configStore.get(), this.window.navigator);
-    }
-
-    getTheme() {
-      return resolveTheme(
-        this.configStore.get(),
-        this.window.matchMedia?.("(prefers-color-scheme: dark)"),
-      );
-    }
-
-    applyPanelState() {
-      if (!this.panel) return;
-      const isOpen = this.panel.classList.contains("open");
-      const isEmbedded = this.panel.classList.contains("embedded");
-      const isPending = this.panel.classList.contains("pending");
-      const nextClassName = [
-        `${SCRIPT_PREFIX}-panel`,
-        this.getTheme(),
-        isOpen ? "open" : "",
-        isEmbedded ? "embedded" : "",
-        isPending ? "pending" : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      if (this.panel.className !== nextClassName) {
-        this.panel.className = nextClassName;
+  function getImageOverlayContext(element, win, viewportArea) {
+    const strongImageClassPattern =
+      /(?:image|photo|picture).*(?:preview|viewer)|(?:preview|viewer).*(?:image|photo|picture)|commentimage|commentpicture|lightbox/i;
+    const overlayClassPattern = /(preview|viewer|lightbox|modal|dialog|popup|popover|overlay)/i;
+    const context = { matched: false, strong: false };
+    let current = element;
+    let depth = 0;
+    while (current && depth < 8) {
+      const role = current.getAttribute?.("role");
+      const ariaModal = current.getAttribute?.("aria-modal");
+      const className = String(current.className || "");
+      if (strongImageClassPattern.test(className)) {
+        context.matched = true;
+        context.strong = true;
+        return context;
       }
-      if (this.launcher) {
-        this.launcher.setAttribute("aria-label", this.t("menu"));
-        this.launcher.title = this.t("menu");
+      if (role === "dialog" || ariaModal === "true" || overlayClassPattern.test(className)) {
+        context.matched = true;
       }
-      const buttons = this.menu?.querySelectorAll?.(`.${SCRIPT_PREFIX}-button`) || [];
-      const labels = [
-        this.t("download"),
-        this.t("frame_capture"),
-        this.t("details"),
-        this.t("settings"),
-      ];
-      buttons.forEach((button, index) => {
-        button.textContent = labels[index] || button.textContent;
-      });
+
+      const rect = toPlainRect(current.getBoundingClientRect?.());
+      const style = getComputedStyleSafe(win, current);
+      if (isHiddenByStyle(style)) return { matched: false, strong: false };
+      const contextAreaRatio = rectArea(rect) / Math.max(1, viewportArea);
+      const zIndex = Number.parseInt(style?.zIndex || "", 10);
+      const isFloating = style?.position === "fixed" || style?.position === "sticky";
+      if (
+        (isFloating || (Number.isFinite(zIndex) && zIndex >= 100)) &&
+        contextAreaRatio >= IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO
+      ) {
+        context.matched = true;
+      }
+
+      current = current.parentElement;
+      depth += 1;
+    }
+    return context;
+  }
+
+  function hasImageOverlayContext(element, win, viewportArea) {
+    return getImageOverlayContext(element, win, viewportArea).matched;
+  }
+
+  function hasSmallOverlayImageSize(rect) {
+    return (
+      rectArea(rect) >= IMAGE_OVERLAY_SMALL_MIN_AREA_PX &&
+      rect.width >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX &&
+      rect.height >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX
+    );
+  }
+
+  function isOverlayImageSizeAllowed(rect, viewportArea, context, options = {}, element = null) {
+    const areaRatio = rectArea(rect) / Math.max(1, viewportArea);
+    if (areaRatio >= IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO) return true;
+    if (!context?.matched || !hasSmallOverlayImageSize(rect)) return false;
+    if (context.strong) return true;
+    return Boolean(
+      options.recentImageOpenGesture ||
+        (element && options.previousOverlayElement && element === options.previousOverlayElement),
+    );
+  }
+
+  function findOpenImageOverlay(doc, win, panel, options = {}) {
+    if (!doc?.querySelectorAll) return null;
+    const viewportWidth = win?.innerWidth || 0;
+    const viewportHeight = win?.innerHeight || 0;
+    if (!viewportWidth || !viewportHeight) return null;
+    const viewportArea = viewportWidth * viewportHeight;
+
+    const seen = new Set();
+    const candidateElements = [];
+    const addCandidate = (element) => {
+      if (!element || seen.has(element)) return;
+      seen.add(element);
+      candidateElements.push(element);
+    };
+
+    for (const selector of CANDIDATE_IMAGE_OVERLAY_SELECTORS) {
+      try {
+        for (const container of Array.from(doc.querySelectorAll(selector))) {
+          addCandidate(container);
+          for (const image of Array.from(container.querySelectorAll?.("img") || [])) {
+            addCandidate(image);
+          }
+          for (const background of Array.from(
+            container.querySelectorAll?.('[style*="background-image"]') || [],
+          )) {
+            addCandidate(background);
+          }
+        }
+      } catch (_err) {
+        continue;
+      }
+    }
+    try {
+      for (const image of Array.from(doc.querySelectorAll("img"))) addCandidate(image);
+    } catch (_err) {
+      // Ignore selector failures in unusual DOM shims.
+    }
+    try {
+      for (const background of Array.from(doc.querySelectorAll('[style*="background-image"]'))) {
+        addCandidate(background);
+      }
+    } catch (_err) {
+      // Ignore selector failures in unusual DOM shims.
     }
 
-    toggleMenu(force = null) {
-      if (!this.panel) return;
-      const shouldOpen =
-        force === null ? !this.panel.classList.contains("open") : Boolean(force);
-      this.panel.classList.toggle("open", shouldOpen);
-      this.mountPanel();
-    }
+    let best = null;
+    const considerOverlayImage = (candidate) => {
+      if (!candidate?.rawImageUrl) return;
+      const canDownload = Boolean(candidate.imageUrl);
+      const bestCanDownload = Boolean(best?.imageUrl);
+      if (
+        !best ||
+        (canDownload && !bestCanDownload) ||
+        (canDownload === bestCanDownload && candidate.area > best.area)
+      ) {
+        best = candidate;
+      }
+    };
+    for (const element of candidateElements) {
+      if (panel?.contains(element)) continue;
+      const rect = toPlainRect(element.getBoundingClientRect?.());
+      if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+      const area = rectArea(rect);
+      const context = getImageOverlayContext(element, win, viewportArea);
+      if (!context.matched) continue;
+      if (!isOverlayImageSizeAllowed(rect, viewportArea, context, options, element)) continue;
+      const rawImageUrl = getElementImageUrl(element, win);
+      const imageUrl = getDownloadableOverlayImageUrl(rawImageUrl);
+      considerOverlayImage({ element, area, imageUrl, rawImageUrl, rect });
 
-    bindMenuOutsideClose() {
-      if (this.outsideMenuBound) return;
-      this.outsideMenuBound = true;
-      this.document.addEventListener(
-        "pointerdown",
-        (event) => {
-          if (!this.panel?.classList.contains("open")) return;
-          if (this.panel.contains(event.target)) return;
-          this.toggleMenu(false);
-        },
-        true,
-      );
-      this.document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") this.toggleMenu(false);
-      });
+      for (const image of Array.from(element.querySelectorAll?.("img") || [])) {
+        if (panel?.contains(image)) continue;
+        const imageRect = toPlainRect(image.getBoundingClientRect?.());
+        if (!imageRect || imageRect.width <= 0 || imageRect.height <= 0) continue;
+        const imageArea = rectArea(imageRect);
+        const imageContext = getImageOverlayContext(image, win, viewportArea);
+        if (!imageContext.matched) continue;
+        if (!isOverlayImageSizeAllowed(imageRect, viewportArea, imageContext, options, image)) continue;
+        const rawChildImageUrl = getElementImageUrl(image, win);
+        considerOverlayImage({
+          element: image,
+          area: imageArea,
+          imageUrl: getDownloadableOverlayImageUrl(rawChildImageUrl),
+          rawImageUrl: rawChildImageUrl,
+          rect: imageRect,
+        });
+      }
+    }
+    return best
+      ? {
+          element: best.element,
+          imageUrl: best.imageUrl,
+          rawImageUrl: best.rawImageUrl,
+          rect: best.rect,
+        }
+      : null;
+  }
+
+  // Encapsulates the DOM heuristics used to locate TikTok's native action bar / video
+  // controls (these rely on scanning for TikTok's auto-generated, frequently-changing
+  // CSS class names, so keeping them in one place makes it easier to patch when TikTok
+  // ships a redesign). Instantiated once per TikTokDlApp as `this.actionBarLocator`;
+  // TikTokDlApp keeps thin delegator methods with the original names so every existing
+  // call site continues to work unchanged.
+  class ActionBarLocator {
+    constructor(app) {
+      this.app = app;
     }
 
     getElementRect(element) {
@@ -3788,19 +4151,19 @@
     }
 
     hasVisibleMediaElement() {
-      const rect = this.getElementRect(this.extractor?.getVisibleVideoElement?.());
+      const rect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
       if (!rect) return false;
       const score = scoreMediaElementRect(
         rect,
-        this.window.innerWidth || 0,
-        this.window.innerHeight || 0,
+        this.app.window.innerWidth || 0,
+        this.app.window.innerHeight || 0,
       );
       return Number.isFinite(score);
     }
 
     isVisibleAnchorRect(rect) {
-      const viewportWidth = this.window.innerWidth || 0;
-      const viewportHeight = this.window.innerHeight || 0;
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
       if (!rect) return false;
       if (rect.width < 20 || rect.width > 140 || rect.height < 40 || rect.height > 220) return false;
       if (rect.left < viewportWidth * 0.42) return false;
@@ -3815,9 +4178,9 @@
         '[class*="enable-detail-page-refine"]',
       ];
       const hosts = Array.from(
-        this.document.querySelectorAll(hostSelectors.join(",")),
+        this.app.document.querySelectorAll(hostSelectors.join(",")),
       )
-        .filter((element) => !this.panel?.contains(element))
+        .filter((element) => !this.app.panel?.contains(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!this.isVisibleAnchorRect(rect)) return false;
@@ -3835,9 +4198,9 @@
       if (hosts[0]) return hosts[0];
 
       const controls = Array.from(
-        this.document.querySelectorAll('button,[role="button"]'),
+        this.app.document.querySelectorAll('button,[role="button"]'),
       )
-        .filter((element) => !this.panel?.contains(element))
+        .filter((element) => !this.app.panel?.contains(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!rect) return false;
@@ -3852,7 +4215,7 @@
       const hostScores = new Map();
       for (const rect of controls) {
         const host = rect.element.closest?.('[class*="FeedNavigationContainer"], [class*="NavigationContainer"], div');
-        if (!host || this.panel?.contains(host)) continue;
+        if (!host || this.app.panel?.contains(host)) continue;
         const hostRect = this.getElementRect(host);
         if (!this.isVisibleAnchorRect(hostRect)) continue;
         const current = hostScores.get(host) || { hostRect, count: 0 };
@@ -3869,9 +4232,9 @@
 
     findNavigationAnchorRect() {
       const controls = Array.from(
-        this.document.querySelectorAll('button,[role="button"]'),
+        this.app.document.querySelectorAll('button,[role="button"]'),
       )
-        .filter((element) => !this.panel?.contains(element))
+        .filter((element) => !this.app.panel?.contains(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!rect) return false;
@@ -3895,15 +4258,15 @@
     }
 
     isVisibleActionBarRect(rect) {
-      const viewportWidth = this.window.innerWidth || 0;
-      const viewportHeight = this.window.innerHeight || 0;
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
       return isUsableActionBarRect(rect, viewportWidth, viewportHeight);
     }
 
     findActionBarHost() {
-      const viewportWidth = this.window.innerWidth || 0;
-      const viewportHeight = this.window.innerHeight || 0;
-      const referenceVideoRect = this.getElementRect(this.extractor?.getVisibleVideoElement?.());
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
+      const referenceVideoRect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
       const scoreHostRect = (rect) => {
         const className = String(rect.element.className || "");
         let score =
@@ -3929,8 +4292,8 @@
         'section[class*="ActionBarContainer"]',
         '[class*="ActionBarContainer"]',
       ];
-      const hosts = Array.from(this.document.querySelectorAll(selectors.join(",")))
-        .filter((element) => !this.panel?.contains(element))
+      const hosts = Array.from(this.app.document.querySelectorAll(selectors.join(",")))
+        .filter((element) => !this.app.panel?.contains(element))
         .filter((element) => isActionBarClassName(element.className))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
@@ -3953,23 +4316,23 @@
     resolveCurrentActionBarHost() {
       const freshHost = this.findActionBarHost();
       if (freshHost) {
-        this.currentActionBarHost = freshHost;
+        this.app.currentActionBarHost = freshHost;
         return freshHost;
       }
 
-      const currentRect = this.getElementRect(this.currentActionBarHost);
+      const currentRect = this.getElementRect(this.app.currentActionBarHost);
       if (this.isVisibleActionBarRect(currentRect)) {
-        return this.currentActionBarHost;
+        return this.app.currentActionBarHost;
       }
 
-      this.currentActionBarHost = null;
+      this.app.currentActionBarHost = null;
       return null;
     }
 
     isActionControlCandidate(rect, videoRect) {
       if (!rect || !videoRect) return false;
-      const viewportWidth = this.window.innerWidth || 0;
-      const viewportHeight = this.window.innerHeight || 0;
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
       if (rect.width < 32 || rect.width > 96 || rect.height < 32 || rect.height > 112) return false;
       if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
       if (rect.centerX < videoRect.right - 20) return false;
@@ -3992,12 +4355,12 @@
     }
 
     findActionControlColumnContext() {
-      const videoRect = this.getElementRect(this.extractor?.getVisibleVideoElement?.());
+      const videoRect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
       if (!videoRect) return null;
       const controls = Array.from(
-        this.document.querySelectorAll?.('button,[role="button"],a') || [],
+        this.app.document.querySelectorAll?.('button,[role="button"],a') || [],
       )
-        .filter((element) => !this.panel?.contains(element))
+        .filter((element) => !this.app.panel?.contains(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => this.isActionControlCandidate(rect, videoRect));
 
@@ -4062,10 +4425,14 @@
     }
 
     getNativeActionChildren(host) {
-      return Array.from(host?.children || []).filter((child) => child !== this.panel);
+      return Array.from(host?.children || []).filter((child) => child !== this.app.panel);
     }
 
     getActionBarInsertionReference(host) {
+      // Kept for backward compatibility with any external tooling that might reference it,
+      // but note that the panel is positioned with `position: fixed` and appended directly
+      // to `document.body` (see mountPanel()), so no code path actually inserts it into
+      // `host`'s children at a specific index. This simply returns the first native child.
       const nativeChildren = this.getNativeActionChildren(host);
       return nativeChildren[0] || null;
     }
@@ -4083,7 +4450,7 @@
       const anchorRect = this.getElementRect(anchor) || hostRect;
       let nextRect = null;
       for (const child of nativeChildren.slice(anchorIndex + 1)) {
-        if (!child || child === this.panel || isAvatarActionChild(child)) continue;
+        if (!child || child === this.app.panel || isAvatarActionChild(child)) continue;
         const rect = this.getElementRect(child);
         if (!rect || rect.width < 24 || rect.height < 24) continue;
         if (anchorRect && Math.abs(rect.centerX - anchorRect.centerX) > 48) continue;
@@ -4097,33 +4464,424 @@
       return this.findActionBarPositionContext().anchorRect;
     }
 
+    getCurrentActionAnchor() {
+      const context = this.findActionBarPositionContext();
+      if (context?.host) return context.host;
+      if (context?.anchor) return context.anchor;
+      return this.resolveCurrentActionBarHost();
+    }
+  }
+
+  class TikTokDlApp {
+    constructor(win, runtimeCache = null) {
+      this.window = win;
+      this.document = win.document;
+      this.configStore = new ConfigStore(win.localStorage);
+      this.runtimeCache = runtimeCache;
+      this.extractor = new TikTokMediaExtractor(this.document, win, runtimeCache);
+      this.actionBarLocator = new ActionBarLocator(this);
+      this.downloader = new Downloader(win, gmXmlHttpRequest);
+      this.panel = null;
+      this.menu = null;
+      this.launcher = null;
+      this.currentMedia = null;
+      this.currentActionBarHost = null;
+      this.currentActionBarContext = null;
+      this.lastHref = "";
+      this.positionObserver = null;
+      this.positionFrame = null;
+      this.positionPoll = null;
+      this.lastPanelPositionSignature = "";
+      this.outsideMenuBound = false;
+      this.openImageOverlay = null;
+      this.imageDownloadButton = null;
+      this.imageOverlayWatcherBound = false;
+      this.lastImageOpenGestureAt = 0;
+      this.appStartTime = Date.now();
+    }
+
+    start() {
+      this.injectStyles();
+      this.renderPanel();
+      this.refreshMedia();
+      this.bindHotkey();
+      this.watchRouteChanges();
+      this.watchPanelPosition();
+    }
+
+    injectStyles() {
+      if (this.document.getElementById(`${SCRIPT_PREFIX}-style`)) return;
+      const style = createElement(this.document, "style");
+      style.id = `${SCRIPT_PREFIX}-style`;
+      style.textContent = getPanelStyleSheet();
+      this.document.head.appendChild(style);
+    }
+
+    renderPanel() {
+      if (this.panel) this.panel.remove();
+      const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
+      const launcher = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-launcher`,
+      );
+      launcher.type = "button";
+      launcher.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M11 4a1 1 0 0 1 2 0v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4Z"></path>
+          <path fill="currentColor" d="M5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"></path>
+        </svg>
+      `;
+      launcher.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.toggleMenu();
+      });
+
+      const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
+      menu.addEventListener("pointerdown", (event) => event.stopPropagation());
+      menu.addEventListener("click", (event) => event.stopPropagation());
+      const downloadButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button`,
+        this.t("download_video"),
+      );
+      downloadButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.downloadVideo();
+      });
+
+      const frameButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        this.t("frame_capture"),
+      );
+      frameButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.openFrameCapture();
+      });
+
+      const detailsButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        this.t("details"),
+      );
+      detailsButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.openDetails();
+      });
+
+      const settingsButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        this.t("settings"),
+      );
+      settingsButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.openSettings();
+      });
+
+      menu.append(downloadButton, frameButton, detailsButton, settingsButton);
+      panel.append(menu, launcher);
+      this.panel = panel;
+      this.menu = menu;
+      this.launcher = launcher;
+      this.downloadButtonEl = downloadButton;
+      this.frameButtonEl = frameButton;
+      this.detailsButtonEl = detailsButton;
+      this.settingsButtonEl = settingsButton;
+      this.applyPanelState();
+      this.mountPanel();
+      this.bindMenuOutsideClose();
+      this.renderImageDownloadButton();
+      this.bindImageOverlayWatcher();
+    }
+
+    // Standalone button shown only while an open image preview (see findOpenImageOverlay())
+    // is detected, e.g. after the user opens a photo attached to a comment. It is a separate
+    // element from the main panel/menu -- while it's visible, the main panel is hidden
+    // entirely (see mountPanel()/refreshImageOverlayState()) so there's only ever one thing
+    // to click, and it always has one job: download that specific image.
+    ensureImageDownloadButton() {
+      if (this.imageDownloadButton) return this.imageDownloadButton;
+      const button = createElement(this.document, "button", `${SCRIPT_PREFIX}-image-button`);
+      button.type = "button";
+      button.style.display = "none";
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.downloadOverlayImage();
+      });
+      this.document.body.appendChild(button);
+      this.imageDownloadButton = button;
+      return button;
+    }
+
+    renderImageDownloadButton() {
+      const button = this.ensureImageDownloadButton();
+      button.textContent = this.t("download_image");
+      button.removeAttribute?.("title");
+      button.classList.toggle("light", this.getTheme() === "light");
+      for (const property of ["left", "right", "top", "bottom"]) {
+        button.style[property] = "auto";
+      }
+
+      const overlay = this.openImageOverlay;
+      const buttonRect = toPlainRect(button.getBoundingClientRect?.());
+      const placement = overlay?.imageUrl
+        ? getSafeOverlayButtonPlacement(overlay.rect, {
+            viewportWidth: this.window.innerWidth || 0,
+            viewportHeight: this.window.innerHeight || 0,
+            buttonWidth: buttonRect?.width || IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH,
+            buttonHeight: buttonRect?.height || IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT,
+          })
+        : null;
+      if (!placement) {
+        button.style.display = "none";
+        return;
+      }
+
+      for (const property of ["left", "right", "top", "bottom"]) {
+        if (placement[property] != null) button.style[property] = `${placement[property]}px`;
+      }
+      button.style.display = "";
+    }
+
+    // Listens for clicks on <img> elements anywhere outside our own UI (per the idea that
+    // the moment a user clicks a comment image is the most reliable signal that a preview is
+    // about to open -- much more direct than waiting for a generic DOM-mutation poll, since
+    // opening the preview usually doesn't change the underlying video/action-bar geometry
+    // that the regular position-refresh logic keys off of, so that path alone could miss it).
+    // The actual open/closed decision still goes through findOpenImageOverlay() shortly after
+    // (the overlay needs a moment to mount), so a mis-guessed click target here just means we
+    // check and find nothing -- it can't produce a false "image open" state on its own.
+    bindImageOverlayWatcher() {
+      if (this.imageOverlayWatcherBound) return;
+      this.imageOverlayWatcherBound = true;
+      const handleClick = (event) => {
+        const target = event.target;
+        if (!target) return;
+        if (this.panel?.contains(target) || this.imageDownloadButton?.contains(target)) return;
+        const isImage =
+          target.tagName === "IMG" ||
+          (typeof target.closest === "function" &&
+            (target.closest("img") || target.closest('[style*="background-image"]')));
+        if (!isImage) return;
+        this.lastImageOpenGestureAt = Date.now();
+        // Give the overlay a moment to actually mount before we go looking for it.
+        this.window.setTimeout?.(() => this.refreshImageOverlayState(), 80);
+      };
+      this.document.addEventListener?.("click", handleClick, true);
+    }
+
+    // Re-checks whether an image preview is currently open and updates both the dedicated
+    // download-image button and the main panel's visibility accordingly. Unlike the regular
+    // position refresh (gated behind getPanelPositionSignature(), which only reacts to the
+    // video/action-bar's own geometry changing), this only cares about "is there an overlay
+    // right now", so it needs its own independent triggers -- see bindImageOverlayWatcher()
+    // and the MutationObserver hookup in watchPanelPosition().
+    refreshImageOverlayState() {
+      const recentImageOpenGesture =
+        this.lastImageOpenGestureAt > 0 &&
+        Date.now() - this.lastImageOpenGestureAt <= IMAGE_OVERLAY_RECENT_GESTURE_MS;
+      const overlay = findOpenImageOverlay(this.document, this.window, this.panel, {
+        recentImageOpenGesture,
+        previousOverlayElement: this.openImageOverlay?.element || null,
+      });
+      const wasOpen = Boolean(this.openImageOverlay);
+      const isOpen = Boolean(overlay);
+      const urlChanged = overlay?.imageUrl !== this.openImageOverlay?.imageUrl;
+      this.openImageOverlay = overlay;
+      this.renderImageDownloadButton();
+      if (wasOpen !== isOpen || (isOpen && urlChanged)) {
+        this.mountPanel();
+        this.applyPanelState();
+      }
+    }
+
+    t(key) {
+      return getMessage(key, this.configStore.get(), this.window.navigator);
+    }
+
+    getTheme() {
+      return resolveTheme(
+        this.configStore.get(),
+        this.window.matchMedia?.("(prefers-color-scheme: dark)"),
+      );
+    }
+
+    applyPanelState() {
+      if (!this.panel) return;
+      const isOpen = this.panel.classList.contains("open");
+      const isEmbedded = this.panel.classList.contains("embedded");
+      const isPending = this.panel.classList.contains("pending");
+      const nextClassName = [
+        `${SCRIPT_PREFIX}-panel`,
+        this.getTheme(),
+        isOpen ? "open" : "",
+        isEmbedded ? "embedded" : "",
+        isPending ? "pending" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (this.panel.className !== nextClassName) {
+        this.panel.className = nextClassName;
+      }
+      if (this.launcher) {
+        this.launcher.setAttribute("aria-label", this.t("menu"));
+        this.launcher.removeAttribute?.("title");
+      }
+      // Explicit element references (set up in renderPanel()) rather than positional index
+      // into a querySelectorAll list -- keeps this correct regardless of how many buttons
+      // are in the menu or what order they're in.
+      if (this.downloadButtonEl) {
+        this.downloadButtonEl.textContent = this.currentMedia?.isImagePost
+          ? this.t("download_album")
+          : this.t("download_video");
+      }
+      if (this.frameButtonEl) this.frameButtonEl.textContent = this.t("frame_capture");
+      if (this.detailsButtonEl) this.detailsButtonEl.textContent = this.t("details");
+      if (this.settingsButtonEl) this.settingsButtonEl.textContent = this.t("settings");
+      if (this.imageDownloadButton) this.renderImageDownloadButton();
+    }
+
+    toggleMenu(force = null) {
+      if (!this.panel) return;
+      const shouldOpen =
+        force === null ? !this.panel.classList.contains("open") : Boolean(force);
+      this.panel.classList.toggle("open", shouldOpen);
+      this.mountPanel();
+      this.updatePanelMenuPosition();
+    }
+
+    clearPanelMenuPosition() {
+      if (!this.menu) return;
+      for (const property of ["left", "right", "top", "bottom"]) {
+        this.menu.style[property] = "";
+      }
+      delete this.menu.dataset.placement;
+    }
+
+    updatePanelMenuPosition() {
+      if (!this.panel || !this.menu) return;
+      const shouldPosition =
+        this.panel.classList.contains("embedded") && this.panel.classList.contains("open");
+      this.clearPanelMenuPosition();
+      if (!shouldPosition) {
+        return;
+      }
+      this.menu.dataset.placement = "top";
+    }
+
+    bindMenuOutsideClose() {
+      if (this.outsideMenuBound) return;
+      this.outsideMenuBound = true;
+      this.document.addEventListener(
+        "pointerdown",
+        (event) => {
+          if (!this.panel?.classList.contains("open")) return;
+          if (this.panel.contains(event.target)) return;
+          this.toggleMenu(false);
+        },
+        true,
+      );
+      this.document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") this.toggleMenu(false);
+      });
+    }
+
+    // DOM-locator heuristics live in ActionBarLocator (see above); these delegate to it
+    // so every existing call site (`this.findActionBarHost()`, etc.) keeps working.
+    getElementRect(element) {
+      return this.actionBarLocator.getElementRect(element);
+    }
+
+    hasVisibleMediaElement() {
+      return this.actionBarLocator.hasVisibleMediaElement();
+    }
+
+    isVisibleAnchorRect(rect) {
+      return this.actionBarLocator.isVisibleAnchorRect(rect);
+    }
+
+    findNavigationHostRect() {
+      return this.actionBarLocator.findNavigationHostRect();
+    }
+
+    findNavigationAnchorRect() {
+      return this.actionBarLocator.findNavigationAnchorRect();
+    }
+
+    isVisibleActionBarRect(rect) {
+      return this.actionBarLocator.isVisibleActionBarRect(rect);
+    }
+
+    findActionBarHost() {
+      return this.actionBarLocator.findActionBarHost();
+    }
+
+    resolveCurrentActionBarHost() {
+      return this.actionBarLocator.resolveCurrentActionBarHost();
+    }
+
+    isActionControlCandidate(rect, videoRect) {
+      return this.actionBarLocator.isActionControlCandidate(rect, videoRect);
+    }
+
+    findActionControlColumnContext() {
+      return this.actionBarLocator.findActionControlColumnContext();
+    }
+
+    getNativeActionChildren(host) {
+      return this.actionBarLocator.getNativeActionChildren(host);
+    }
+
+    getActionBarInsertionReference(host) {
+      return this.actionBarLocator.getActionBarInsertionReference(host);
+    }
+
+    findActionBarPositionContext() {
+      return this.actionBarLocator.findActionBarPositionContext();
+    }
+
+    findActionBarAnchorRect() {
+      return this.actionBarLocator.findActionBarAnchorRect();
+    }
+
     getPanelButtonSize() {
-      const value = this.panel?.style?.getPropertyValue?.("--tk-dl-action-size") || "";
+      const value = this.panel?.style?.getPropertyValue?.(`--${SCRIPT_PREFIX}-action-size`) || "";
       const size = Number(String(value).replace(/[^\d.]/g, ""));
       return Number.isFinite(size) && size > 0 ? size : 44;
     }
-    
+
+    // Shared by syncEmbeddedButtonMetrics() and syncEmbeddedButtonMetricsFromContext():
+    // sets the --${SCRIPT_PREFIX}-action-{bg,color,hover-bg} custom properties for the "auto" theme
+    // (derived from the native control's computed style) or for the explicit light/dark
+    // overrides. `resolveComputedColors` is only invoked for the "auto" theme and should
+    // return `{ backgroundColor, color }` (or a falsy value if no source element is usable).
     applyEmbeddedThemeVariables(resolveComputedColors) {
       const theme = this.getTheme();
       if (theme === "light") {
-        this.panel.style.setProperty("--tk-dl-action-bg", "rgb(241, 241, 241)");
-        this.panel.style.setProperty("--tk-dl-action-color", "rgb(22, 24, 35)");
-        this.panel.style.setProperty("--tk-dl-action-hover-bg", "rgb(232, 232, 232)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(241, 241, 241)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(22, 24, 35)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(232, 232, 232)");
         return;
       }
       if (theme === "dark") {
-        this.panel.style.setProperty("--tk-dl-action-bg", "rgb(36, 36, 36)");
-        this.panel.style.setProperty("--tk-dl-action-color", "rgb(255, 255, 255)");
-        this.panel.style.setProperty("--tk-dl-action-hover-bg", "rgb(47, 47, 47)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(36, 36, 36)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(255, 255, 255)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(47, 47, 47)");
         return;
       }
       if (typeof this.window.getComputedStyle !== "function") return;
       const computed = resolveComputedColors?.();
       if (!computed) return;
       const palette = getEmbeddedLauncherPalette(computed.backgroundColor, computed.color);
-      this.panel.style.setProperty("--tk-dl-action-bg", palette.background);
-      this.panel.style.setProperty("--tk-dl-action-color", palette.color);
-      this.panel.style.setProperty("--tk-dl-action-hover-bg", palette.hoverBackground);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, palette.background);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, palette.color);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, palette.hoverBackground);
     }
 
     syncEmbeddedButtonMetrics(host) {
@@ -4147,7 +4905,7 @@
       const size = rect
         ? Math.round(Math.max(44, Math.min(50, Math.max(rect.width, rect.height))))
         : 48;
-      this.panel.style.setProperty("--tk-dl-action-size", `${size}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${size}px`);
       this.applyEmbeddedThemeVariables(() => {
         if (!nativeControl) return null;
         const controlStyle = this.window.getComputedStyle(nativeControl);
@@ -4170,7 +4928,7 @@
       if (!this.panel || !context?.anchorRect) return;
       const rect = context.anchorRect;
       const size = Math.round(Math.max(44, Math.min(50, Math.max(rect.width, rect.height))));
-      this.panel.style.setProperty("--tk-dl-action-size", `${size}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${size}px`);
       this.applyEmbeddedThemeVariables(() => {
         if (!rect.element) return null;
         const controlStyle = this.window.getComputedStyle(rect.element);
@@ -4180,14 +4938,32 @@
 
     clearEmbeddedButtonMetrics() {
       if (!this.panel) return;
-      this.panel.style.removeProperty("--tk-dl-action-size");
-      this.panel.style.removeProperty("--tk-dl-action-bg");
-      this.panel.style.removeProperty("--tk-dl-action-color");
-      this.panel.style.removeProperty("--tk-dl-action-hover-bg");
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-size`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-bg`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-color`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-hover-bg`);
     }
 
     mountPanel() {
       if (!this.panel) return;
+
+      if (this.openImageOverlay) {
+        // An image preview is open (see refreshImageOverlayState()) and the dedicated
+        // image-download button is showing instead -- hide the main panel entirely rather
+        // than embedding it near the (now visually covered) video action bar, so it can't
+        // end up rendered on top of the enlarged image.
+        if (this.panel.parentElement !== this.document.body) {
+          this.document.body.appendChild(this.panel);
+        }
+        this.currentActionBarHost = null;
+        this.currentActionBarContext = null;
+        this.clearEmbeddedButtonMetrics();
+        this.panel.classList.add("pending");
+        this.panel.classList.remove("embedded", "open");
+        this.clearPanelMenuPosition();
+        return;
+      }
+
       const actionContext = this.findActionBarPositionContext();
       if (actionContext?.anchorRect) {
         const actionHost = actionContext.host || this.findActionBarHost?.() || null;
@@ -4214,6 +4990,7 @@
       this.panel.classList.add("pending");
       this.panel.classList.remove("embedded", "open");
       this.clearEmbeddedButtonMetrics();
+      this.clearPanelMenuPosition();
     }
 
     updatePanelPosition(actionContext = null) {
@@ -4237,13 +5014,11 @@
       this.panel.style.top = `${position.top}px`;
       this.panel.style.right = "auto";
       this.panel.style.bottom = "auto";
+      this.updatePanelMenuPosition();
     }
 
     getCurrentActionAnchor() {
-      const context = this.findActionBarPositionContext();
-      if (context?.host) return context.host;
-      if (context?.anchor) return context.anchor;
-      return this.resolveCurrentActionBarHost();
+      return this.actionBarLocator.getCurrentActionAnchor();
     }
 
     refreshMedia() {
@@ -4305,8 +5080,7 @@
       const url = String(image.url || "");
       const extension =
         url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || "jpg";
-      const suffix = String(Number(index || 0) + 1).padStart(2, "0");
-      return normalizeFilename(`${base}_image_${suffix}.${extension}`, {
+      return normalizeFilename(`${base}_image${formatAlbumIndex(index, config.album_index_format)}.${extension}`, {
         maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 16,
       });
     }
@@ -4380,6 +5154,9 @@
     }
 
     async downloadAsset(url, filename) {
+      // `url` may be a single string or an array of fallback URLs (see makeDownloadPill in
+      // openDetails). `!url` alone never catches an empty array since arrays are always
+      // truthy in JS, so normalize first and check length.
       const urls = unique(ensureArray(url));
       if (!urls.length) {
         this.toast(this.t("asset_empty"));
@@ -4387,6 +5164,32 @@
       }
       try {
         await this.downloader.downloadUrl(urls, filename);
+        this.toast(`${this.t("download_started")}: ${filename}`);
+      } catch (err) {
+        this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
+      }
+    }
+
+    getOverlayImageFilename(media, url) {
+      const config = this.configStore.get();
+      const base = buildFilename(media || {}, config) || `tiktok_${Date.now()}`;
+      const extension =
+        String(url).match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || "jpg";
+      return normalizeFilename(`${base}_comment_image.${extension}`, {
+        maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 20,
+      });
+    }
+
+    async downloadOverlayImage() {
+      const overlay = this.openImageOverlay;
+      if (!overlay?.imageUrl) {
+        this.toast(this.t("asset_empty"));
+        return;
+      }
+      const media = this.currentMedia || {};
+      const filename = this.getOverlayImageFilename(media, overlay.imageUrl);
+      try {
+        await this.downloader.downloadUrl(overlay.imageUrl, filename);
         this.toast(`${this.t("download_started")}: ${filename}`);
       } catch (err) {
         this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
@@ -4586,8 +5389,11 @@
         return actions;
       };
 
-      const makeDownloadPill = (urls, filename, label = this.t("download")) =>
-        makePillButton(label, () => this.downloadAsset(urls, filename));
+      const makeDownloadPill = (urls, filename, label = this.t("download")) => {
+        const button = makePillButton(label, () => this.downloadAsset(urls, filename));
+        button.removeAttribute?.("title");
+        return button;
+      };
 
       const makeCopyPill = (value, label = this.t("copy")) =>
         value ? makePillButton(label, () => copyText(value)) : null;
@@ -4728,14 +5534,14 @@
       const imageSection = makeFieldset(`${this.t("image_album")} (${details.images.length})`);
       imageSection.appendChild(
         makeTable(
-          [this.t("id"), this.t("resolution"), this.t("size"), this.t("actions")],
+          [this.t("id"), this.t("resolution"), this.t("actions")],
           details.images.map((image) => {
             const actions = makeActions(
               makePillLink(this.t("open"), image.url),
               makeCopyPill(image.url),
               makeDownloadPill(image.urls, image.filename, this.t("download")),
             );
-            return [String(image.index), image.resolution, image.size, actions];
+            return [String(image.index), image.resolution, actions];
           }),
         ),
       );
@@ -4743,7 +5549,8 @@
       const musicSection = this.renderMusicSection(details, { makeFieldset, makeRows });
       const mediaGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-media-grid`);
       mediaGrid.append(coverSection, musicSection);
-      mediaPanel.append(mediaGrid, videoSection);
+      mediaPanel.appendChild(mediaGrid);
+      if (details.showVideoSources) mediaPanel.appendChild(videoSection);
       if (details.isImagePost) mediaPanel.appendChild(imageSection);
 
       const authorPanel = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-panel`);
@@ -4830,7 +5637,7 @@
           selection?.addRange(range);
         }),
         makePillButton(this.t("console_log"), () => {
-          this.window.console?.log?.("[TikScope]", media.raw || media);
+          this.window.console?.log?.("[TikTok Helper]", media.raw || media);
           this.toast(this.t("json_logged"));
         }),
         makePillButton(this.t("copy_json"), () => copyText(details.rawJson)),
@@ -4906,7 +5713,7 @@
         config.video_quality,
         "tooltip_video_resolution",
       );
-      VIDEO_QUALITY_OPTIONS.forEach(([value]) => {
+      VIDEO_QUALITY_OPTIONS.forEach((value) => {
         const option = createElement(this.document, "option");
         option.value = value;
         option.textContent = this.t(`quality_${value}`);
@@ -4921,7 +5728,7 @@
         config.download_method,
         "tooltip_browser_downloads_only",
       );
-      DOWNLOAD_METHOD_OPTIONS.forEach(([value]) => {
+      DOWNLOAD_METHOD_OPTIONS.forEach((value) => {
         const option = createElement(this.document, "option");
         option.value = value;
         option.textContent = this.t(`download_method_${value}`) || value;
@@ -4969,14 +5776,29 @@
         config.filename_max_length,
         "tooltip_filename_max_length",
       );
-      maxLength.wrapper.classList.add("full");
+      const albumIndexFormat = this.input(
+        this.t("album_index_format"),
+        "select",
+        "album_index_format",
+        normalizeAlbumIndexFormat(config.album_index_format),
+        "tooltip_album_index_format",
+      );
+      ALBUM_INDEX_FORMAT_OPTIONS.forEach((definition) => {
+        const option = createElement(this.document, "option");
+        option.value = definition.value;
+        option.textContent = definition.label;
+        if (definition.value === normalizeAlbumIndexFormat(config.album_index_format)) {
+          option.selected = true;
+        }
+        albumIndexFormat.appendChild(option);
+      });
       const filenameEditor = this.createFilenameTemplateEditor(config, {
         previewMedia: this.getFilenamePreviewMedia(),
         getMaxLength: () => Number(maxLength.value || config.filename_max_length || 80),
       });
       maxLength.addEventListener("input", () => filenameEditor.updatePreview());
       const filenameGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      filenameGrid.append(maxLength.wrapper, filenameEditor.element);
+      filenameGrid.append(maxLength.wrapper, albumIndexFormat.wrapper, filenameEditor.element);
 
       const shortcutGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
       const shortcutInputs = [
@@ -5342,8 +6164,37 @@
         schedule();
       };
 
+      // Separate from the position-signature dedup above: whether an image preview overlay
+      // is open or closed generally does NOT change the video/action-bar's own geometry (see
+      // getPanelPositionSignature()), so scheduleIfChanged() alone would often never notice
+      // it. This runs on every DOM mutation instead (rAF-throttled so a burst of mutations
+      // still only costs one check per frame), independent of the position-signature gate.
+      let imageOverlayFrame = null;
+      const checkImageOverlay = () => {
+        if (imageOverlayFrame) return;
+        const run = () => {
+          imageOverlayFrame = null;
+          this.refreshImageOverlayState();
+        };
+        if (typeof this.window.requestAnimationFrame === "function") {
+          imageOverlayFrame = this.window.requestAnimationFrame(run);
+        } else {
+          imageOverlayFrame = this.window.setTimeout(run, 50);
+        }
+      };
+
+      // NOTE: high-frequency triggers (scroll/wheel/touchmove/mutations/poll) are wired to
+      // `scheduleIfChanged`, not the raw `schedule`. `scheduleIfChanged` does a cheap
+      // rect-signature comparison first and only pays for the expensive
+      // mountPanel()/applyPanelState() DOM recompute when the layout actually moved.
+      // (Previously every listener called `schedule` directly, so the signature check was
+      // computed once at setup and never consulted again afterward — every scroll pixel or
+      // React re-render on the page forced a full DOM re-scan on each animation frame.)
       if (typeof this.window.MutationObserver === "function" && this.document.body) {
-        this.positionObserver = new this.window.MutationObserver(scheduleIfChanged);
+        this.positionObserver = new this.window.MutationObserver(() => {
+          scheduleIfChanged();
+          checkImageOverlay();
+        });
         this.positionObserver.observe(this.document.body, {
           childList: true,
           subtree: true,
@@ -5381,6 +6232,7 @@
     LANGUAGE_OPTIONS,
     THEME_OPTIONS,
     DOWNLOAD_METHOD_OPTIONS,
+    ALBUM_INDEX_FORMAT_OPTIONS,
     getMessage,
     resolveLanguage,
     resolveTheme,
@@ -5394,8 +6246,13 @@
     collectVideoItemsDeep,
     TikTokMediaExtractor,
     TikTokDlApp,
+    ActionBarLocator,
+    findOpenImageOverlay,
+    getSafeOverlayButtonPlacement,
+    getPanelStyleSheet,
     calculatePanelPosition,
     calculateEmbeddedPanelPosition,
+    calculatePanelMenuPlacement,
     isActionBarClassName,
     isUsableActionBarRect,
     scoreActionBarRect,
@@ -5412,6 +6269,7 @@
     FILENAME_TEMPLATE_FIELDS,
     FILENAME_TEMPLATE_SEPARATORS,
     getFilenameTemplate,
+    formatAlbumIndex,
     appendFilenameTemplateToken,
     appendFilenameTemplateLiteral,
     sanitizeConfig,
@@ -5421,6 +6279,8 @@
     eventMatchesHotkey,
     buildFilename,
     buildDetailsModel,
+    formatNumber,
+    formatOptionalNumber,
     normalizeHeaders,
     toShortId,
   };
