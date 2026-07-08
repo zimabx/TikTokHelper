@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            TikTokHelper
 // @namespace       https://github.com/zimabx/TikTokHelper
-// @version         0.5.15
+// @version         0.9.17
 // @description     Add download tools to TikTok web pages.
 // @author          zimabx
 // @match           https://*.tiktok.com/*
@@ -29,7 +29,7 @@
 // @run-at          document-start
 // ==/UserScript==
 
-(function (root) {
+function (root) {
   "use strict";
 
   const SCRIPT_PREFIX = "tthelper";
@@ -86,8 +86,9 @@
     shortcut_frame: "",
     shortcut_details: "",
     shortcut_settings: "",
-    show_test_notification_menu: true,
-    show_debug_info_menu: true,
+    profile_bulk_checkbox_size: 26,
+    show_test_notification_menu: false,
+    show_debug_info_menu: false,
   };
 
   const ALLOWED_DOWNLOAD_HOST_SUFFIXES = [
@@ -411,11 +412,27 @@
       height: "Height",
       format: "Format",
       url_id: "URL ID",
-      debug_info: "Get test info",
+      debug_info: "Get full test info",
       debug_info_copied: "Test info copied",
-      debug_info_copied_detail: "Paste it back when photo/album detection fails.",
+      debug_info_copied_detail: "Paste this information back with the issue description.",
       download_already_running: "A download is already running. Please wait.",
-      advanced_section: "Advanced",
+      advanced_section: "Developer options",
+      profile_bulk_section: "Profile bulk download",
+      profile_bulk_checkbox_size: "Profile selection checkbox size",
+      tooltip_profile_bulk_checkbox_size: "Size of the bottom-right selection checkbox on profile video cards. Range: 18–40 px.",
+      bulk_download: "Bulk download",
+      bulk_download_selected: "Download selected",
+      bulk_cancel_selection: "Cancel selection",
+      bulk_confirm_title: "Confirm selected videos",
+      bulk_start_download: "Start download",
+      bulk_no_selection: "No videos selected.",
+      bulk_selected_count: "Selected",
+      bulk_type_video: "Video",
+      bulk_type_album: "Album",
+      bulk_type_unknown: "Unknown",
+      bulk_downloading: "Bulk downloading",
+      bulk_download_done: "Bulk download finished",
+      bulk_download_result: "Success ${success}, failed ${failed}.",
       show_test_notification_menu: "Show notification test items",
       show_debug_info_menu: "Show test info item",
       template: "Template",
@@ -577,11 +594,27 @@
       height: "高度",
       format: "格式",
       url_id: "URL ID",
-      debug_info: "获取测试信息",
+      debug_info: "获取完整测试信息",
       debug_info_copied: "测试信息已复制",
-      debug_info_copied_detail: "图集识别失败时，把这段信息发回来。",
+      debug_info_copied_detail: "请把这段信息和问题现象一起发回来。",
       download_already_running: "当前已有下载任务，请等待完成。",
-      advanced_section: "高级",
+      advanced_section: "开发者选项",
+      profile_bulk_section: "个人主页批量下载",
+      profile_bulk_checkbox_size: "个人页复选框大小",
+      tooltip_profile_bulk_checkbox_size: "个人主页作品卡片右下角复选框的大小，范围：18–40 px。",
+      bulk_download: "批量下载",
+      bulk_download_selected: "下载选中",
+      bulk_cancel_selection: "取消选择",
+      bulk_confirm_title: "确认选中的作品",
+      bulk_start_download: "开始下载",
+      bulk_no_selection: "尚未选择作品。",
+      bulk_selected_count: "已选择",
+      bulk_type_video: "视频",
+      bulk_type_album: "图集",
+      bulk_type_unknown: "待识别",
+      bulk_downloading: "批量下载中",
+      bulk_download_done: "批量下载完成",
+      bulk_download_result: "成功 ${success}，失败 ${failed}。",
       show_test_notification_menu: "显示通知测试菜单项",
       show_debug_info_menu: "显示获取测试信息菜单项",
       template: "模板",
@@ -760,6 +793,12 @@
     next.filename_max_length = Number(next.filename_max_length || 80);
     next.album_index_format = normalizeAlbumIndexFormat(next.album_index_format);
     next.video_source_columns = normalizeVideoSourceColumns(next.video_source_columns);
+    next.profile_bulk_checkbox_size = clampNumber(
+      Number(next.profile_bulk_checkbox_size),
+      18,
+      40,
+      DEFAULT_CONFIG.profile_bulk_checkbox_size,
+    );
     next.shortcut_download = normalizeHotkey(next.shortcut_download);
     next.shortcut_frame = normalizeHotkey(next.shortcut_frame);
     next.shortcut_details = normalizeHotkey(next.shortcut_details);
@@ -1002,6 +1041,30 @@
       (score, entry) => score + (contextContainsText(contextText, entry.value) ? entry.score : 0),
       0,
     );
+  }
+
+  function compactLiveContextText(value = "") {
+    return String(value || "").replace(/\s+/g, "").trim();
+  }
+
+  function isLikelyLiveContextText(actionText = "", contextText = "") {
+    const compactAction = compactLiveContextText(actionText);
+    const compactContext = compactLiveContextText(contextText);
+    const combined = `${compactAction}${compactContext}`;
+    if (!combined) return false;
+
+    // TikTok's live cards in the feed expose stable text markers even when the backing item
+    // cannot be resolved as a normal video/photo post: e.g. "LIVE16573" in the action bar
+    // and Chinese localized labels such as "点击以观看直播" / "直播中" in the feed context.
+    if (/(点击以观看直播|观看直播|直播中|正在直播|进入直播间|LIVE中)/i.test(combined)) {
+      return true;
+    }
+
+    // Keep the generic English marker conservative: a normal caption may contain the word
+    // "live", but the action column usually compresses live cards into "LIVE" + viewer
+    // count. Only treat short action-bar text as live, never arbitrary long descriptions.
+    if (/^LIVE\d*$/i.test(compactAction)) return true;
+    return /^LIVE\d{1,8}$/i.test(compactAction) && compactAction.length <= 16;
   }
 
   function getItemPageUrl(item = {}, fallbackUrl = "") {
@@ -3241,6 +3304,10 @@
   const RECOMMEND_ACTION_METRIC_SELECTOR =
     '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"]';
 
+  const PROFILE_BROWSE_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
+  const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
+  const PROFILE_BROWSE_MEDIA_SELECTOR = '[data-e2e="browse-video"], video, img';
+
   function isActionBarClassName(className = "") {
     const value = String(className || "");
     return /ActionBarContainer/i.test(value) && !/FeedNavigation|NavigationContainer/i.test(value);
@@ -3264,6 +3331,41 @@
     });
   }
 
+  function isVisibleProfileBrowseDialog(dialog = null, win = root) {
+    if (!dialog?.querySelector) return false;
+    const rect = dialog.getBoundingClientRect?.();
+    const viewportWidth = Number(win?.innerWidth || 0);
+    const viewportHeight = Number(win?.innerHeight || 0);
+    if (!rect || !viewportWidth || !viewportHeight) return false;
+    if (rect.width < 280 || rect.height < 280) return false;
+    if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
+    const ellipsis = dialog.querySelector(PROFILE_BROWSE_ELLIPSIS_SELECTOR);
+    if (!ellipsis) return false;
+    const ellipsisRect = ellipsis.getBoundingClientRect?.();
+    if (!ellipsisRect || ellipsisRect.width < 24 || ellipsisRect.height < 24) return false;
+    if (getVisibleRectRatio(ellipsisRect, viewportWidth, viewportHeight) < 0.5) return false;
+    return Boolean(dialog.querySelector(PROFILE_BROWSE_MEDIA_SELECTOR));
+  }
+
+  function getVisibleProfileBrowseDialog(doc = root?.document) {
+    const win = doc?.defaultView || root;
+    if (!doc?.querySelectorAll) return null;
+    const dialogs = Array.from(doc.querySelectorAll(PROFILE_BROWSE_DIALOG_SELECTOR))
+      .filter((dialog) => isVisibleProfileBrowseDialog(dialog, win))
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect?.();
+        const rightRect = right.getBoundingClientRect?.();
+        const leftArea = (leftRect?.width || 0) * (leftRect?.height || 0);
+        const rightArea = (rightRect?.width || 0) * (rightRect?.height || 0);
+        return rightArea - leftArea;
+      });
+    return dialogs[0] || null;
+  }
+
+  function hasVisibleProfileBrowseDialog(doc = root?.document) {
+    return Boolean(getVisibleProfileBrowseDialog(doc));
+  }
+
   function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
     const rawPath = String(locationLike?.pathname || "/");
     const pathname = rawPath.replace(/\/+$/, "") || "/";
@@ -3276,6 +3378,7 @@
     // the page is still visually the For You / feed layout. In that state keep using the
     // recommend placement adapter as long as a visible feed action bar is present.
     if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
+    if (hasVisibleProfileBrowseDialog(doc)) return "profile-dialog";
     if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
       return "detail";
     }
@@ -3590,12 +3693,12 @@
 
   function getEmbeddedLauncherPalette(backgroundColor = "", color = "") {
     if (isTransparentColor(backgroundColor)) {
-      const foreground = color || "rgb(255, 255, 255)";
+      const foreground = color || "rgba(255, 255, 255, 0.9)";
       const lightForeground = isLightColor(foreground);
       return {
-        background: lightForeground ? "rgba(255, 255, 255, 0.18)" : "rgba(22, 24, 35, 0.08)",
+        background: lightForeground ? "hsla(0, 0%, 100%, 0.13)" : "rgba(22, 24, 35, 0.08)",
         color: foreground,
-        hoverBackground: lightForeground ? "rgba(255, 255, 255, 0.24)" : "rgba(22, 24, 35, 0.12)",
+        hoverBackground: lightForeground ? "hsla(0, 0%, 100%, 0.19)" : "rgba(22, 24, 35, 0.12)",
       };
     }
     const background = String(backgroundColor);
@@ -3688,6 +3791,19 @@
           overflow: visible;
           isolation: isolate;
         }
+        .${SCRIPT_PREFIX}-panel.profile-dialog {
+          position: fixed;
+          z-index: 2147483200;
+          width: var(--${SCRIPT_PREFIX}-action-size, 40px);
+          height: var(--${SCRIPT_PREFIX}-action-size, 40px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: auto;
+          contain: layout style;
+          overflow: visible;
+          isolation: isolate;
+        }
         .${SCRIPT_PREFIX}-launcher-shell {
           display: flex;
           flex-direction: column;
@@ -3718,8 +3834,6 @@
           overflow: hidden;
           border-radius: var(--tux-v2-radius-control-capsule, 9999px);
           border: 0;
-          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
-          background: var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13));
           box-shadow: none;
           box-sizing: border-box;
           transition: background 0.12s ease, opacity 0.12s ease;
@@ -3754,26 +3868,26 @@
         .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container {
           border-radius: var(--${SCRIPT_PREFIX}-action-radius, var(--tux-v2-radius-control-capsule, 9999px));
           border: 0;
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
-          background: var(--${SCRIPT_PREFIX}-action-bg, var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13)));
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
+          background: var(--${SCRIPT_PREFIX}-action-bg, var(--ui-shape-neutral-4, hsla(0, 0%, 100%, 0.13)));
           -webkit-backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
           backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
           box-shadow: none;
         }
         .${SCRIPT_PREFIX}-panel.embedded.light .${SCRIPT_PREFIX}-launcher-container {
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
-          background: var(--${SCRIPT_PREFIX}-action-bg, var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13)));
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
+          background: var(--${SCRIPT_PREFIX}-action-bg, var(--ui-shape-neutral-4, hsla(0, 0%, 100%, 0.13)));
         }
-        .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
-        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher-container {
-          background: var(--tux-v2-color-ui-shape-neutral-3, rgba(255, 255, 255, 0.18));
-          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
+        .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin),
+        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
+          background: var(--ui-shape-neutral-3, hsla(0, 0%, 100%, 0.19));
+          color: var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9));
           transform: none;
         }
         .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
         .${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher-container {
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
-          background: var(--${SCRIPT_PREFIX}-action-hover-bg, var(--tux-v2-color-ui-shape-neutral-3, rgba(255, 255, 255, 0.18)));
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
+          background: var(--${SCRIPT_PREFIX}-action-hover-bg, var(--ui-shape-neutral-3, hsla(0, 0%, 100%, 0.19)));
           transform: none;
         }
         .${SCRIPT_PREFIX}-launcher svg {
@@ -3804,6 +3918,279 @@
           height: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
           margin: 0 auto;
           transform: none;
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-icon-wrapper,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
+          flex: 0 0 auto;
+          width: var(--${SCRIPT_PREFIX}-action-size, 40px);
+          height: var(--${SCRIPT_PREFIX}-action-size, 40px);
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-icon-wrapper,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container,
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
+          border-radius: var(--${SCRIPT_PREFIX}-action-radius, 9999px);
+          color: var(--${SCRIPT_PREFIX}-action-color, rgb(246, 246, 246));
+          background: var(--${SCRIPT_PREFIX}-action-bg, transparent);
+          -webkit-backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
+          backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container.${SCRIPT_PREFIX}-profile-official-skin {
+          position: static !important;
+          left: auto !important;
+          right: auto !important;
+          top: auto !important;
+          bottom: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          width: var(--${SCRIPT_PREFIX}-action-size, 40px) !important;
+          height: var(--${SCRIPT_PREFIX}-action-size, 40px) !important;
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin),
+        .${SCRIPT_PREFIX}-panel.profile-dialog.open .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
+          color: var(--${SCRIPT_PREFIX}-action-color, rgb(246, 246, 246));
+          background: var(--${SCRIPT_PREFIX}-action-hover-bg, rgba(255, 255, 255, 0.08));
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
+          cursor: pointer;
+          touch-action: manipulation;
+          padding: 0;
+          border-radius: 0;
+          background: transparent;
+          line-height: 0 !important;
+        }
+        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher svg {
+          flex: 0 0 auto;
+          width: var(--${SCRIPT_PREFIX}-action-icon-size, 22px);
+          height: var(--${SCRIPT_PREFIX}-action-icon-size, 22px);
+          margin: 0 auto;
+          transform: none;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-wrap {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          flex: 0 0 auto;
+          box-sizing: border-box;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-button {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          width: 100% !important;
+          height: 100% !important;
+          padding: 0 !important;
+          line-height: 0 !important;
+          cursor: pointer;
+          color: inherit;
+          background: transparent !important;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-wrap:hover,
+        .${SCRIPT_PREFIX}-profile-bulk-wrap.${SCRIPT_PREFIX}-profile-bulk-open {
+          border-radius: 999px;
+          background: #3e3e3e !important;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-button:focus-visible {
+          outline: 2px solid rgba(255, 255, 255, 0.7);
+          outline-offset: 2px;
+          border-radius: 999px;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-button svg {
+          width: 1em;
+          height: 1em;
+          display: block;
+          pointer-events: none;
+        }
+        .${SCRIPT_PREFIX}-profile-bulk-menu {
+          width: 160px;
+        }
+        .${SCRIPT_PREFIX}-profile-select-box {
+          position: absolute;
+          right: 8px;
+          bottom: 8px;
+          z-index: 5;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: var(--${SCRIPT_PREFIX}-profile-checkbox-size, 26px);
+          height: var(--${SCRIPT_PREFIX}-profile-checkbox-size, 26px);
+          border: 2px solid rgba(255, 255, 255, 0.92);
+          border-radius: 999px;
+          background: rgba(22, 24, 35, 0.72);
+          box-shadow: none;
+          cursor: pointer;
+          box-sizing: border-box;
+          backdrop-filter: blur(8px);
+          padding: 0;
+          line-height: 0;
+          appearance: none;
+          -webkit-appearance: none;
+          transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+        }
+        .${SCRIPT_PREFIX}-profile-select-box:hover {
+          transform: scale(1.04);
+          background: rgba(22, 24, 35, 0.86);
+        }
+        .${SCRIPT_PREFIX}-profile-select-box.selected {
+          border-color: #fe2c55;
+          background: #fe2c55;
+          box-shadow: none;
+        }
+        .${SCRIPT_PREFIX}-profile-select-box input {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          margin: 0;
+          padding: 0;
+          opacity: 0 !important;
+          cursor: pointer;
+          appearance: none !important;
+          -webkit-appearance: none !important;
+        }
+        .${SCRIPT_PREFIX}-profile-select-mark {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+        }
+        .${SCRIPT_PREFIX}-profile-select-box.selected .${SCRIPT_PREFIX}-profile-select-mark::after {
+          content: "";
+          position: absolute;
+          left: 30%;
+          top: 20%;
+          width: 34%;
+          height: 52%;
+          border: solid #fff;
+          border-width: 0 3px 3px 0;
+          transform: rotate(45deg);
+          box-sizing: border-box;
+        }
+        .${SCRIPT_PREFIX}-bulk-confirm-modal {
+          width: min(860px, calc(100vw - 42px));
+          max-height: min(720px, calc(100vh - 42px));
+        }
+        .${SCRIPT_PREFIX}-bulk-list {
+          display: grid;
+          gap: 10px;
+          max-height: min(520px, 58vh);
+          overflow: auto;
+          padding-right: 4px;
+        }
+        .${SCRIPT_PREFIX}-bulk-row {
+          display: grid;
+          grid-template-columns: 28px 72px minmax(0, 1fr) 72px;
+          gap: 12px;
+          align-items: center;
+          border: 1px solid rgba(127, 127, 127, 0.22);
+          border-radius: 12px;
+          padding: 10px;
+          background: rgba(127, 127, 127, 0.06);
+        }
+        .${SCRIPT_PREFIX}-bulk-row input {
+          width: 18px;
+          height: 18px;
+          accent-color: #fe2c55;
+        }
+        .${SCRIPT_PREFIX}-bulk-cover {
+          width: 72px;
+          height: 96px;
+          border-radius: 8px;
+          object-fit: cover;
+          background: #222;
+        }
+        .${SCRIPT_PREFIX}-bulk-desc {
+          min-width: 0;
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+        .${SCRIPT_PREFIX}-bulk-type {
+          justify-self: end;
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 12px;
+          font-weight: 700;
+          background: rgba(254, 44, 85, 0.12);
+          color: #fe2c55;
+          white-space: nowrap;
+        }
+        .${SCRIPT_PREFIX}-bulk-footer {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: center;
+          margin-top: 14px;
+          padding-top: 12px;
+          border-top: 1px solid rgba(127, 127, 127, 0.2);
+        }
+        .${SCRIPT_PREFIX}-advanced-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+        .${SCRIPT_PREFIX}-check-left label {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          margin: 0;
+          cursor: pointer;
+          font-weight: 600;
+        }
+        .${SCRIPT_PREFIX}-check-left input {
+          width: 16px !important;
+          height: 16px;
+          margin: 0;
+          accent-color: #fe2c55;
+          order: -1;
+        }
+        .${SCRIPT_PREFIX}-profile-slider-field {
+          grid-column: 1 / -1;
+          display: grid;
+          gap: 10px;
+        }
+        .${SCRIPT_PREFIX}-profile-slider-head {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .${SCRIPT_PREFIX}-profile-slider-head label {
+          margin: 0;
+          flex: 0 0 auto;
+        }
+        .${SCRIPT_PREFIX}-profile-slider-desc {
+          min-width: 0;
+          color: #777;
+          font-size: 12px;
+          line-height: 1.35;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-profile-slider-desc { color: #aaa; }
+        .${SCRIPT_PREFIX}-profile-slider-value {
+          margin-left: auto;
+          flex: 0 0 auto;
+          min-width: 48px;
+          text-align: right;
+          color: #fe2c55;
+          font-weight: 800;
+          font-variant-numeric: tabular-nums;
+        }
+        .${SCRIPT_PREFIX}-profile-slider-field input[type="range"] {
+          width: 100%;
+          accent-color: #fe2c55;
         }
         .${SCRIPT_PREFIX}-menu {
           position: absolute;
@@ -3920,7 +4307,7 @@
           z-index: 2147483702;
           width: min(372px, calc(100vw - 28px));
           height: var(--${SCRIPT_PREFIX}-notification-stack-collapsed-height, 90px);
-          pointer-events: auto;
+          pointer-events: none;
           perspective: 900px;
           transition: height 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
         }
@@ -4412,7 +4799,7 @@
         }
         .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-kv,
         .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-stat {
-          border-color: #303030;
+          border-color: #3e3e3e;
           background: #1f1f1f;
         }
         .${SCRIPT_PREFIX}-kv small,
@@ -4454,7 +4841,7 @@
           font: 12px Consolas, "Courier New", monospace;
         }
         .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-json-pre {
-          border-color: #303030;
+          border-color: #3e3e3e;
           background: #101010;
         }
         .${SCRIPT_PREFIX}-details-modal {
@@ -4877,7 +5264,7 @@
           background: rgba(127, 127, 127, 0.06);
         }
         .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-settings-note {
-          border-color: #303030;
+          border-color: #3e3e3e;
           background: rgba(255, 255, 255, 0.04);
         }
         .${SCRIPT_PREFIX}-filename-template-editor {
@@ -4893,7 +5280,7 @@
           overflow-wrap: anywhere;
         }
         .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-filename-preview {
-          border-color: #303030;
+          border-color: #3e3e3e;
         }
         .${SCRIPT_PREFIX}-frame-modal {
           width: min(560px, calc(100vw - 28px));
@@ -5860,6 +6247,620 @@
     }
   }
 
+  class ProfileBrowseDialogAdapter {
+    constructor(app) {
+      this.app = app;
+    }
+
+    findDialog() {
+      return getVisibleProfileBrowseDialog(this.app.document);
+    }
+
+    findEllipsis(dialog = null) {
+      const button = dialog?.querySelector?.(PROFILE_BROWSE_ELLIPSIS_SELECTOR) || null;
+      if (!button) return null;
+      const rect = button.getBoundingClientRect?.();
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.5) return null;
+      return button;
+    }
+
+    getPositionSignature() {
+      const dialog = this.findDialog();
+      const ellipsis = this.findEllipsis(dialog);
+      const rect = ellipsis?.getBoundingClientRect?.();
+      if (!dialog || !ellipsis || !rect) return "no-profile-dialog";
+      return [
+        Math.round(rect.left),
+        Math.round(rect.top),
+        Math.round(rect.width),
+        Math.round(rect.height),
+        this.app.window.location?.href || "",
+      ].join(",");
+    }
+
+    mount() {
+      const dialog = this.findDialog();
+      const ellipsis = this.findEllipsis(dialog);
+      if (dialog && ellipsis && this.app.mountPanelNearProfileBrowseEllipsis(dialog, ellipsis)) {
+        return true;
+      }
+      this.app.hidePanelForInactivePlacement();
+      return false;
+    }
+
+    refresh() {
+      return this.mount();
+    }
+
+    unmount() {
+      this.app.hidePanelForInactivePlacement();
+    }
+  }
+
+
+  class ProfilePageBulkAdapter {
+    constructor(app) {
+      this.app = app;
+      this.buttonWrapper = null;
+      this.button = null;
+      this.menu = null;
+      this.selectionMode = false;
+      this.scanFrame = null;
+      this.scanInterval = null;
+      this.scrollHandler = () => this.scheduleScan();
+      this.mutationObserver = null;
+      this.outsideHandler = null;
+      this.menuCloseTimer = null;
+    }
+
+    get document() {
+      return this.app.document;
+    }
+
+    get window() {
+      return this.app.window;
+    }
+
+    get selectionState() {
+      if (!this.app.profileBulkSelectionState) {
+        this.app.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
+      }
+      return this.app.profileBulkSelectionState;
+    }
+
+    get selectedItems() {
+      const state = this.selectionState;
+      if (!(state.selectedItems instanceof Map)) state.selectedItems = new Map();
+      return state.selectedItems;
+    }
+
+    isProfilePage() {
+      return this.app.getCurrentPageType() === "profile";
+    }
+
+    getProfileKey() {
+      const match = String(this.window.location?.pathname || "").match(/^\/(@[^/]+)/);
+      return match ? match[1] : "";
+    }
+
+    syncProfileContext() {
+      const profileKey = this.getProfileKey();
+      if (!profileKey) return;
+      const state = this.selectionState;
+      if (state.profileKey && state.profileKey !== profileKey) {
+        state.selectedItems.clear();
+      }
+      state.profileKey = profileKey;
+    }
+
+    findUserMoreButton() {
+      return this.document.querySelector('[data-e2e="user-more"]');
+    }
+
+    mount() {
+      if (!this.isProfilePage()) {
+        this.unmount();
+        return false;
+      }
+      this.syncProfileContext();
+      const userMore = this.findUserMoreButton();
+      if (userMore) {
+        this.ensureButton(userMore);
+      } else {
+        this.unmountButtonOnly();
+      }
+      if (!this.selectionMode) this.enterSelectionMode();
+      else this.scheduleRecoveryScan();
+      this.updateMenuLabels();
+      return Boolean(userMore);
+    }
+
+    unmountButtonOnly() {
+      this.closeMenu();
+      this.buttonWrapper?.remove?.();
+      this.buttonWrapper = null;
+      this.button = null;
+    }
+
+    suspend() {
+      this.closeMenu(true);
+      this.disableSelectionMode(false);
+      this.unmountButtonOnly();
+    }
+
+    unmount() {
+      this.closeMenu();
+      this.disableSelectionMode(false);
+      this.unmountButtonOnly();
+    }
+
+    ensureButton(userMore) {
+      const nativeWrapper = userMore.parentElement || null;
+      const parent = nativeWrapper?.parentElement || userMore.parentElement;
+      if (!parent) return;
+
+      const syncOfficialVisual = () => {
+        const wrapperClass = [
+          String(nativeWrapper?.className || ""),
+          `${SCRIPT_PREFIX}-profile-bulk-wrap`,
+        ].filter(Boolean).join(" ");
+        const buttonClass = [String(userMore.className || ""), `${SCRIPT_PREFIX}-profile-bulk-button`]
+          .filter(Boolean)
+          .join(" ");
+        this.buttonWrapper.className = wrapperClass;
+        this.button.className = buttonClass;
+
+        const wrapperStyle = nativeWrapper?.getAttribute?.("style") || "";
+        if (wrapperStyle) this.buttonWrapper.setAttribute("style", wrapperStyle);
+        else this.buttonWrapper.removeAttribute("style");
+        const buttonStyle = userMore?.getAttribute?.("style") || "";
+        if (buttonStyle) this.button.setAttribute("style", buttonStyle);
+        else this.button.removeAttribute("style");
+
+        const wrapperRect = nativeWrapper?.getBoundingClientRect?.();
+        const buttonRect = userMore?.getBoundingClientRect?.();
+        const wrapperSize = Math.round(wrapperRect?.width || buttonRect?.width || 40);
+        const wrapperHeight = Math.round(wrapperRect?.height || buttonRect?.height || 40);
+        this.buttonWrapper.style.setProperty("width", `${wrapperSize}px`);
+        this.buttonWrapper.style.setProperty("height", `${wrapperHeight}px`);
+        this.buttonWrapper.style.setProperty("display", "inline-flex", "important");
+        this.buttonWrapper.style.setProperty("align-items", "center", "important");
+        this.buttonWrapper.style.setProperty("justify-content", "center", "important");
+        this.buttonWrapper.style.setProperty("flex", "0 0 auto");
+        this.button.style.setProperty("width", "100%", "important");
+        this.button.style.setProperty("height", "100%", "important");
+        this.button.style.setProperty("display", "flex", "important");
+        this.button.style.setProperty("align-items", "center", "important");
+        this.button.style.setProperty("justify-content", "center", "important");
+        this.button.style.setProperty("padding", "0", "important");
+        this.button.style.setProperty("line-height", "0", "important");
+        this.button.style.setProperty("background", "transparent", "important");
+        this.button.style.setProperty("color", "inherit");
+      };
+
+      if (!this.buttonWrapper) {
+        this.buttonWrapper = createElement(this.document, "div", "");
+        this.button = createElement(this.document, "button", "");
+        this.button.type = "button";
+        this.button.dataset.tthelperProfileBulk = "1";
+        this.button.setAttribute("aria-label", this.app.t("bulk_download"));
+        this.button.innerHTML = `
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+            <path d="M4.75 6.25a1.25 1.25 0 0 1 1.25-1.25h9.7a1.25 1.25 0 1 1 0 2.5H6a1.25 1.25 0 0 1-1.25-1.25Zm0 5.75A1.25 1.25 0 0 1 6 10.75h8.2a1.25 1.25 0 1 1 0 2.5H6A1.25 1.25 0 0 1 4.75 12Zm0 5.75A1.25 1.25 0 0 1 6 16.5h5.2a1.25 1.25 0 1 1 0 2.5H6a1.25 1.25 0 0 1-1.25-1.25Zm15.98-5.4a1.1 1.1 0 0 1 .02 1.56l-3.72 3.84a1.1 1.1 0 0 1-1.57.02l-1.9-1.82a1.1 1.1 0 1 1 1.52-1.59l1.11 1.06 2.96-3.05a1.1 1.1 0 0 1 1.58-.02Z"></path>
+          </svg>
+        `;
+        this.button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.toggleMenu();
+        });
+        this.buttonWrapper.appendChild(this.button);
+      }
+
+      syncOfficialVisual();
+      const reference = nativeWrapper || userMore;
+      if (this.buttonWrapper.parentElement !== parent || this.buttonWrapper.previousSibling !== reference) {
+        parent.insertBefore(this.buttonWrapper, reference.nextSibling);
+      }
+    }
+
+    ensureMenu() {
+      if (this.menu) return this.menu;
+      const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu ${SCRIPT_PREFIX}-profile-bulk-menu ${this.app.getTheme()}`);
+      menu.addEventListener("pointerdown", (event) => event.stopPropagation());
+      menu.addEventListener("click", (event) => event.stopPropagation());
+      menu.addEventListener("mouseleave", () => this.toggleMenu(false));
+
+      this.downloadSelectedButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button`, "");
+      this.downloadSelectedButton.addEventListener("click", () => {
+        this.closeMenu(true);
+        this.openConfirmModal();
+      });
+
+      this.cancelSelectionButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button secondary`, "");
+      this.cancelSelectionButton.addEventListener("click", () => {
+        this.closeMenu(true);
+        this.clearSelection();
+      });
+
+      this.settingsButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button secondary`, "");
+      this.settingsButton.addEventListener("click", () => {
+        this.closeMenu(true);
+        this.app.openSettings();
+      });
+
+      menu.append(this.downloadSelectedButton, this.cancelSelectionButton, this.settingsButton);
+      this.document.body.appendChild(menu);
+      this.menu = menu;
+      return menu;
+    }
+
+    toggleMenu(force = null) {
+      const menu = this.ensureMenu();
+      const isOpen = menu.classList.contains("open");
+      const isClosing = menu.classList.contains("closing");
+      const shouldOpen = force === null ? !isOpen || isClosing : Boolean(force);
+
+      if (this.menuCloseTimer) {
+        this.window.clearTimeout?.(this.menuCloseTimer);
+        this.menuCloseTimer = null;
+      }
+
+      if (shouldOpen) {
+        this.enterSelectionMode();
+        this.updateMenuLabels();
+        menu.classList.remove("closing");
+        menu.classList.add("open");
+        this.buttonWrapper?.classList?.add?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+        this.positionMenu();
+        this.bindOutsideClose();
+        return;
+      }
+
+      if (!isOpen && !isClosing) return;
+      menu.classList.add("open", "closing");
+      this.positionMenu();
+      this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+      this.menuCloseTimer = this.window.setTimeout?.(() => {
+        this.menuCloseTimer = null;
+        menu.classList.remove("open", "closing");
+        this.clearMenuPosition();
+        this.unbindOutsideClose();
+      }, 170) || null;
+    }
+
+    closeMenu(immediate = false) {
+      if (!this.menu) return;
+      if (!immediate) {
+        this.toggleMenu(false);
+        return;
+      }
+      if (this.menuCloseTimer) {
+        this.window.clearTimeout?.(this.menuCloseTimer);
+        this.menuCloseTimer = null;
+      }
+      this.menu.classList.remove("open", "closing");
+      this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+      this.clearMenuPosition();
+      this.unbindOutsideClose();
+    }
+
+    clearMenuPosition() {
+      if (!this.menu) return;
+      for (const property of ["left", "right", "top", "bottom"]) {
+        this.menu.style[property] = "";
+      }
+      this.menu.style.position = "";
+      this.menu.style.transform = "";
+      delete this.menu.dataset.placement;
+    }
+
+    bindOutsideClose() {
+      if (this.outsideHandler) return;
+      this.outsideHandler = (event) => {
+        if (this.menu?.contains?.(event.target) || this.buttonWrapper?.contains?.(event.target)) return;
+        this.closeMenu();
+      };
+      this.document.addEventListener("pointerdown", this.outsideHandler, true);
+    }
+
+    unbindOutsideClose() {
+      if (!this.outsideHandler) return;
+      this.document.removeEventListener("pointerdown", this.outsideHandler, true);
+      this.outsideHandler = null;
+    }
+
+    positionMenu() {
+      const menu = this.ensureMenu();
+      this.clearMenuPosition();
+      const rect = this.buttonWrapper?.getBoundingClientRect?.();
+      if (!rect) return;
+      const menuRect = menu.getBoundingClientRect?.();
+      const placement = calculatePanelMenuPlacement({
+        panelRect: rect,
+        launcherRect: rect,
+        menuWidth: menuRect?.width || 160,
+        menuHeight: menuRect?.height || 160,
+        viewportWidth: this.window.innerWidth || 0,
+        viewportHeight: this.window.innerHeight || 0,
+      });
+      menu.classList.toggle("light", this.app.getTheme() === "light");
+      menu.classList.toggle("dark", this.app.getTheme() === "dark");
+      menu.style.position = "fixed";
+      menu.style.left = `${Math.round(placement.left)}px`;
+      menu.style.top = `${Math.round(placement.top)}px`;
+      menu.style.right = "auto";
+      menu.style.bottom = "auto";
+      menu.style.transform = "none";
+      menu.dataset.placement = placement.placement;
+    }
+
+    formatBulkItemCount(count) {
+      return String(count);
+    }
+
+    updateMenuLabels() {
+      const count = this.selectedItems.size;
+      if (this.button) this.button.setAttribute("aria-label", this.app.t("bulk_download"));
+      if (this.downloadSelectedButton) {
+        this.downloadSelectedButton.textContent = `${this.app.t("bulk_download_selected")}（${this.formatBulkItemCount(count)}）`;
+        this.downloadSelectedButton.disabled = false;
+      }
+      if (this.cancelSelectionButton) {
+        this.cancelSelectionButton.textContent = this.app.t("bulk_cancel_selection");
+        this.cancelSelectionButton.disabled = count <= 0;
+      }
+      if (this.settingsButton) this.settingsButton.textContent = this.app.t("settings");
+    }
+
+    enterSelectionMode() {
+      if (!this.selectionMode) {
+        this.selectionMode = true;
+        this.ensureSelectionScanner();
+      }
+      this.scheduleScan();
+    }
+
+    ensureSelectionScanner() {
+      if (!this.scanInterval && typeof this.window.setInterval === "function") {
+        this.scanInterval = this.window.setInterval(() => this.scheduleScan(), 800);
+      }
+      this.document.addEventListener?.("scroll", this.scrollHandler, true);
+      if (!this.mutationObserver && typeof this.window.MutationObserver === "function" && this.document.body) {
+        this.mutationObserver = new this.window.MutationObserver(() => this.scheduleScan());
+        this.mutationObserver.observe(this.document.body, { childList: true, subtree: true });
+      }
+    }
+
+    clearSelection() {
+      this.selectedItems.clear();
+      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((box) => {
+        box.classList.remove("selected");
+        box.setAttribute("aria-checked", "false");
+      });
+      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-card-selected`).forEach((node) => node.classList.remove(`${SCRIPT_PREFIX}-profile-card-selected`));
+      this.updateMenuLabels();
+      this.scheduleScan();
+    }
+
+    disableSelectionMode(clearSelected = false) {
+      this.selectionMode = false;
+      if (clearSelected) this.selectedItems.clear();
+      if (this.scanInterval) {
+        this.window.clearInterval?.(this.scanInterval);
+        this.scanInterval = null;
+      }
+      if (this.scanFrame) {
+        this.window.cancelAnimationFrame?.(this.scanFrame);
+        this.scanFrame = null;
+      }
+      this.document.removeEventListener?.("scroll", this.scrollHandler, true);
+      this.mutationObserver?.disconnect?.();
+      this.mutationObserver = null;
+      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((node) => node.remove());
+      this.document.querySelectorAll(`[data-tthelper-select-ready]`).forEach((node) => {
+        delete node.dataset.tthelperSelectReady;
+        node.removeAttribute("data-tthelper-select-ready");
+      });
+      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-card-selected`).forEach((node) => node.classList.remove(`${SCRIPT_PREFIX}-profile-card-selected`));
+    }
+
+    scheduleRecoveryScan() {
+      this.scheduleScan();
+      const delays = [0, 120, 350, 800, 1400];
+      for (const delay of delays) {
+        this.window.setTimeout?.(() => this.scheduleScan(), delay);
+      }
+    }
+
+    scheduleScan() {
+      if (!this.selectionMode || this.scanFrame) return;
+      const run = () => {
+        this.scanFrame = null;
+        this.scanVisibleCards();
+      };
+      if (typeof this.window.requestAnimationFrame === "function") {
+        this.scanFrame = this.window.requestAnimationFrame(run);
+      } else {
+        this.scanFrame = this.window.setTimeout(run, 50);
+      }
+    }
+
+    scanVisibleCards() {
+      if (!this.selectionMode || !this.isProfilePage()) return;
+      const config = this.app.configStore.get();
+      const size = `${Math.round(clampNumber(Number(config.profile_bulk_checkbox_size), 18, 40, 26))}px`;
+      const anchors = Array.from(this.document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]'));
+      for (const anchor of anchors) {
+        const item = this.extractItemFromAnchor(anchor);
+        if (!item?.id || !item.card) continue;
+        this.attachCheckbox(item, size);
+      }
+      this.updateMenuLabels();
+    }
+
+    extractItemFromAnchor(anchor) {
+      const href = anchor?.href || anchor?.getAttribute?.("href") || "";
+      const id = getVideoIdFromUrl(href);
+      if (!id) return null;
+      const card = anchor.closest?.('[data-e2e="user-post-item"]') || anchor.closest?.('div') || anchor;
+      const img = card.querySelector?.("img") || anchor.querySelector?.("img") || null;
+      const coverUrl = img?.currentSrc || img?.src || img?.getAttribute?.("src") || "";
+      const desc = String(img?.alt || card?.textContent || anchor?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return {
+        id,
+        href: new URL(href, this.window.location.href).href,
+        pageUrl: new URL(href, this.window.location.href).href,
+        coverUrl,
+        desc,
+        type: "unknown",
+        card,
+      };
+    }
+
+    attachCheckbox(item, size) {
+      const card = item.card;
+      if (!card) return;
+
+      const existingBoxes = Array.from(card.querySelectorAll?.(`.${SCRIPT_PREFIX}-profile-select-box`) || []);
+      for (const box of existingBoxes) {
+        if (box.dataset.tthelperItemId && box.dataset.tthelperItemId !== item.id) box.remove();
+      }
+
+      const setBoxState = (box) => {
+        const checked = this.selectedItems.has(item.id);
+        box.dataset.tthelperItemId = item.id;
+        box.style.setProperty(`--${SCRIPT_PREFIX}-profile-checkbox-size`, size);
+        box.classList.toggle("selected", checked);
+        box.setAttribute("aria-checked", checked ? "true" : "false");
+      };
+
+      const currentPosition = getComputedStyleSafe(this.window, card)?.position || "";
+      if (!currentPosition || currentPosition === "static") card.style.position = "relative";
+
+      let box = card.querySelector?.(`.${SCRIPT_PREFIX}-profile-select-box[data-tthelper-item-id="${item.id}"]`)
+        || card.querySelector?.(`.${SCRIPT_PREFIX}-profile-select-box`);
+
+      if (!box) {
+        box = createElement(this.document, "button", `${SCRIPT_PREFIX}-profile-select-box`);
+        box.type = "button";
+        box.setAttribute("role", "checkbox");
+        box.setAttribute("aria-label", this.app.t("bulk_download_selected"));
+        box.dataset.tthelperItemId = item.id;
+
+        const toggleSelected = () => {
+          const nextChecked = !this.selectedItems.has(item.id);
+          if (nextChecked) {
+            const fresh = this.extractItemFromAnchor(card.querySelector?.('a[href*="/video/"], a[href*="/photo/"]') || null) || item;
+            this.selectedItems.set(item.id, { ...item, ...fresh, card: null });
+          } else {
+            this.selectedItems.delete(item.id);
+          }
+          setBoxState(box);
+          this.updateMenuLabels();
+        };
+
+        box.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        box.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleSelected();
+        });
+        box.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          toggleSelected();
+        });
+        const mark = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-select-mark`);
+        box.appendChild(mark);
+        card.appendChild(box);
+      }
+
+      card.dataset.tthelperSelectReady = item.id;
+      setBoxState(box);
+    }
+
+    tryResolveMedia(item) {
+      const config = this.app.configStore.get();
+      const candidates = [
+        parsePageDataFromDocument(this.document),
+        ...getWindowDataCandidates(this.window),
+      ].filter(Boolean);
+      for (const data of candidates) {
+        const media = extractMediaFromPageData(data, item.pageUrl || item.href, config);
+        if (hasUsableMedia(media)) return media;
+      }
+      const cached = this.app.runtimeCache?.getMedia?.(item.pageUrl || item.href, config);
+      if (hasUsableMedia(cached)) return cached;
+      return null;
+    }
+
+    getItemTypeLabel(item) {
+      const media = this.tryResolveMedia(item);
+      if (media?.isImagePost || ensureArray(media?.images).length) return this.app.t("bulk_type_album");
+      if (media?.video?.primaryUrl) return this.app.t("bulk_type_video");
+      return this.app.t("bulk_type_unknown");
+    }
+
+    openConfirmModal() {
+      const items = Array.from(this.selectedItems.values());
+      if (!items.length) {
+        this.app.toast(this.app.t("bulk_no_selection"));
+        return;
+      }
+      const modal = this.app.createModal(this.app.t("bulk_confirm_title"), "", { closeOnBackdrop: false });
+      modal.classList.add(`${SCRIPT_PREFIX}-bulk-confirm-modal`);
+      const main = modal.querySelector("main");
+      const selected = new Set(items.map((item) => item.id));
+      const list = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-list`);
+      const footer = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-footer`);
+      const countLabel = createElement(this.document, "div", `${SCRIPT_PREFIX}-readonly`);
+      const actions = createElement(this.document, "div", `${SCRIPT_PREFIX}-row`);
+      const close = this.app.actionButton(this.app.t("cancel"), () => modal.parentElement?.remove?.(), "secondary");
+      const start = this.app.actionButton(this.app.t("bulk_start_download"), () => {
+        const finalItems = items.filter((item) => selected.has(item.id));
+        modal.parentElement?.remove?.();
+        this.app.downloadProfileBulkItems(finalItems);
+      }, "primary");
+      const updateCount = () => {
+        countLabel.textContent = `${this.app.t("bulk_selected_count")} ${this.formatBulkItemCount(selected.size)}`;
+        start.disabled = selected.size <= 0;
+      };
+
+      for (const item of items) {
+        const row = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-row`);
+        const checkbox = createElement(this.document, "input");
+        checkbox.type = "checkbox";
+        checkbox.checked = true;
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selected.add(item.id);
+          else selected.delete(item.id);
+          updateCount();
+        });
+        const cover = createElement(this.document, "img", `${SCRIPT_PREFIX}-bulk-cover`);
+        cover.alt = "";
+        if (item.coverUrl) cover.src = item.coverUrl;
+        const desc = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-desc`, item.desc || item.pageUrl || item.id);
+        const type = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-type`, this.getItemTypeLabel(item));
+        row.append(checkbox, cover, desc, type);
+        list.appendChild(row);
+      }
+      actions.append(close, start);
+      footer.append(countLabel, actions);
+      main.append(list, footer);
+      updateCount();
+    }
+  }
+
   class TikTokDlApp {
     constructor(win, runtimeCache = null) {
       this.window = win;
@@ -5868,7 +6869,10 @@
       this.runtimeCache = runtimeCache;
       this.extractor = new TikTokMediaExtractor(this.document, win, runtimeCache);
       this.actionBarLocator = new ActionBarLocator(this);
+      this.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
       this.recommendPlacementAdapter = new RecommendPlacementAdapter(this);
+      this.profileBrowseDialogAdapter = new ProfileBrowseDialogAdapter(this);
+      this.profilePageBulkAdapter = new ProfilePageBulkAdapter(this);
       this.downloader = new Downloader(win, gmXmlHttpRequest, gmDownload);
       this.panel = null;
       this.menu = null;
@@ -5876,6 +6880,7 @@
       this.currentMedia = null;
       this.currentActionBarHost = null;
       this.currentActionBarContext = null;
+      this.currentPlacementMode = "inactive";
       this.lastHref = "";
       this.positionObserver = null;
       this.positionFrame = null;
@@ -5886,6 +6891,7 @@
       this.outsideMenuBound = false;
       this.menuCloseTimer = null;
       this.openImageOverlay = null;
+      this.isCurrentLiveItem = false;
       this.isDownloading = false;
       this.isCapturingFrame = false;
       this.lastToastAnchorRect = null;
@@ -6023,7 +7029,7 @@
       );
       debugInfoButton.addEventListener("click", () => {
         this.toggleMenu(false);
-        this.copyMediaDebugInfo();
+        this.copyDebugInfo("full");
       });
 
       const testNoticeButton = createElement(
@@ -6237,11 +7243,13 @@
       const isPending = this.panel.classList.contains("pending");
       const isClosing = this.panel.classList.contains("closing");
       const isEmbedded = this.panel.classList.contains("embedded");
+      const isProfileDialog = this.panel.classList.contains("profile-dialog");
       const config = this.configStore.get();
       const nextClassName = [
         `${SCRIPT_PREFIX}-panel`,
         this.getTheme(),
         isEmbedded ? "embedded" : "",
+        isProfileDialog ? "profile-dialog" : "",
         isOpen ? "open" : "",
         isPending ? "pending" : "",
         isClosing ? "closing" : "",
@@ -6271,15 +7279,21 @@
       // Explicit element references (set up in renderPanel()) rather than positional index
       // into a querySelectorAll list -- keeps this correct regardless of how many buttons
       // are in the menu or what order they're in.
+      const hideMediaActionsForLive = Boolean(this.isCurrentLiveItem);
       if (this.downloadButtonEl) {
         this.downloadButtonEl.textContent = this.t("download");
+        this.downloadButtonEl.hidden = hideMediaActionsForLive;
       }
       if (this.frameButtonEl) this.frameButtonEl.textContent = this.t("frame_capture");
-      if (this.detailsButtonEl) this.detailsButtonEl.textContent = this.t("details");
+      if (this.detailsButtonEl) {
+        this.detailsButtonEl.textContent = this.t("details");
+        this.detailsButtonEl.hidden = hideMediaActionsForLive;
+      }
       if (this.settingsButtonEl) this.settingsButtonEl.textContent = this.t("settings");
+      const showDebugItems = Boolean(config.show_debug_info_menu);
       if (this.debugInfoButtonEl) {
         this.debugInfoButtonEl.textContent = this.t("debug_info");
-        this.debugInfoButtonEl.hidden = !Boolean(config.show_debug_info_menu);
+        this.debugInfoButtonEl.hidden = !showDebugItems;
       }
       const showTestItems = Boolean(config.show_test_notification_menu);
       for (const button of [
@@ -6460,9 +7474,9 @@
         return;
       }
       if (theme === "dark") {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(36, 36, 36)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(255, 255, 255)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(47, 47, 47)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "hsla(0, 0%, 100%, 0.13)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgba(255, 255, 255, 0.9)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "hsla(0, 0%, 100%, 0.19)");
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
         this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
         return;
@@ -6576,6 +7590,21 @@
       }
     }
 
+    applyProfileDialogOfficialSkin(nativeControl = null) {
+      const container = this.panel?.querySelector?.(`.${SCRIPT_PREFIX}-launcher-container`) || null;
+      if (!container) return;
+      const baseClass = `${SCRIPT_PREFIX}-launcher-container`;
+      if (!nativeControl) {
+        if (container.className !== baseClass) container.className = baseClass;
+        return;
+      }
+      const nativeClassName = String(nativeControl.className || "");
+      const nextClassName = mergeClassNames(baseClass, `${SCRIPT_PREFIX}-profile-official-skin`, nativeClassName);
+      if (container.className !== nextClassName) {
+        container.className = nextClassName;
+      }
+    }
+
     syncEmbeddedButtonMetrics(host) {
       if (!this.panel || !host) return;
       const sample = this.getEmbeddedNativeButtonSample(host);
@@ -6601,6 +7630,7 @@
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-size`, `${iconSize}px`);
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`, "0px");
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-gap`, "0px");
+      this.applyProfileDialogOfficialSkin(null);
       this.applyOfficialEmbeddedButtonClass(nativeControl);
 
       const nativeStyle = getComputedStyleSafe(this.window, styleElement);
@@ -6630,11 +7660,52 @@
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-radius`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-bg`);
       this.applyOfficialEmbeddedButtonClass(null);
+      this.applyProfileDialogOfficialSkin(null);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-bg`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-color`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-hover-bg`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-radius`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
+    }
+
+    applyProfileDialogButtonTheme(anchorElement = null) {
+      if (!this.panel) return;
+      const anchorStyle = getComputedStyleSafe(this.window, anchorElement);
+      const anchorBg = getStyleValue(anchorStyle, ["backgroundColor", "background-color"]);
+      const anchorColor = getStyleValue(anchorStyle, ["color"]);
+      const anchorRadius = getStyleValue(anchorStyle, ["borderRadius", "border-radius"]);
+      const anchorBackdropFilter = getStyleValue(anchorStyle, ["backdropFilter", "-webkit-backdrop-filter"]);
+      const bg = anchorBg && anchorBg !== "transparent" && !/^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)$/i.test(anchorBg)
+        ? anchorBg
+        : "rgba(84, 84, 84, 0.5)";
+      const color = anchorColor || "rgb(255, 255, 255)";
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, bg);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, color);
+      // In profile browse dialogs, keep the open/hover state visually aligned with the native ellipsis button.
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, bg);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, anchorRadius || "100px");
+      if (anchorBackdropFilter && anchorBackdropFilter !== "none") {
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`, anchorBackdropFilter);
+      } else {
+        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
+      }
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-bg`, "transparent");
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-radius`, "0px");
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-padding`, "0px");
+    }
+
+    syncProfileDialogButtonMetrics(anchorElement) {
+      if (!this.panel || !anchorElement) return;
+      const rect = anchorElement.getBoundingClientRect?.();
+      const rawSize = rect ? Math.max(rect.width, rect.height) : 40;
+      const controlSize = Math.round(clampNumber(rawSize, 32, 56, 40));
+      const iconSize = Math.round(clampNumber(controlSize * 0.56, 18, 28, 22));
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${controlSize}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-size`, `${iconSize}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`, "0px");
+      this.applyOfficialEmbeddedButtonClass(null);
+      this.applyProfileDialogButtonTheme(anchorElement);
+      this.applyProfileDialogOfficialSkin(anchorElement);
     }
 
     getCurrentPageType() {
@@ -6661,12 +7732,48 @@
       if (this.panel.parentElement !== host || this.panel.nextSibling !== reference) {
         host.insertBefore(this.panel, reference || host.firstChild);
       }
+      this.currentPlacementMode = "recommend";
       this.currentActionBarHost = host;
       this.currentActionBarContext = this.findActionBarPositionContext();
-      this.panel.classList.remove("pending");
+      this.panel.classList.remove("pending", "profile-dialog");
       this.panel.classList.add("embedded");
       this.clearPanelFixedPosition();
       this.syncEmbeddedButtonMetrics(host);
+      this.updatePanelMenuPosition();
+      return true;
+    }
+
+    mountPanelNearProfileBrowseEllipsis(dialog, ellipsis) {
+      if (!this.panel || !dialog || !ellipsis) return false;
+      if (this.panel.parentElement !== this.document.body) {
+        this.document.body.appendChild(this.panel);
+      }
+      if (this.menu && this.menu.parentElement !== this.document.body) {
+        this.document.body.appendChild(this.menu);
+      }
+      const rect = ellipsis.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const size = Math.round(clampNumber(Math.max(rect.width, rect.height), 32, 56, 40));
+      const margin = 8;
+      const viewportWidth = this.window.innerWidth || 0;
+      const viewportHeight = this.window.innerHeight || 0;
+      const preferredLeft = rect.left - size - margin;
+      const fallbackLeft = rect.right + margin;
+      const left = preferredLeft >= margin
+        ? preferredLeft
+        : Math.min(Math.max(fallbackLeft, margin), Math.max(margin, viewportWidth - size - margin));
+      const top = clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top);
+
+      this.currentPlacementMode = "profile-dialog";
+      this.currentActionBarHost = null;
+      this.currentActionBarContext = { anchor: dialog, anchorRect: this.getElementRect(ellipsis), host: null };
+      this.panel.classList.remove("pending", "embedded");
+      this.panel.classList.add("profile-dialog");
+      this.panel.style.left = `${Math.round(left)}px`;
+      this.panel.style.top = `${Math.round(top)}px`;
+      this.panel.style.right = "auto";
+      this.panel.style.bottom = "auto";
+      this.syncProfileDialogButtonMetrics(ellipsis);
       this.updatePanelMenuPosition();
       return true;
     }
@@ -6679,11 +7786,12 @@
       if (this.menu && this.menu.parentElement !== this.document.body) {
         this.document.body.appendChild(this.menu);
       }
+      this.currentPlacementMode = "inactive";
       this.currentActionBarHost = null;
       this.currentActionBarContext = null;
       this.clearEmbeddedButtonMetrics();
       this.panel.classList.add("pending");
-      this.panel.classList.remove("embedded", "open", "closing");
+      this.panel.classList.remove("embedded", "profile-dialog", "open", "closing");
       this.clearPanelMenuPosition();
     }
 
@@ -6696,8 +7804,25 @@
       // Other page types should not fall back to the legacy floating button,
       // otherwise UI changes such as opening comments can accidentally move the launcher
       // back into an inactive/unsupported placement.
+      if (pageType === "profile-dialog") {
+        this.profilePageBulkAdapter?.suspend?.();
+        this.profileBrowseDialogAdapter?.mount?.();
+        return;
+      }
+
+      if (pageType === "profile") {
+        this.recommendPlacementAdapter?.unmount?.();
+        this.profileBrowseDialogAdapter?.unmount?.();
+        this.hidePanelForInactivePlacement();
+        this.profilePageBulkAdapter?.mount?.();
+        return;
+      }
+
+      this.profilePageBulkAdapter?.unmount?.();
+
       if (!this.shouldEmbedPanelInActionBar(pageType)) {
         this.recommendPlacementAdapter?.unmount?.();
+        this.profileBrowseDialogAdapter?.unmount?.();
         return;
       }
 
@@ -6715,16 +7840,53 @@
     }
 
     getCurrentActionAnchor() {
+      if (this.currentPlacementMode === "profile-dialog") return null;
       return this.actionBarLocator.getCurrentActionAnchor();
+    }
+
+    getCurrentLiveContextText(anchorElement = null) {
+      const visibleMedia = this.extractor?.getVisibleMediaElement?.() || null;
+      const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
+      const actionContext = this.currentActionBarContext || null;
+      const context =
+        this.extractor?.getMediaContextElement?.(anchorElement) ||
+        this.extractor?.getMediaContextElement?.(visibleMedia) ||
+        this.extractor?.getMediaContextElement?.(visibleVideo) ||
+        null;
+      const actionText = unique([
+        anchorElement?.textContent || "",
+        this.currentActionBarHost?.textContent || "",
+        actionContext?.anchor?.textContent || "",
+        actionContext?.host?.textContent || "",
+      ]).join(" ");
+      const contextText = unique([
+        context?.textContent || "",
+        visibleMedia?.parentElement?.textContent || "",
+        visibleVideo?.parentElement?.textContent || "",
+      ]).join(" ");
+      return { actionText, contextText };
+    }
+
+    isCurrentLiveContext(anchorElement = null) {
+      if (this.getCurrentPageType() === "live") return true;
+      const { actionText, contextText } = this.getCurrentLiveContextText(anchorElement);
+      return isLikelyLiveContextText(actionText, contextText);
     }
 
     refreshMedia() {
       this.mountPanel();
       const anchor = this.getCurrentActionAnchor();
+      this.isCurrentLiveItem = this.isCurrentLiveContext(anchor);
+      if (this.isCurrentLiveItem) {
+        this.currentMedia = null;
+        return null;
+      }
+      const requireContext =
+        this.panel?.classList.contains("embedded") && this.currentPlacementMode !== "profile-dialog";
       this.currentMedia = this.extractor.getCurrentMedia(
         this.configStore.get(),
         anchor,
-        { requireContext: this.panel?.classList.contains("embedded") },
+        { requireContext },
       );
       return this.currentMedia;
     }
@@ -6792,7 +7954,10 @@
         this.extractor.getCurrentMedia(
           this.configStore.get(),
           anchor,
-          { requireContext: this.panel?.classList.contains("embedded") },
+          {
+            requireContext:
+              this.panel?.classList.contains("embedded") && this.currentPlacementMode !== "profile-dialog",
+          },
         ) ||
         {};
       const fallbackAuthor = getAuthorFromUrl(this.window.location?.href || "") || "creator";
@@ -6835,6 +8000,113 @@
       };
     }
 
+    summarizeComputedStyleForDebug(element = null) {
+      if (!element) return null;
+      const style = getComputedStyleSafe(this.window, element);
+      if (!style) return null;
+      const svg = element.querySelector?.("svg") || null;
+      const svgStyle = getComputedStyleSafe(this.window, svg);
+      const path = element.querySelector?.("svg path") || null;
+      const pathStyle = getComputedStyleSafe(this.window, path);
+      return {
+        element: this.summarizeElementForDebug(element),
+        style: {
+          display: getStyleValue(style, ["display"]),
+          position: getStyleValue(style, ["position"]),
+          backgroundColor: getStyleValue(style, ["backgroundColor", "background-color"]),
+          color: getStyleValue(style, ["color"]),
+          opacity: getStyleValue(style, ["opacity"]),
+          border: getStyleValue(style, ["border"]),
+          borderRadius: getStyleValue(style, ["borderRadius", "border-radius"]),
+          boxShadow: getStyleValue(style, ["boxShadow", "box-shadow"]),
+          filter: getStyleValue(style, ["filter"]),
+          backdropFilter: getStyleValue(style, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]),
+          mixBlendMode: getStyleValue(style, ["mixBlendMode", "mix-blend-mode"]),
+          padding: getStyleValue(style, ["padding"]),
+          margin: getStyleValue(style, ["margin"]),
+          width: getStyleValue(style, ["width"]),
+          height: getStyleValue(style, ["height"]),
+        },
+        cssVars: {
+          "--ui-shape-neutral-3": style.getPropertyValue?.("--ui-shape-neutral-3") || "",
+          "--ui-shape-neutral-4": style.getPropertyValue?.("--ui-shape-neutral-4") || "",
+          "--tux-colorBGInput": style.getPropertyValue?.("--tux-colorBGInput") || "",
+          "--tux-colorTextPrimary": style.getPropertyValue?.("--tux-colorTextPrimary") || "",
+          "--tux-colorBGSecondary": style.getPropertyValue?.("--tux-colorBGSecondary") || "",
+        },
+        svg: svg ? {
+          className: String(svg.className || ""),
+          width: svg.getAttribute?.("width") || "",
+          height: svg.getAttribute?.("height") || "",
+          fillAttr: svg.getAttribute?.("fill") || "",
+          strokeAttr: svg.getAttribute?.("stroke") || "",
+          computed: svgStyle ? {
+            color: getStyleValue(svgStyle, ["color"]),
+            fill: getStyleValue(svgStyle, ["fill"]),
+            stroke: getStyleValue(svgStyle, ["stroke"]),
+            opacity: getStyleValue(svgStyle, ["opacity"]),
+          } : null,
+        } : null,
+        path: path ? {
+          fillAttr: path.getAttribute?.("fill") || "",
+          strokeAttr: path.getAttribute?.("stroke") || "",
+          computed: pathStyle ? {
+            color: getStyleValue(pathStyle, ["color"]),
+            fill: getStyleValue(pathStyle, ["fill"]),
+            stroke: getStyleValue(pathStyle, ["stroke"]),
+            opacity: getStyleValue(pathStyle, ["opacity"]),
+          } : null,
+        } : null,
+      };
+    }
+
+    collectActionStyleDebugSamples(host = null) {
+      const rootElement = host || this.document;
+      const selectors = `${RECOMMEND_ACTION_METRIC_SELECTOR}, button[class*="tux-button__element"]`;
+      const seen = new Set();
+      return Array.from(rootElement?.querySelectorAll?.(selectors) || [])
+        .filter((element) => {
+          if (!element || seen.has(element)) return false;
+          seen.add(element);
+          const rect = element.getBoundingClientRect?.();
+          return rect && rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= (this.window.innerHeight || 0);
+        })
+        .slice(0, 12)
+        .map((element) => this.summarizeComputedStyleForDebug(element));
+    }
+
+    summarizeLocatorRectForDebug(rect = null) {
+      if (!rect) return null;
+      const plain = toPlainRect(rect);
+      if (!plain) return null;
+      return {
+        ...plain,
+        centerX: Number.isFinite(Number(rect.centerX)) ? Number(rect.centerX) : plain.left + plain.width / 2,
+        centerY: Number.isFinite(Number(rect.centerY)) ? Number(rect.centerY) : plain.top + plain.height / 2,
+        element: this.summarizeElementForDebug(rect.element),
+      };
+    }
+
+    stringifyDebugInfo(data) {
+      const seen = new WeakSet();
+      const ElementCtor = this.window?.Element;
+      return JSON.stringify(
+        data,
+        (key, value) => {
+          if (ElementCtor && value instanceof ElementCtor) {
+            return this.summarizeElementForDebug(value);
+          }
+          if (value && typeof value === "object") {
+            if (seen.has(value)) return "[Circular]";
+            seen.add(value);
+          }
+          if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
+          return value;
+        },
+        2,
+      );
+    }
+
     summarizeMediaForDebug(media = null) {
       if (!media) return null;
       return {
@@ -6855,69 +8127,34 @@
       };
     }
 
-    collectMediaDebugInfo() {
-      const config = this.configStore.get();
-      const anchor = this.getCurrentActionAnchor();
-      const requireContext = Boolean(this.panel?.classList.contains("embedded"));
-      const visibleMedia = this.extractor.getVisibleMediaElement();
-      const visibleVideo = this.extractor.getVisibleVideoElement();
-      const visibleImages = this.extractor.getImageMediaCandidates(this.document).slice(0, 10);
-      const context =
-        this.extractor.getMediaContextElement(anchor) ||
-        this.extractor.getMediaContextElement(visibleMedia) ||
-        this.extractor.getMediaContextElement(visibleVideo);
-      const contextUrls = unique([
-        ...this.extractor.getMediaUrlsFromScopes([context, anchor].filter(Boolean)),
-        ...this.extractor.getVisibleMediaContextUrls(visibleMedia || visibleVideo),
-      ]);
-      const dataCandidates = [
-        parsePageDataFromDocument(this.document),
-        ...getWindowDataCandidates(this.window),
-      ].filter(Boolean);
-      const pageDataSummary = dataCandidates.map((data, index) => {
-        const items = collectVideoItemsDeep(data).slice(0, 18);
-        return {
-          index,
-          itemCountSample: items.length,
-          itemIds: items.map((item) => ({
-            id: getVideoItemId(item),
-            hasVideo: Boolean(item?.video),
-            hasImagePost: Boolean(getImagePostPayload(item)),
-            desc: String(item?.desc || item?.description || "").slice(0, 80),
-          })),
-        };
-      });
-      const freshMedia = this.extractor.getCurrentMedia(config, anchor, { requireContext });
-      const fallbackMedia = this.extractor.getCurrentMedia(config, null, { requireContext: false });
-      const cacheItems = Array.from(this.runtimeCache?.items?.values?.() || [])
-        .slice(-20)
-        .map((entry) => ({
-          id: getVideoItemId(entry.item),
-          sourceUrl: entry.sourceUrl || "",
-          hasVideo: Boolean(entry.item?.video),
-          hasImagePost: Boolean(getImagePostPayload(entry.item)),
-          seenAt: entry.seenAt || 0,
-        }));
-
+    collectFullDebugInfo() {
       return {
-        version: "debug-v1",
+        version: "debug-full-v3",
         capturedAt: new Date().toISOString(),
         url: this.window.location?.href || "",
-        viewport: { width: this.window.innerWidth || 0, height: this.window.innerHeight || 0, scrollY: this.window.scrollY || 0 },
-        panel: { embedded: requireContext, open: Boolean(this.panel?.classList.contains("open")) },
+        pageType: this.getCurrentPageType(),
+        currentPlacementMode: this.currentPlacementMode,
+        viewport: {
+          width: this.window.innerWidth || 0,
+          height: this.window.innerHeight || 0,
+          scrollY: this.window.scrollY || 0,
+        },
+        panel: {
+          className: this.panel?.className || "",
+          open: Boolean(this.panel?.classList.contains("open")),
+          pending: Boolean(this.panel?.classList.contains("pending")),
+          embedded: Boolean(this.panel?.classList.contains("embedded")),
+          profileDialog: Boolean(this.panel?.classList.contains("profile-dialog")),
+          rect: this.summarizeElementForDebug(this.panel)?.rect || null,
+        },
         selectedMedia: this.summarizeMediaForDebug(this.currentMedia),
-        freshMedia: this.summarizeMediaForDebug(freshMedia),
-        fallbackMedia: this.summarizeMediaForDebug(fallbackMedia),
-        anchor: this.summarizeElementForDebug(anchor),
-        context: this.summarizeElementForDebug(context),
-        visibleMediaElement: this.summarizeElementForDebug(visibleMedia),
-        visibleVideoElement: this.summarizeElementForDebug(visibleVideo),
-        visibleImageCandidates: visibleImages.map((image) => this.summarizeElementForDebug(image)),
-        contextUrls,
-        pageVideoId: getVideoIdFromUrl(this.window.location?.href || ""),
-        pageDataSummary,
-        runtimeCacheSummary: cacheItems,
+        actionAnchor: this.summarizeElementForDebug(this.getCurrentActionAnchor()),
+        profileBulk: this.profilePageBulkAdapter?.getDebugSnapshot?.() || null,
       };
+    }
+
+    collectDebugInfo() {
+      return this.collectFullDebugInfo();
     }
 
     copyTextToClipboard(value = "", successMessage = "") {
@@ -6932,9 +8169,10 @@
       }
     }
 
-    copyMediaDebugInfo() {
-      const json = JSON.stringify(this.collectMediaDebugInfo(), null, 2);
+    copyDebugInfo(kind = "media") {
+      let json = "";
       try {
+        json = this.stringifyDebugInfo(this.collectDebugInfo(kind));
         const writeText = this.window.navigator.clipboard?.writeText;
         if (typeof writeText !== "function") {
           this.toast(json);
@@ -6948,10 +8186,12 @@
           return;
         }
         this.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") });
-      } catch (_err) {
-        this.toast(json);
+      } catch (err) {
+        const message = err?.message ? String(err.message) : String(err || "");
+        this.toast(`${this.t("debug_info_copied")}: ${message}`);
       }
     }
+
 
     async downloadVideo(anchorElement = null) {
       if (this.isDownloading) {
@@ -7555,6 +8795,143 @@
       main.append(tabs, body);
     }
 
+
+    getProfileBulkTaskDelayMs() {
+      return 1500 + Math.floor(Math.random() * 501);
+    }
+
+    formatTemplateMessage(key, values = {}) {
+      let text = this.t(key);
+      for (const [name, value] of Object.entries(values)) {
+        text = text.replaceAll("${" + name + "}", String(value));
+      }
+      return text;
+    }
+
+    formatBulkItemCount(count) {
+      return String(count);
+    }
+
+    formatBulkProgressCount(index, total) {
+      return `${index}/${total}`;
+    }
+
+    showBulkDownloadProgress(index, total, detail = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: `${this.t("bulk_downloading")} ${this.formatBulkProgressCount(index, total)}`,
+        detail,
+        spinner: false,
+      });
+    }
+
+    resolveProfileBulkMedia(item = {}) {
+      const config = this.configStore.get();
+      const pageUrl = item.pageUrl || item.href || "";
+      const dataCandidates = [
+        parsePageDataFromDocument(this.document),
+        ...getWindowDataCandidates(this.window),
+      ].filter(Boolean);
+      for (const data of dataCandidates) {
+        const media = extractMediaFromPageData(data, pageUrl, config);
+        if (hasUsableMedia(media)) return media;
+      }
+      const cached = this.runtimeCache?.getMedia?.(pageUrl, config);
+      if (hasUsableMedia(cached)) return cached;
+      return null;
+    }
+
+    async downloadResolvedMedia(media, item = {}, context = {}) {
+      const images = ensureArray(media?.images).filter((image) => image?.url);
+      if (!media?.video?.primaryUrl && images.length) {
+        let successCount = 0;
+        const failures = [];
+        for (const [index, image] of images.entries()) {
+          const filename = this.getImageFilename(media, image, index);
+          this.showBulkDownloadProgress(
+            context.index || 1,
+            context.total || 1,
+            `${this.t("bulk_type_album")} ${index + 1}/${images.length} · ${filename}`,
+          );
+          try {
+            await this.downloader.downloadUrl(
+              unique([image.url, ...ensureArray(image.fallbackUrls)]),
+              filename,
+            );
+            successCount += 1;
+          } catch (err) {
+            failures.push(err?.message || String(err));
+          }
+          if (index < images.length - 1) await this.wait(500);
+        }
+        if (successCount > 0) return { ok: true, filename: `${successCount}/${images.length}` };
+        return { ok: false, message: failures[0] || this.t("download_failed") };
+      }
+      if (!media?.video?.primaryUrl) {
+        return { ok: false, message: this.t("no_media") };
+      }
+      const filename = this.getFilename(media, media.video.format || "mp4");
+      await this.downloader.downloadUrl([media.video.primaryUrl, ...ensureArray(media.video.fallbackUrls)], filename);
+      return { ok: true, filename };
+    }
+
+    async downloadProfileBulkItems(items = []) {
+      const queue = ensureArray(items).filter(Boolean);
+      if (!queue.length) {
+        this.toast(this.t("bulk_no_selection"));
+        return;
+      }
+      if (this.isDownloading) {
+        this.nudgeDownloadStatus();
+        return;
+      }
+      this.isDownloading = true;
+      const failures = [];
+      let success = 0;
+      try {
+        for (let index = 0; index < queue.length; index += 1) {
+          const item = queue[index];
+          if (index > 0) await this.wait(this.getProfileBulkTaskDelayMs());
+          this.showBulkDownloadProgress(index + 1, queue.length, item.desc || item.pageUrl || item.id || "");
+          try {
+            const media = this.resolveProfileBulkMedia(item);
+            if (!hasUsableMedia(media)) {
+              failures.push({ item, message: this.t("no_media") });
+              continue;
+            }
+            const result = await this.downloadResolvedMedia(media, item, {
+              index: index + 1,
+              total: queue.length,
+            });
+            if (result?.ok) success += 1;
+            else failures.push({ item, message: result?.message || this.t("download_failed") });
+          } catch (err) {
+            failures.push({ item, message: err?.message || String(err) });
+          }
+        }
+        const detail = this.formatTemplateMessage("bulk_download_result", {
+          success,
+          failed: failures.length,
+        });
+        if (failures.length) {
+          this.setDownloadStatus({
+            type: success > 0 ? "error" : "error",
+            title: this.t("bulk_download_done"),
+            detail,
+          });
+        } else {
+          this.setDownloadStatus({
+            type: "success",
+            title: this.t("bulk_download_done"),
+            detail,
+            autoHideMs: 3500,
+          });
+        }
+      } finally {
+        this.isDownloading = false;
+      }
+    }
+
     openSettings() {
       const config = this.configStore.get();
       const modal = this.createModal(this.t("settings"), "", {
@@ -7566,7 +8943,8 @@
       const closeModal = () => modal.parentElement.remove();
 
       const header = createElement(this.document, "header", `${SCRIPT_PREFIX}-settings-header`);
-      header.appendChild(createElement(this.document, "h2", `${SCRIPT_PREFIX}-settings-title`, this.t("settings")));
+      const settingsTitle = createElement(this.document, "h2", `${SCRIPT_PREFIX}-settings-title`, this.t("settings"));
+      header.appendChild(settingsTitle);
       const headerActions = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-header-actions`);
       header.appendChild(headerActions);
       modal.insertBefore(header, main);
@@ -7671,6 +9049,34 @@
       sourceColumns.appendChild(sourceColumnList);
       downloadGrid.appendChild(sourceColumns);
 
+      const profileCheckboxSizeWrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-profile-slider-field`);
+      const profileCheckboxSizeHead = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-slider-head`);
+      const profileCheckboxSizeLabel = createElement(this.document, "label", "", this.t("profile_bulk_checkbox_size"));
+      const profileCheckboxSizeDesc = createElement(
+        this.document,
+        "span",
+        `${SCRIPT_PREFIX}-profile-slider-desc`,
+        this.t("tooltip_profile_bulk_checkbox_size"),
+      );
+      const profileCheckboxSizeValue = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-slider-value`);
+      const profileCheckboxSize = createElement(this.document, "input");
+      profileCheckboxSize.type = "range";
+      profileCheckboxSize.dataset.configKey = "profile_bulk_checkbox_size";
+      profileCheckboxSize.min = "18";
+      profileCheckboxSize.max = "40";
+      profileCheckboxSize.step = "2";
+      profileCheckboxSize.value = String(config.profile_bulk_checkbox_size ?? DEFAULT_CONFIG.profile_bulk_checkbox_size);
+      const updateProfileCheckboxSizeValue = () => {
+        profileCheckboxSizeValue.textContent = `${Math.round(clampNumber(Number(profileCheckboxSize.value), 18, 40, DEFAULT_CONFIG.profile_bulk_checkbox_size))}px`;
+      };
+      profileCheckboxSize.addEventListener("input", updateProfileCheckboxSizeValue);
+      updateProfileCheckboxSizeValue();
+      profileCheckboxSizeHead.append(profileCheckboxSizeLabel, profileCheckboxSizeDesc, profileCheckboxSizeValue);
+      profileCheckboxSizeWrapper.append(profileCheckboxSizeHead, profileCheckboxSize);
+      profileCheckboxSize.wrapper = profileCheckboxSizeWrapper;
+      const profileBulkGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      profileBulkGrid.append(profileCheckboxSize.wrapper);
+
       const maxLength = this.input(
         this.t("filename_max_length"),
         "number",
@@ -7726,33 +9132,54 @@
       );
       shortcutGrid.append(...shortcutInputs.map((input) => input.wrapper), shortcutNote);
 
-      const advancedGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      const showTestMenu = this.input(
+      const makeLeftCheckbox = (labelText, key, checked) => {
+        const wrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-check-left`);
+        const label = createElement(this.document, "label");
+        const input = createElement(this.document, "input");
+        input.type = "checkbox";
+        input.dataset.configKey = key;
+        input.checked = Boolean(checked);
+        label.append(input, createElement(this.document, "span", "", labelText));
+        wrapper.appendChild(label);
+        input.wrapper = wrapper;
+        return input;
+      };
+      const advancedGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-advanced-grid`);
+      const showTestMenu = makeLeftCheckbox(
         this.t("show_test_notification_menu"),
-        "checkbox",
         "show_test_notification_menu",
-        "1",
-        "",
-        "full",
+        config.show_test_notification_menu,
       );
-      showTestMenu.checked = Boolean(config.show_test_notification_menu);
-      const showDebugInfoMenu = this.input(
+      const showDebugInfoMenu = makeLeftCheckbox(
         this.t("show_debug_info_menu"),
-        "checkbox",
         "show_debug_info_menu",
-        "1",
-        "",
-        "full",
+        config.show_debug_info_menu,
       );
-      showDebugInfoMenu.checked = Boolean(config.show_debug_info_menu);
       advancedGrid.append(showTestMenu.wrapper, showDebugInfoMenu.wrapper);
+      const advancedFieldset = makeFieldset(this.t("advanced_section"), advancedGrid);
+      advancedFieldset.hidden = true;
+      let settingsTitleClickCount = 0;
+      let settingsTitleClickTimer = null;
+      settingsTitle.addEventListener("click", () => {
+        settingsTitleClickCount += 1;
+        if (settingsTitleClickTimer) this.window.clearTimeout?.(settingsTitleClickTimer);
+        settingsTitleClickTimer = this.window.setTimeout?.(() => {
+          settingsTitleClickCount = 0;
+          settingsTitleClickTimer = null;
+        }, 1500) || null;
+        if (settingsTitleClickCount >= 5) {
+          advancedFieldset.hidden = false;
+          settingsTitleClickCount = 0;
+        }
+      });
 
       main.append(
         makeFieldset(this.t("appearance_section"), appearanceGrid),
         makeFieldset(this.t("download_section"), downloadGrid),
+        makeFieldset(this.t("profile_bulk_section"), profileBulkGrid),
         makeFieldset(this.t("filename_section"), filenameGrid),
         makeFieldset(this.t("shortcut_section"), shortcutGrid),
-        makeFieldset(this.t("advanced_section"), advancedGrid),
+        advancedFieldset,
       );
 
       headerActions.append(
@@ -7764,6 +9191,12 @@
           formValues.show_test_notification_menu = Boolean(showTestMenu.checked);
           formValues.show_debug_info_menu = Boolean(showDebugInfoMenu.checked);
           formValues.filename_max_length = Number(formValues.filename_max_length || 80);
+          formValues.profile_bulk_checkbox_size = clampNumber(
+            Number(formValues.profile_bulk_checkbox_size),
+            18,
+            40,
+            DEFAULT_CONFIG.profile_bulk_checkbox_size,
+          );
           formValues.video_source_columns = Array.from(
             modal.querySelectorAll("[data-source-column]:checked"),
           ).map((input) => input.dataset.sourceColumn);
@@ -8444,6 +9877,15 @@
         actionBarSignature = rect
           ? `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${childCount}`
           : "no-action-bar";
+      } else if (pageType === "profile-dialog") {
+        actionBarSignature = this.profileBrowseDialogAdapter?.getPositionSignature?.() || "no-profile-dialog";
+      } else if (pageType === "profile") {
+        const userMore = this.profilePageBulkAdapter?.findUserMoreButton?.() || this.document.querySelector?.('[data-e2e="user-more"]');
+        const rect = this.getElementRect(userMore);
+        const parent = userMore?.parentElement?.parentElement || userMore?.parentElement || null;
+        actionBarSignature = rect
+          ? `profile-more:${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${parent?.children?.length || 0}`
+          : "profile-no-user-more";
       }
       return [
         this.window.location?.href || "",
@@ -8592,6 +10034,7 @@
     normalizeHeaders,
     normalizeSafeDownloadUrl,
     isAllowedDownloadHost,
+    isLikelyLiveContextText,
     shouldInspectRuntimeResponse,
     normalizeFileExtension,
     toShortId,
