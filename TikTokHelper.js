@@ -28,9 +28,7 @@
 // @connect         *.bytefcdn-oversea.com
 // @connect         muscdn.com
 // @connect         *.muscdn.com
-// @run-at          document-start
-// @downloadURL https://update.greasyfork.org/scripts/586126/TikTokHelper.user.js
-// @updateURL https://update.greasyfork.org/scripts/586126/TikTokHelper.meta.js
+// @run-at          document-end
 // ==/UserScript==
 
 (function (root) {
