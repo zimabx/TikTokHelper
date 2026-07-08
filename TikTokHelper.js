@@ -1,15 +1,31 @@
 // ==UserScript==
 // @name            TikTokHelper
 // @namespace       https://github.com/zimabx/TikTokHelper
-// @version         0.4.0
+// @version         0.5.15
 // @description     Add download tools to TikTok web pages.
 // @author          zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
 // @license         MIT
-// @require         https://cdn.jsdelivr.net/npm/htm@3/preact/standalone.umd.js
 // @grant           GM_xmlhttpRequest
-// @connect         *
+// @grant           GM_download
+// @grant           GM_registerMenuCommand
+// @connect         tiktok.com
+// @connect         *.tiktok.com
+// @connect         tiktokcdn.com
+// @connect         *.tiktokcdn.com
+// @connect         tiktokcdn-us.com
+// @connect         *.tiktokcdn-us.com
+// @connect         tiktokv.com
+// @connect         *.tiktokv.com
+// @connect         byteoversea.com
+// @connect         *.byteoversea.com
+// @connect         ibytedtos.com
+// @connect         *.ibytedtos.com
+// @connect         bytefcdn-oversea.com
+// @connect         *.bytefcdn-oversea.com
+// @connect         muscdn.com
+// @connect         *.muscdn.com
 // @run-at          document-start
 // ==/UserScript==
 
@@ -22,12 +38,25 @@
     typeof GM_xmlhttpRequest !== "undefined"
       ? GM_xmlhttpRequest
       : root?.GM_xmlhttpRequest;
+  const gmDownload =
+    typeof GM_download !== "undefined"
+      ? GM_download
+      : root?.GM_download;
+  const gmRegisterMenuCommand =
+    typeof GM_registerMenuCommand !== "undefined"
+      ? GM_registerMenuCommand
+      : root?.GM_registerMenuCommand;
   const MEDIA_READY_ATTEMPTS = 6;
   const MEDIA_READY_INTERVAL_MS = 120;
   const MEDIA_READY_COLD_START_ATTEMPTS = 24;
   const MEDIA_READY_COLD_START_INTERVAL_MS = 200;
   const MEDIA_READY_COLD_START_WINDOW_MS = 8000;
-  
+  const RUNTIME_OBSERVER_MAX_TEXT_BYTES = 2 * 1024 * 1024;
+  const RUNTIME_OBSERVER_CONTENT_TYPE_RE =
+    /(?:application\/json|text\/plain|application\/x-ndjson|application\/ld\+json)/i;
+  const RUNTIME_OBSERVER_URL_HINT_RE =
+    /(?:\/api\/|\/aweme\/|\/item\/|\/feed\/|\/detail\/|\/node\/share|\/v1\/|\/v2\/|\/tiktok\/)/i;
+
   const DEFAULT_VIDEO_SOURCE_COLUMNS = ["quality", "resolution", "codec", "fps", "bitrate", "size"];
   const VIDEO_SOURCE_COLUMN_DEFINITIONS = [
     { key: "quality", messageKey: "quality" },
@@ -57,7 +86,41 @@
     shortcut_frame: "",
     shortcut_details: "",
     shortcut_settings: "",
+    show_test_notification_menu: true,
+    show_debug_info_menu: true,
   };
+
+  const ALLOWED_DOWNLOAD_HOST_SUFFIXES = [
+    "tiktok.com",
+    "tiktokcdn.com",
+    "tiktokcdn-us.com",
+    "tiktokv.com",
+    "byteoversea.com",
+    "ibytedtos.com",
+    "bytefcdn-oversea.com",
+    "muscdn.com",
+  ];
+
+  function isAllowedDownloadHost(hostname = "") {
+    const host = String(hostname || "").toLowerCase();
+    return ALLOWED_DOWNLOAD_HOST_SUFFIXES.some(
+      (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+    );
+  }
+
+  function normalizeSafeDownloadUrl(rawUrl = "", baseUrl = "https://www.tiktok.com/") {
+    const value = String(rawUrl || "").trim();
+    if (!value) throw new Error("Empty download URL");
+
+    const parsed = new URL(value, baseUrl);
+    if (parsed.protocol !== "https:") {
+      throw new Error(`Blocked non-HTTPS download URL: ${parsed.protocol}`);
+    }
+    if (!isAllowedDownloadHost(parsed.hostname)) {
+      throw new Error(`Blocked download host: ${parsed.hostname}`);
+    }
+    return parsed.href;
+  }
 
   const FILENAME_TEMPLATE_FIELDS = [
     {
@@ -207,6 +270,13 @@
       copy_json: "Copy JSON",
       no_media: "No TikTok media found on this page.",
       asset_empty: "Asset URL is empty.",
+      download_preparing: "Preparing download...",
+      downloading: "Downloading",
+      download_completed: "Download completed",
+      preparing_video_download: "Preparing video download...",
+      downloading_album: "Downloading album",
+      downloading_image: "Downloading image",
+      download_busy: "Download in progress",
       download_started: "Download started",
       download_failed: "Download failed",
       settings_saved: "Settings saved.",
@@ -341,6 +411,13 @@
       height: "Height",
       format: "Format",
       url_id: "URL ID",
+      debug_info: "Get test info",
+      debug_info_copied: "Test info copied",
+      debug_info_copied_detail: "Paste it back when photo/album detection fails.",
+      download_already_running: "A download is already running. Please wait.",
+      advanced_section: "Advanced",
+      show_test_notification_menu: "Show notification test items",
+      show_debug_info_menu: "Show test info item",
       template: "Template",
     },
     zh: {
@@ -359,6 +436,13 @@
       copy_json: "复制 JSON",
       no_media: "当前页面未找到 TikTok 媒体。",
       asset_empty: "资源链接为空。",
+      download_preparing: "正在准备下载...",
+      downloading: "正在下载",
+      download_completed: "下载完成",
+      preparing_video_download: "正在准备视频下载...",
+      downloading_album: "正在下载图集",
+      downloading_image: "正在下载图片",
+      download_busy: "下载正在进行",
       download_started: "已开始下载",
       download_failed: "下载失败",
       settings_saved: "设置已保存。",
@@ -493,6 +577,13 @@
       height: "高度",
       format: "格式",
       url_id: "URL ID",
+      debug_info: "获取测试信息",
+      debug_info_copied: "测试信息已复制",
+      debug_info_copied_detail: "图集识别失败时，把这段信息发回来。",
+      download_already_running: "当前已有下载任务，请等待完成。",
+      advanced_section: "高级",
+      show_test_notification_menu: "显示通知测试菜单项",
+      show_debug_info_menu: "显示获取测试信息菜单项",
       template: "模板",
     },
   };
@@ -649,6 +740,16 @@
     return value;
   }
 
+  function normalizeConfigBoolean(value, fallback = false) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (value === undefined || value === null || value === "") return Boolean(fallback);
+    const text = String(value).trim().toLowerCase();
+    if (["false", "0", "no", "off"].includes(text)) return false;
+    if (["true", "1", "yes", "on"].includes(text)) return true;
+    return Boolean(fallback);
+  }
+
   function sanitizeConfig(config = {}) {
     const merged = { ...DEFAULT_CONFIG, ...(config || {}) };
     const next = {};
@@ -663,6 +764,14 @@
     next.shortcut_frame = normalizeHotkey(next.shortcut_frame);
     next.shortcut_details = normalizeHotkey(next.shortcut_details);
     next.shortcut_settings = normalizeHotkey(next.shortcut_settings);
+    next.show_test_notification_menu = normalizeConfigBoolean(
+      next.show_test_notification_menu,
+      DEFAULT_CONFIG.show_test_notification_menu,
+    );
+    next.show_debug_info_menu = normalizeConfigBoolean(
+      next.show_debug_info_menu,
+      DEFAULT_CONFIG.show_debug_info_menu,
+    );
     if (!DOWNLOAD_METHOD_OPTIONS.includes(next.download_method)) {
       next.download_method = DEFAULT_CONFIG.download_method;
     }
@@ -1576,6 +1685,19 @@
     }
   }
 
+  function getResponseContentLength(headers) {
+    const value = Number(headers?.get?.("content-length") || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  function shouldInspectRuntimeResponse(url = "", contentType = "", contentLength = 0) {
+    const textUrl = String(url || "");
+    if (contentLength > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return false;
+    if (contentType && !RUNTIME_OBSERVER_CONTENT_TYPE_RE.test(contentType)) return false;
+    if (RUNTIME_OBSERVER_URL_HINT_RE.test(textUrl)) return true;
+    return RUNTIME_OBSERVER_CONTENT_TYPE_RE.test(contentType);
+  }
+
   class RuntimeResponseObserver {
     constructor(win, cache) {
       this.window = win;
@@ -1604,16 +1726,17 @@
           try {
             const url = response?.url || String(args[0]?.url || args[0] || "");
             const contentType = response?.headers?.get?.("content-type") || "";
-            if (
-              contentType &&
-              !/(json|text|javascript|application\/x-ndjson)/i.test(contentType)
-            ) {
+            const contentLength = getResponseContentLength(response?.headers);
+            if (!shouldInspectRuntimeResponse(url, contentType, contentLength)) {
               return response;
             }
             response
               ?.clone?.()
               ?.text?.()
-              ?.then((text) => cache.ingestText(text, url))
+              ?.then((text) => {
+                if (text.length > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return;
+                cache.ingestText(text, url);
+              })
               ?.catch(() => {});
           } catch (_err) {}
           return response;
@@ -1635,13 +1758,21 @@
       Xhr.prototype.send = function patchedSend(...args) {
         this.addEventListener?.("load", function onLoad() {
           try {
+            const url = this.responseURL || this.__tkDlUrl || "";
+            const contentType = this.getResponseHeader?.("content-type") || "";
+            const contentLength = Number(this.getResponseHeader?.("content-length") || 0);
+            if (!shouldInspectRuntimeResponse(url, contentType, contentLength)) return;
+
             const responseType = this.responseType || "";
             if (responseType && responseType !== "text" && responseType !== "json") return;
             if (responseType === "json") {
-              cache.ingestJson(this.response, this.responseURL || this.__tkDlUrl || "");
-            } else {
-              cache.ingestText(this.responseText, this.responseURL || this.__tkDlUrl || "");
+              cache.ingestJson(this.response, url);
+              return;
             }
+
+            const text = this.responseText || "";
+            if (text.length > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return;
+            cache.ingestText(text, url);
           } catch (_err) {}
         });
         return originalSend.apply(this, args);
@@ -1887,7 +2018,10 @@
   }
 
   function formatDate(date, format = "YYYY-MM-DD") {
-    const safeDate = date instanceof Date && !Number.isNaN(date) ? date : new Date();
+    const safeDate =
+      date instanceof Date && !Number.isNaN(date.getTime())
+        ? date
+        : new Date();
     const values = {
       YYYY: safeDate.getFullYear(),
       MM: String(safeDate.getMonth() + 1).padStart(2, "0"),
@@ -1941,6 +2075,16 @@
       if (!cleanBase) cleanBase = "download";
     }
     return cleanBase + extension;
+  }
+
+  function normalizeFileExtension(value = "mp4", fallback = "mp4") {
+    const text = String(value || fallback || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^.*\//, "")
+      .split(/[?#]/)[0]
+      .replace(/^\.+/, "");
+    return /^[a-z0-9]{2,5}$/.test(text) ? text : fallback;
   }
 
   function renderFilenameTemplate(template = "", context = {}) {
@@ -2326,21 +2470,181 @@
       this.runtimeCache = runtimeCache;
     }
 
+    getImageElementUrl(image = null) {
+      return String(image?.currentSrc || image?.src || image?.getAttribute?.("src") || "").trim();
+    }
+
+    isLikelyPhotoModeElement(image = null) {
+      if (!image || String(image.tagName || "").toLowerCase() !== "img") return false;
+      const src = this.getImageElementUrl(image);
+      if (!src) return false;
+      const signature = `${image.className || ""} ${image.parentElement?.className || ""} ${src}`;
+      if (/ImgPhotoSlide|PhotoSlide|PhotoMode|photomode|tplv-photomode/i.test(signature)) return true;
+      const rect = image.getBoundingClientRect?.();
+      const viewportWidth = Number(this.window?.innerWidth || 0);
+      const viewportHeight = Number(this.window?.innerHeight || 0);
+      return Boolean(
+        rect &&
+          viewportWidth &&
+          viewportHeight &&
+          rect.width >= viewportWidth * 0.22 &&
+          rect.height >= viewportHeight * 0.45 &&
+          getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.28,
+      );
+    }
+
+    getVisiblePhotoModeImages(primaryImage = null) {
+      const context = this.getMediaContextElement(primaryImage) || this.document;
+      const candidates = this.getImageMediaCandidates(context).filter((image) => {
+        if (!image || String(image.tagName || "").toLowerCase() !== "img") return false;
+        const src = this.getImageElementUrl(image);
+        if (!src) return false;
+        if (this.isLikelyPhotoModeElement(image)) return true;
+        if (primaryImage && image.className === primaryImage.className) return true;
+        return false;
+      });
+      if (primaryImage && !candidates.includes(primaryImage)) candidates.unshift(primaryImage);
+      const seen = new Set();
+      const result = [];
+      for (const image of candidates) {
+        const src = this.getImageElementUrl(image);
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        result.push(image);
+      }
+      return result;
+    }
+
+    getRawImagePostItems(dataCandidates = []) {
+      const items = [];
+      for (const data of dataCandidates) {
+        for (const item of collectVideoItemsDeep(data)) {
+          if (getImagePostPayload(item)) items.push(item);
+        }
+      }
+      for (const entry of Array.from(this.runtimeCache?.items?.values?.() || [])) {
+        if (getImagePostPayload(entry?.item)) items.push(entry.item);
+      }
+      const byId = new Map();
+      for (const item of items) {
+        const id = getVideoItemId(item) || JSON.stringify(item).slice(0, 80);
+        if (!byId.has(id)) byId.set(id, item);
+      }
+      return [...byId.values()];
+    }
+
+    buildDomImagePostMedia(imageElements = [], pageUrl = "") {
+      const images = imageElements
+        .map((image, index) => {
+          const url = this.getImageElementUrl(image);
+          const rect = image.getBoundingClientRect?.();
+          return {
+            index: index + 1,
+            url,
+            fallbackUrls: [],
+            width: Number(image.naturalWidth || rect?.width || 0),
+            height: Number(image.naturalHeight || rect?.height || 0),
+            size: 0,
+          };
+        })
+        .filter((image) => image.url);
+      if (!images.length) return null;
+      const context = this.getMediaContextElement(imageElements[0]) || imageElements[0]?.parentElement || null;
+      const contextText = String(context?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
+      const authorFromUrl = getAuthorFromUrl(pageUrl);
+      const first = images[0];
+      return {
+        id: `photo_${toShortId(String(Date.now()))}`,
+        desc: contextText,
+        createTime: null,
+        pageUrl,
+        shareUrl: pageUrl,
+        groupId: `photo_${first.url.slice(-32)}`,
+        author: {
+          id: "",
+          uniqueId: authorFromUrl,
+          secUid: "",
+          nickname: authorFromUrl,
+          avatarUrl: "",
+          signature: "",
+          verification: "",
+          verified: false,
+          followerCount: undefined,
+          totalFavorited: undefined,
+          profileUrl: authorFromUrl ? `https://www.tiktok.com/@${authorFromUrl}` : "",
+        },
+        video: {
+          primaryUrl: "",
+          fallbackUrls: [],
+          primarySource: null,
+          sources: [],
+          width: 0,
+          height: 0,
+          duration: 0,
+          format: "mp4",
+          codec: "",
+          fps: 0,
+          quality: "",
+          size: 0,
+        },
+        cover: {
+          url: first.url,
+          dynamicUrl: "",
+          width: first.width,
+          height: first.height,
+        },
+        music: { id: "", title: "", authorName: "", coverUrl: "", duration: 0, url: "" },
+        isImagePost: true,
+        images,
+        hashtags: [],
+        stats: {},
+        permissions: {},
+        raw: {
+          source: "visible-photo-mode-dom-fallback",
+          imageUrls: images.map((image) => image.url),
+        },
+      };
+    }
+
+    getVisibleImagePostMedia(visibleMediaElement = null, config = {}, pageUrl = "", dataCandidates = []) {
+      if (!this.isLikelyPhotoModeElement(visibleMediaElement)) return null;
+      const imageElements = this.getVisiblePhotoModeImages(visibleMediaElement);
+      const imageUrls = unique(imageElements.map((image) => this.getImageElementUrl(image)).filter(Boolean));
+      if (!imageUrls.length) return null;
+
+      for (const item of this.getRawImagePostItems(dataCandidates)) {
+        const itemPageUrl = getItemPageUrl(item, pageUrl);
+        const media = normalizeMediaItem(item, itemPageUrl, config);
+        if (!media?.isImagePost || !ensureArray(media.images).length) continue;
+        if (urlsShareResource(imageUrls, getMediaResourceUrls(media))) return media;
+      }
+
+      // If the screen clearly shows a Photo Mode carousel but the backing API item has not
+      // been matched yet, return a temporary image-post media object instead of falling back
+      // to a nearby ordinary video. This avoids downloading/showing details for the next item.
+      return this.buildDomImagePostMedia(imageElements, pageUrl);
+    }
+
     getCurrentMedia(config = {}, anchorElement = null, options = {}) {
       const pageUrl = this.window?.location?.href || "";
       const requireContext = Boolean(options.requireContext);
       const anchorContext = this.getMediaContextElement(anchorElement);
-      const video = anchorContext
-        ? this.getContextVideoElement(anchorContext)
-        : this.getCurrentVideoElement(anchorElement);
-      const visibleVideo = video || this.getVisibleVideoElement();
-      const visibleContext = this.getMediaContextElement(visibleVideo);
+      const contextMediaElement = anchorContext ? this.getContextMediaElement(anchorContext) : null;
+      const contextVideo = anchorContext ? this.getContextVideoElement(anchorContext) : null;
+      const visibleMediaElement = contextMediaElement || this.getVisibleMediaElement();
+      const visibleVideo = contextVideo || this.getVisibleVideoElement();
+      const visibleMediaIsVideo = String(visibleMediaElement?.tagName || "").toLowerCase() === "video";
+      const matchVideoElement = visibleMediaIsVideo ? visibleMediaElement : contextVideo;
+      const visibleContext =
+        this.getMediaContextElement(visibleMediaElement) ||
+        this.getMediaContextElement(visibleVideo);
       const contextUrls = anchorContext
         ? this.getMediaUrlsFromScopes([anchorContext])
-        : this.getVisibleVideoContextUrls(visibleVideo);
+        : this.getVisibleMediaContextUrls(visibleMediaElement || visibleVideo);
       const contextText = unique([
         anchorContext?.textContent || "",
         visibleContext?.textContent || "",
+        visibleMediaElement?.parentElement?.textContent || "",
         visibleVideo?.parentElement?.textContent || "",
       ]).join(" ");
       const allowPageFallback = !anchorContext && !requireContext;
@@ -2351,6 +2655,14 @@
         parsePageDataFromDocument(this.document),
         ...getWindowDataCandidates(this.window),
       ].filter(Boolean);
+
+      const visibleImagePostMedia = this.getVisibleImagePostMedia(
+        visibleMediaElement,
+        config,
+        pageUrl,
+        dataCandidates,
+      );
+      if (hasUsableMedia(visibleImagePostMedia)) return visibleImagePostMedia;
 
       for (const targetUrl of targetUrls) {
         if (!getVideoIdFromUrl(targetUrl)) continue;
@@ -2363,7 +2675,7 @@
       }
 
       const cachedVisibleMedia = this.runtimeCache?.getMediaByVideoElement(
-        visibleVideo,
+        matchVideoElement,
         contextText,
         config,
         pageUrl,
@@ -2379,12 +2691,12 @@
       for (const data of dataCandidates) {
         const items = collectVideoItemsDeep(data);
         if (!items.length) continue;
-        const fuzzyDataMedia = findBestMediaMatch(items, visibleVideo, contextText, config, pageUrl);
+        const fuzzyDataMedia = findBestMediaMatch(items, matchVideoElement, contextText, config, pageUrl);
         if (hasUsableMedia(fuzzyDataMedia)) return fuzzyDataMedia;
       }
 
       const currentPageId = getVideoIdFromUrl(pageUrl);
-      if (visibleVideo && currentPageId && contextUrls.length === 0) {
+      if (matchVideoElement && currentPageId && contextUrls.length === 0) {
         for (const data of dataCandidates) {
           const dataMedia = extractMediaFromPageData(data, pageUrl, config);
           if (hasUsableMedia(dataMedia)) return dataMedia;
@@ -2395,11 +2707,11 @@
       }
 
       if (anchorContext) {
-        return extractMediaFromVideoElement(visibleVideo, contextUrls[0] || "") || null;
+        return extractMediaFromVideoElement(matchVideoElement, contextUrls[0] || "") || null;
       }
 
       if (requireContext) {
-        return extractMediaFromVideoElement(visibleVideo, contextUrls[0] || "") || null;
+        return extractMediaFromVideoElement(matchVideoElement, contextUrls[0] || "") || null;
       }
 
       if (allowPageFallback) {
@@ -2412,7 +2724,7 @@
         if (hasUsableMedia(cachedMedia)) return cachedMedia;
       }
 
-      return extractMediaFromVideoElement(visibleVideo, pageUrl);
+      return extractMediaFromVideoElement(matchVideoElement, pageUrl);
     }
 
     getCurrentVideoElement(anchorElement = null) {
@@ -2426,19 +2738,58 @@
       return this.selectBestVideoElement(videos);
     }
 
+    getContextMediaElement(context = null) {
+      if (!context) return null;
+      const mediaElements = [
+        ...Array.from(context.querySelectorAll?.("video") || []),
+        ...this.getImageMediaCandidates(context),
+      ];
+      return this.selectBestMediaElement(mediaElements);
+    }
+
     getVisibleVideoElement() {
       const videos = Array.from(this.document?.querySelectorAll?.("video") || []);
       return this.selectBestVideoElement(videos);
     }
 
+    getVisibleMediaElement() {
+      const mediaElements = [
+        ...Array.from(this.document?.querySelectorAll?.("video") || []),
+        ...this.getImageMediaCandidates(this.document),
+      ];
+      return this.selectBestMediaElement(mediaElements);
+    }
+
+    getImageMediaCandidates(scope = this.document) {
+      return Array.from(scope?.querySelectorAll?.("img") || []).filter((image) => {
+        if (!image || image.closest?.(`.${SCRIPT_PREFIX}-panel`)) return false;
+        const src = image.currentSrc || image.src || image.getAttribute?.("src") || "";
+        if (!src || src.startsWith("data:")) return false;
+        const rect = image.getBoundingClientRect?.();
+        if (!rect || rect.width < 160 || rect.height < 160) return false;
+        const viewportWidth = Number(this.window?.innerWidth || 0);
+        const viewportHeight = Number(this.window?.innerHeight || 0);
+        if (viewportWidth && viewportHeight && getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.08) {
+          return false;
+        }
+        const signature = `${image.alt || ""} ${image.className || ""} ${image.parentElement?.className || ""}`;
+        if (/(avatar|profile|music|icon|logo|emoji|comment)/i.test(signature)) return false;
+        return true;
+      });
+    }
+
     selectBestVideoElement(videos = []) {
+      return this.selectBestMediaElement(videos);
+    }
+
+    selectBestMediaElement(elements = []) {
       const viewportWidth = Number(this.window?.innerWidth || 0);
       const viewportHeight = Number(this.window?.innerHeight || 0);
-      const scored = videos
+      const scored = elements
         .filter(Boolean)
-        .map((video) => ({
-          video,
-          rect: video.getBoundingClientRect?.(),
+        .map((element) => ({
+          element,
+          rect: element.getBoundingClientRect?.(),
         }))
         .map((entry) => ({
           ...entry,
@@ -2446,20 +2797,20 @@
         }))
         .filter((entry) => Number.isFinite(entry.score))
         .sort((left, right) => right.score - left.score);
-      if (scored[0]) return scored[0].video;
+      if (scored[0]) return scored[0].element;
 
       return (
-        videos
+        elements
           .filter(Boolean)
-          .filter((video) => {
-            const rect = video.getBoundingClientRect?.();
+          .filter((element) => {
+            const rect = element.getBoundingClientRect?.();
             return rect && rect.width > 80 && rect.height > 80;
           })
           .sort((left, right) => {
             const leftRect = left.getBoundingClientRect();
             const rightRect = right.getBoundingClientRect();
             return rightRect.width * rightRect.height - leftRect.width * leftRect.height;
-          })[0] || videos[0] || null
+          })[0] || elements[0] || null
       );
     }
 
@@ -2520,21 +2871,26 @@
       return unique(urls);
     }
 
-    getVisibleVideoContextUrls(video = this.getVisibleVideoElement()) {
+    getVisibleMediaContextUrls(mediaElement = this.getVisibleMediaElement()) {
       const scopes = [];
       const addScope = (scope) => {
         if (scope && !scopes.includes(scope)) scopes.push(scope);
       };
-      addScope(this.getMediaContextElement(video));
-      addScope(video?.parentElement);
+      addScope(this.getMediaContextElement(mediaElement));
+      addScope(mediaElement?.parentElement);
       return this.getMediaUrlsFromScopes(scopes);
+    }
+
+    getVisibleVideoContextUrls(video = this.getVisibleVideoElement()) {
+      return this.getVisibleMediaContextUrls(video);
     }
   }
 
   class Downloader {
-    constructor(win, gmRequest = null) {
+    constructor(win, gmRequest = null, gmDownloadFn = null) {
       this.window = win;
       this.gmRequest = gmRequest;
+      this.gmDownload = gmDownloadFn;
     }
 
     normalizeFetchHeaders(headers = {}) {
@@ -2586,10 +2942,56 @@
       });
     }
 
+    downloadWithGm(url, filename, headers = {}) {
+      if (typeof this.gmDownload !== "function") {
+        return Promise.reject(new Error("GM_download unavailable"));
+      }
+
+      return new Promise((resolve, reject) => {
+        try {
+          this.gmDownload({
+            url,
+            name: filename,
+            headers: normalizeHeaders(headers),
+            saveAs: false,
+            onload: () => resolve(true),
+            onerror: (error) => reject(error?.error ? new Error(error.error) : error),
+            ontimeout: () => reject(new Error("Download timeout")),
+          });
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+
     async downloadUrl(urls, filename, headers = {}) {
-      const allUrls = unique(ensureArray(urls));
       let lastError = null;
+      const allUrls = unique(ensureArray(urls))
+        .map((url) => {
+          try {
+            return normalizeSafeDownloadUrl(
+              url,
+              this.window.location?.href || "https://www.tiktok.com/",
+            );
+          } catch (err) {
+            lastError = err;
+            return "";
+          }
+        })
+        .filter(Boolean);
+
+      if (!allUrls.length) {
+        throw lastError || new Error("No safe download URL");
+      }
+
       for (const url of allUrls) {
+        try {
+          await this.downloadWithGm(url, filename, headers);
+          return true;
+        } catch (err) {
+          lastError = err;
+        }
+
         try {
           const blob = await this.fetchBlob(url, headers);
           this.downloadBlob(blob, filename);
@@ -2621,6 +3023,30 @@
     return element;
   }
 
+  function createDownloadSpinner(doc) {
+    const ns = "http://www.w3.org/2000/svg";
+    const wrapper = createElement(doc, "span", `${SCRIPT_PREFIX}-download-status-spinner`);
+    wrapper.setAttribute("aria-hidden", "true");
+
+    const svg = doc.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("focusable", "false");
+
+    const ring = doc.createElementNS(ns, "circle");
+    ring.setAttribute("class", `${SCRIPT_PREFIX}-spinner-ring`);
+    ring.setAttribute("cx", "12");
+    ring.setAttribute("cy", "12");
+    ring.setAttribute("r", "9");
+
+    const arrow = doc.createElementNS(ns, "path");
+    arrow.setAttribute("class", `${SCRIPT_PREFIX}-spinner-arrow`);
+    arrow.setAttribute("d", "M12 5.5v8.2m0 0 3.4-3.4M12 13.7l-3.4-3.4M7.4 18.4h9.2");
+
+    svg.append(ring, arrow);
+    wrapper.appendChild(svg);
+    return wrapper;
+  }
+
   function calculatePanelPosition(options = {}) {
     const buttonSize = Number(options.buttonSize || 44);
     const gap = Number(options.gap || 10);
@@ -2646,6 +3072,10 @@
   function calculateEmbeddedPanelPosition(options = {}) {
     const buttonSize = Number(options.buttonSize || 44);
     const gap = Number(options.gap || 8);
+    const navigationGapValue = Number(options.navigationGap);
+    const navigationGap = Number.isFinite(navigationGapValue)
+      ? navigationGapValue
+      : Math.max(gap, 16);
     const margin = Number(options.margin || 8);
     const viewportWidth = Number(options.viewportWidth || 0);
     const viewportHeight = Number(options.viewportHeight || 0);
@@ -2653,13 +3083,72 @@
     if (!anchor) {
       return calculatePanelPosition({ buttonSize, gap, margin, viewportWidth, viewportHeight });
     }
-    const edges = getRectEdges(anchor);
     const maxLeft = Math.max(margin, viewportWidth - buttonSize - margin);
     const maxTop = Math.max(margin, viewportHeight - buttonSize - margin);
-    const left = Math.min(Math.max(margin, Math.round(edges.centerX - buttonSize / 2)), maxLeft);
+    if (options.navigationRect) {
+      const navigationEdges = getRectEdges(options.navigationRect);
+      const left = Math.min(
+        Math.max(margin, Math.round(navigationEdges.centerX - buttonSize / 2)),
+        maxLeft,
+      );
+      let top = Math.round(navigationEdges.top - buttonSize - navigationGap);
+      if (top < margin) {
+        const belowTop = Math.round(navigationEdges.bottom + navigationGap);
+        if (belowTop + buttonSize <= maxTop) {
+          top = belowTop;
+        }
+      }
+      return {
+        left,
+        top: Math.min(Math.max(margin, top), maxTop),
+      };
+    }
+
+    const edges = getRectEdges(anchor);
+    let left = Math.min(Math.max(margin, Math.round(edges.centerX - buttonSize / 2)), maxLeft);
+    const previousEdges = options.previousRect ? getRectEdges(options.previousRect) : null;
+    const previousGroupEdges = options.previousGroupRect
+      ? getRectEdges(options.previousGroupRect)
+      : previousEdges;
     const nextEdges = options.nextRect ? getRectEdges(options.nextRect) : null;
     let top = Math.round(edges.top - buttonSize - gap);
-    if (top < margin && nextEdges) {
+    if (previousEdges && top < previousEdges.bottom + Math.min(gap, 4)) {
+      const betweenGap = edges.top - previousGroupEdges.bottom;
+      let placed = false;
+      if (betweenGap >= buttonSize) {
+        top = Math.round(previousGroupEdges.bottom + (betweenGap - buttonSize) / 2);
+        placed = true;
+      } else if (options.previousGroupRect) {
+        const abovePreviousTop = Math.round(previousGroupEdges.top - buttonSize - gap);
+        if (abovePreviousTop >= margin) {
+          left = Math.min(
+            Math.max(margin, Math.round(previousGroupEdges.centerX - buttonSize / 2)),
+            maxLeft,
+          );
+          top = abovePreviousTop;
+          placed = true;
+        }
+      }
+      if (!placed && nextEdges) {
+        const betweenGap = nextEdges.top - edges.bottom;
+        if (betweenGap >= buttonSize) {
+          top = Math.round(edges.bottom + (betweenGap - buttonSize) / 2);
+          placed = true;
+        }
+      }
+      if (!placed) {
+        const sideTop = Math.round(edges.centerY - buttonSize / 2);
+        const leftSlot = Math.round(edges.left - buttonSize - gap);
+        const rightSlot = Math.round(edges.right + gap);
+        if (leftSlot >= margin) {
+          left = leftSlot;
+          top = sideTop;
+        } else if (rightSlot <= maxLeft) {
+          left = rightSlot;
+          top = sideTop;
+        }
+      }
+    } else if (top < margin && nextEdges) {
       const betweenGap = nextEdges.top - edges.bottom;
       if (betweenGap >= buttonSize + gap * 2) {
         top = Math.round(edges.bottom + (betweenGap - buttonSize) / 2);
@@ -2674,11 +3163,6 @@
     };
   }
 
-  function clampNumber(value, min, max) {
-    if (max < min) return min;
-    return Math.min(Math.max(value, min), max);
-  }
-
   function calculatePanelMenuPlacement(options = {}) {
     const gap = Number(options.gap || 10);
     const margin = Number(options.margin || 8);
@@ -2689,28 +3173,118 @@
     const panelRect = options.panelRect;
     const anchorRect = options.launcherRect || options.buttonRect || panelRect;
     if (!anchorRect || !viewportWidth || !viewportHeight) {
-      return { placement: "top", left: margin, top: margin };
+      return { placement: "right", left: margin, top: margin };
     }
 
     const edges = getRectEdges(anchorRect);
-    const buttonWidth = Number(options.buttonWidth || edges.width || options.buttonSize || 44);
     const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
     const maxTop = Math.max(margin, viewportHeight - menuHeight - margin);
+    const centeredTop = clampNumber(
+      Math.round(edges.top + edges.height / 2 - menuHeight / 2),
+      margin,
+      maxTop,
+    );
+
+    if (edges.right + gap + menuWidth <= viewportWidth - margin) {
+      return {
+        placement: "right",
+        left: Math.round(edges.right + gap),
+        top: centeredTop,
+      };
+    }
+
+    const centeredLeft = clampNumber(
+      Math.round(edges.left + edges.width / 2 - menuWidth / 2),
+      margin,
+      maxLeft,
+    );
+
+    if (edges.top - gap - menuHeight >= margin) {
+      return {
+        placement: "top",
+        left: centeredLeft,
+        top: Math.round(edges.top - menuHeight - gap),
+      };
+    }
+
+    if (edges.left - gap - menuWidth >= margin) {
+      return {
+        placement: "left",
+        left: Math.round(edges.left - menuWidth - gap),
+        top: centeredTop,
+      };
+    }
+
+    const bottomTop = Math.round(edges.bottom + gap);
+    if (bottomTop + menuHeight <= viewportHeight - margin) {
+      return {
+        placement: "bottom",
+        left: centeredLeft,
+        top: bottomTop,
+      };
+    }
 
     return {
-      placement: "top",
-      left: clampNumber(
-        Math.round(edges.left + buttonWidth / 2 - menuWidth / 2),
-        margin,
-        maxLeft,
-      ),
-      top: clampNumber(Math.round(edges.top - menuHeight - gap), margin, maxTop),
+      placement: "bottom",
+      left: centeredLeft,
+      top: clampNumber(bottomTop, margin, maxTop),
     };
   }
+
+  const RECOMMEND_ACTION_BAR_SELECTOR = [
+    'section[class*="SectionActionBarContainer"]',
+    '[class*="SectionActionBarContainer"]',
+    'section[class*="ActionBarContainer"]',
+    '[class*="ActionBarContainer"]',
+  ].join(",");
+
+  const RECOMMEND_ACTION_METRIC_SELECTOR =
+    '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"]';
 
   function isActionBarClassName(className = "") {
     const value = String(className || "");
     return /ActionBarContainer/i.test(value) && !/FeedNavigation|NavigationContainer/i.test(value);
+  }
+
+  function hasVisibleRecommendFeedActionBar(doc = root?.document) {
+    const win = doc?.defaultView || root;
+    const viewportWidth = Number(win?.innerWidth || 0);
+    const viewportHeight = Number(win?.innerHeight || 0);
+    if (!doc?.querySelectorAll || !viewportWidth || !viewportHeight) return false;
+    return Array.from(
+      doc.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR),
+    ).some((section) => {
+      if (!section || !isActionBarClassName(section.className)) return false;
+      const rect = section.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.45) return false;
+      return Boolean(
+        section.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR),
+      );
+    });
+  }
+
+  function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
+    const rawPath = String(locationLike?.pathname || "/");
+    const pathname = rawPath.replace(/\/+$/, "") || "/";
+    if (/^\/(?:explore|messages|upload|following|friends)(?:\/|$)/i.test(pathname)) return "explore";
+    if (/^\/live(?:\/|$)/i.test(pathname)) return "live";
+    if (pathname === "/" || /^\/(?:foryou|feed|recommend)(?:\/|$)/i.test(pathname)) {
+      return "recommend";
+    }
+    // TikTok may switch the URL to /@user/video/id when the comment sidebar is open while
+    // the page is still visually the For You / feed layout. In that state keep using the
+    // recommend placement adapter as long as a visible feed action bar is present.
+    if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
+    if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
+      return "detail";
+    }
+    if (/^\/@[^/]+(?:\/|$)/.test(pathname)) return "profile";
+    const hasRecommendFeed = Boolean(
+      doc?.querySelector?.('article[data-e2e="recommend-list-item-container"], [data-e2e="recommend-list-item-container"]'),
+    );
+    if (hasRecommendFeed) return "recommend";
+    return "unknown";
   }
 
   function getRectEdges(rect = {}) {
@@ -2727,6 +3301,33 @@
       height,
       centerX: Number(rect.centerX ?? left + width / 2),
       centerY: Number(rect.centerY ?? top + height / 2),
+    };
+  }
+
+  function getBoundingRect(rects = []) {
+    const usableRects = rects.filter(Boolean);
+    if (!usableRects.length) return null;
+    const box = usableRects.reduce(
+      (current, rect) => ({
+        left: Math.min(current.left, rect.left),
+        top: Math.min(current.top, rect.top),
+        right: Math.max(current.right, rect.right),
+        bottom: Math.max(current.bottom, rect.bottom),
+      }),
+      { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+    );
+    const width = box.right - box.left;
+    const height = box.bottom - box.top;
+    return {
+      element: usableRects[0].element || null,
+      left: box.left,
+      top: box.top,
+      right: box.right,
+      bottom: box.bottom,
+      width,
+      height,
+      centerX: box.left + width / 2,
+      centerY: box.top + height / 2,
     };
   }
 
@@ -2797,6 +3398,173 @@
     return element.querySelector?.("button,[role='button'],a") || element;
   }
 
+  function getNativeActionVisualControl(element) {
+    if (!element) return null;
+    const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
+    if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
+    let best = null;
+    let bestScore = -Infinity;
+    for (const candidate of candidates) {
+      const rect = candidate?.getBoundingClientRect?.();
+      if (!rect || rect.width < 34 || rect.height < 34) continue;
+      const size = Math.max(rect.width, rect.height);
+      const squarePenalty = Math.abs(rect.width - rect.height);
+      const sizePenalty = Math.abs(size - 48);
+      const tagBonus = candidate.tagName === "BUTTON" ? 18 : 0;
+      const classBonus = /tux-button|button/i.test(String(candidate.className || "")) ? 8 : 0;
+      const oversizedPenalty = size > 64 ? 80 : 0;
+      const score = 120 - squarePenalty * 4 - sizePenalty + tagBonus + classBonus - oversizedPenalty;
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best || getNativeActionControl(element);
+  }
+
+
+  function getOfficialActionButtonCandidate(element) {
+    if (!element) return null;
+    const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
+    if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
+    return (
+      candidates.find((candidate) => /(?:^|\s)tux-button__element|TUX|tux-button/i.test(String(candidate.className || ""))) ||
+      getNativeActionVisualControl(element)
+    );
+  }
+
+  function isOfficialActionMetricElement(element) {
+    const value = String(element?.getAttribute?.("data-e2e") || "");
+    return /^(like|comment|favorite|share)-icon$/i.test(value);
+  }
+
+  function getOfficialActionMetricElement(child) {
+    if (!child) return null;
+    if (isOfficialActionMetricElement(child)) return child;
+    return (
+      child.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR) ||
+      null
+    );
+  }
+
+  function getBestSquareMetricElement(root) {
+    if (!root) return null;
+    const candidates = [];
+    if (root.matches?.("button,[role='button'],a,span,div")) candidates.push(root);
+    candidates.push(...Array.from(root.querySelectorAll?.("span,button,[role='button'],a,svg,div") || []));
+    let best = null;
+    let bestScore = -Infinity;
+    for (const candidate of candidates) {
+      const rect = candidate?.getBoundingClientRect?.();
+      if (!rect || rect.width < 20 || rect.height < 20 || rect.width > 80 || rect.height > 80) continue;
+      const size = Math.max(rect.width, rect.height);
+      const squarePenalty = Math.abs(rect.width - rect.height) * 8;
+      const className = String(candidate.className || "");
+      const spanBonus = candidate.tagName === "SPAN" ? 24 : 0;
+      const buttonBonus = candidate.tagName === "BUTTON" ? 16 : 0;
+      const iconBonus = /icon|tux|button/i.test(className) ? 20 : 0;
+      const svgPenalty = candidate.tagName === "svg" ? 18 : 0;
+      const actionItemPenalty = candidate.getAttribute?.("data-e2e") ? 24 : 0;
+      const score = 140 + spanBonus + buttonBonus + iconBonus - svgPenalty - actionItemPenalty - squarePenalty - Math.abs(size - 40) * 0.6;
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  function clampNumber(value, min, max, fallback = min) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, number));
+  }
+
+
+  function mergeClassNames(...values) {
+    const result = [];
+    const seen = new Set();
+    for (const value of values) {
+      for (const token of String(value || "").split(/\s+/).filter(Boolean)) {
+        if (seen.has(token)) continue;
+        seen.add(token);
+        result.push(token);
+      }
+    }
+    return result.join(" ");
+  }
+
+  const ACTION_BUTTON_VISUAL_SELECTOR =
+    '[data-testid*="icon-button-container" i],[class*="tux-button--capsule" i],[class*="tux-button-rFq4rS" i]';
+
+  function appendUniqueElement(elements, element) {
+    if (element && !elements.includes(element)) elements.push(element);
+  }
+
+  function getActionButtonVisualElement(element) {
+    if (!element) return null;
+    if (element.matches?.(ACTION_BUTTON_VISUAL_SELECTOR)) return element;
+    return (
+      element.querySelector?.(ACTION_BUTTON_VISUAL_SELECTOR) ||
+      element.closest?.(ACTION_BUTTON_VISUAL_SELECTOR) ||
+      null
+    );
+  }
+
+  function collectElementActionStyleCandidates(elements = []) {
+    const candidates = [];
+    for (const element of elements) {
+      if (!element) continue;
+      appendUniqueElement(candidates, element);
+      appendUniqueElement(candidates, getActionButtonVisualElement(element));
+      const control = getNativeActionControl(element);
+      appendUniqueElement(candidates, control);
+      appendUniqueElement(candidates, getActionButtonVisualElement(control));
+      appendUniqueElement(candidates, element.parentElement);
+      appendUniqueElement(candidates, control?.parentElement);
+    }
+    return candidates;
+  }
+
+  function getStyleValue(style, names = []) {
+    for (const name of names) {
+      const direct = style?.[name];
+      if (direct) return direct;
+      const cssValue = style?.getPropertyValue?.(name);
+      if (cssValue) return cssValue;
+    }
+    return "";
+  }
+
+  function getElementActionStyleSample(win, elements = []) {
+    const candidates = collectElementActionStyleCandidates(elements);
+
+    let fallbackSample = null;
+    for (const element of candidates) {
+      const style = getComputedStyleSafe(win, element);
+      if (!style) continue;
+      const parentStyle = getComputedStyleSafe(win, element.parentElement);
+      const rawBackground = getStyleValue(style, ["backgroundColor", "background-color"]);
+      const parentBackground = getStyleValue(parentStyle, ["backgroundColor", "background-color"]);
+      const backgroundColor = isTransparentColor(rawBackground) ? parentBackground : rawBackground;
+      const color =
+        getStyleValue(style, ["color"]) ||
+        getStyleValue(parentStyle, ["color"]);
+      const borderRadius =
+        getStyleValue(style, ["borderRadius", "border-radius"]) ||
+        getStyleValue(parentStyle, ["borderRadius", "border-radius"]);
+      const backdropFilter =
+        getStyleValue(style, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]) ||
+        getStyleValue(parentStyle, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]);
+      if (backgroundColor || color || borderRadius || backdropFilter) {
+        const sample = { backgroundColor, color, borderRadius, backdropFilter };
+        if (backgroundColor && !isTransparentColor(backgroundColor)) return sample;
+        if (!fallbackSample) fallbackSample = sample;
+      }
+    }
+    return fallbackSample;
+  }
+
   function parseRgbColor(value = "") {
     const match = String(value || "").match(/rgba?\(([^)]+)\)/i);
     if (!match) return null;
@@ -2821,9 +3589,16 @@
   }
 
   function getEmbeddedLauncherPalette(backgroundColor = "", color = "") {
-    const background = isTransparentColor(backgroundColor)
-      ? "rgb(36, 36, 36)"
-      : String(backgroundColor);
+    if (isTransparentColor(backgroundColor)) {
+      const foreground = color || "rgb(255, 255, 255)";
+      const lightForeground = isLightColor(foreground);
+      return {
+        background: lightForeground ? "rgba(255, 255, 255, 0.18)" : "rgba(22, 24, 35, 0.08)",
+        color: foreground,
+        hoverBackground: lightForeground ? "rgba(255, 255, 255, 0.24)" : "rgba(22, 24, 35, 0.12)",
+      };
+    }
+    const background = String(backgroundColor);
     const light = isLightColor(background);
     return {
       background,
@@ -2840,10 +3615,12 @@
         .${SCRIPT_PREFIX}-panel {
           position: fixed;
           right: 18px;
-          bottom: 80px;
+          top: 25vh;
+          bottom: auto;
+          left: auto;
           z-index: 2147483200;
-          width: 44px;
-          height: 44px;
+          width: 48px;
+          height: 48px;
           font-family: Arial, sans-serif;
           color-scheme: dark;
         }
@@ -2893,99 +3670,219 @@
           color: #fff;
         }
         .${SCRIPT_PREFIX}-panel.embedded {
-          position: fixed;
+          position: relative;
+          left: auto !important;
           right: auto !important;
+          top: auto !important;
           bottom: auto !important;
           z-index: 2147483200;
-          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
-          height: var(--${SCRIPT_PREFIX}-action-size, 48px);
+          flex: 0 0 var(--${SCRIPT_PREFIX}-action-item-height, 78px);
+          width: var(--${SCRIPT_PREFIX}-action-item-width, var(--${SCRIPT_PREFIX}-action-size, 48px));
+          height: var(--${SCRIPT_PREFIX}-action-item-height, 78px);
+          margin: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           pointer-events: auto;
           contain: layout style;
           overflow: visible;
           isolation: isolate;
         }
-        .${SCRIPT_PREFIX}-launcher {
-          display: grid;
-          place-items: center;
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 1px solid rgba(255, 255, 255, 0.14);
+        .${SCRIPT_PREFIX}-launcher-shell {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          width: 48px;
+          height: 48px;
           padding: 0;
-          color: #fff;
-          background: rgba(37, 37, 37, 0.96);
+          color: rgba(255, 255, 255, 0.9);
           box-sizing: border-box;
-          cursor: pointer;
-          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
-          transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
         }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
-          width: 100%;
-          height: 100%;
+        .${SCRIPT_PREFIX}-launcher-icon-wrapper {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
+          color: inherit;
+          box-sizing: border-box;
+          line-height: 0;
+        }
+        .${SCRIPT_PREFIX}-launcher-container {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
+          overflow: hidden;
+          border-radius: var(--tux-v2-radius-control-capsule, 9999px);
           border: 0;
-          color: var(--${SCRIPT_PREFIX}-action-color, #fff);
-          background: var(--${SCRIPT_PREFIX}-action-bg, #242424);
+          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
+          background: var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13));
+          box-shadow: none;
+          box-sizing: border-box;
+          transition: background 0.12s ease, opacity 0.12s ease;
+        }
+        .${SCRIPT_PREFIX}-launcher {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
+          border-radius: 0;
+          border: 0;
+          padding: 0;
+          color: inherit;
+          background: transparent;
+          box-sizing: border-box;
+          line-height: 0;
+        }
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell {
+          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
+          height: var(--${SCRIPT_PREFIX}-action-item-height, 78px);
+          align-items: center;
+          justify-content: center;
+        }
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-icon-wrapper,
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container,
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
+          flex: 0 0 auto;
+          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
+          height: var(--${SCRIPT_PREFIX}-action-size, 48px);
+        }
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container {
+          border-radius: var(--${SCRIPT_PREFIX}-action-radius, var(--tux-v2-radius-control-capsule, 9999px));
+          border: 0;
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
+          background: var(--${SCRIPT_PREFIX}-action-bg, var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13)));
+          -webkit-backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
+          backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
           box-shadow: none;
         }
-        .${SCRIPT_PREFIX}-panel.embedded.light .${SCRIPT_PREFIX}-launcher {
-          color: var(--${SCRIPT_PREFIX}-action-color, #111);
-          background: var(--${SCRIPT_PREFIX}-action-bg, #f1f1f1);
-          box-shadow: none;
+        .${SCRIPT_PREFIX}-panel.embedded.light .${SCRIPT_PREFIX}-launcher-container {
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
+          background: var(--${SCRIPT_PREFIX}-action-bg, var(--tux-v2-color-ui-shape-neutral-4, rgba(255, 255, 255, 0.13)));
         }
-        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-launcher {
-          color: #111;
-          background: rgba(255, 255, 255, 0.96);
-          border-color: rgba(0, 0, 0, 0.12);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+        .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
+        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher-container {
+          background: var(--tux-v2-color-ui-shape-neutral-3, rgba(255, 255, 255, 0.18));
+          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
+          transform: none;
         }
-        .${SCRIPT_PREFIX}-launcher:hover,
-        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher {
-          background: #fe2c55;
-          color: #fff;
-          transform: translateY(-1px);
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher:hover,
-        .${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher {
-          color: var(--${SCRIPT_PREFIX}-action-color, #fff);
-          background: var(--${SCRIPT_PREFIX}-action-hover-bg, #2f2f2f);
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
+        .${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher-container {
+          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-v2-color-ui-shape-text-1-on-primary, #fff));
+          background: var(--${SCRIPT_PREFIX}-action-hover-bg, var(--tux-v2-color-ui-shape-neutral-3, rgba(255, 255, 255, 0.18)));
           transform: none;
         }
         .${SCRIPT_PREFIX}-launcher svg {
-          width: 20px;
-          height: 20px;
+          display: block;
+          width: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
+          height: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
           pointer-events: none;
+          transform: translateY(var(--${SCRIPT_PREFIX}-action-icon-offset-y, -1px));
+          transform-origin: center;
+          overflow: visible;
+        }
+        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          cursor: pointer;
+          touch-action: manipulation;
+          padding: var(--${SCRIPT_PREFIX}-action-button-padding, 0);
+          border-radius: var(--${SCRIPT_PREFIX}-action-button-radius, 0);
+          background: var(--${SCRIPT_PREFIX}-action-button-bg, transparent);
+          font: inherit;
+          line-height: 0 !important;
+          text-align: center;
         }
         .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher svg {
-          width: 22px;
-          height: 22px;
+          flex: 0 0 auto;
+          width: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
+          height: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
+          margin: 0 auto;
+          transform: none;
         }
         .${SCRIPT_PREFIX}-menu {
           position: absolute;
+          z-index: 2147483601;
           left: 50%;
           bottom: 52px;
-          transform: translateX(-50%);
+          transform: none;
+          transform-origin: var(--${SCRIPT_PREFIX}-menu-origin, 50% 50%);
           display: none;
+          visibility: hidden;
           width: 160px;
           overflow: hidden;
-          border-radius: 8px;
-          background: rgba(18, 18, 18, 0.96);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow: 0 12px 36px rgba(0, 0, 0, 0.38);
+          border-radius: 14px;
+          background:
+            radial-gradient(circle at var(--${SCRIPT_PREFIX}-menu-origin-x, 50%) var(--${SCRIPT_PREFIX}-menu-origin-y, 50%), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.00) 54px),
+            rgba(18, 18, 18, 0.96);
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          box-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
+          opacity: 1;
+          color: #fff;
+          color-scheme: dark;
+          font-family: Arial, sans-serif;
+          box-sizing: border-box;
+          will-change: transform, opacity, filter;
         }
-        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-menu { display: block; }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-menu {
-          position: absolute;
-          left: 50%;
-          right: auto;
-          top: auto;
-          bottom: calc(100% + 10px);
-          transform: translateX(-50%);
+        .${SCRIPT_PREFIX}-menu.open,
+        .${SCRIPT_PREFIX}-menu.closing {
+          display: block;
         }
-        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-menu {
+        .${SCRIPT_PREFIX}-menu.open[data-placement],
+        .${SCRIPT_PREFIX}-menu.closing[data-placement] {
+          visibility: visible;
+        }
+        .${SCRIPT_PREFIX}-menu.open:not(.closing)[data-placement] {
+          animation: ${SCRIPT_PREFIX}-menu-slide-fade-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .${SCRIPT_PREFIX}-menu.closing[data-placement] {
+          pointer-events: none;
+          animation: ${SCRIPT_PREFIX}-menu-slide-fade-out 105ms cubic-bezier(0.4, 0, 1, 1) both;
+        }
+        .${SCRIPT_PREFIX}-menu[data-placement="right"] {
+          --${SCRIPT_PREFIX}-menu-origin: 0% 50%;
+          --${SCRIPT_PREFIX}-menu-origin-x: 0%;
+          --${SCRIPT_PREFIX}-menu-origin-y: 50%;
+          --${SCRIPT_PREFIX}-menu-start-x: -10px;
+          --${SCRIPT_PREFIX}-menu-start-y: 0px;
+        }
+        .${SCRIPT_PREFIX}-menu[data-placement="left"] {
+          --${SCRIPT_PREFIX}-menu-origin: 100% 50%;
+          --${SCRIPT_PREFIX}-menu-origin-x: 100%;
+          --${SCRIPT_PREFIX}-menu-origin-y: 50%;
+          --${SCRIPT_PREFIX}-menu-start-x: 10px;
+          --${SCRIPT_PREFIX}-menu-start-y: 0px;
+        }
+        .${SCRIPT_PREFIX}-menu[data-placement="top"] {
+          --${SCRIPT_PREFIX}-menu-origin: 50% 100%;
+          --${SCRIPT_PREFIX}-menu-origin-x: 50%;
+          --${SCRIPT_PREFIX}-menu-origin-y: 100%;
+          --${SCRIPT_PREFIX}-menu-start-x: 0px;
+          --${SCRIPT_PREFIX}-menu-start-y: 10px;
+        }
+        .${SCRIPT_PREFIX}-menu[data-placement="bottom"],
+        .${SCRIPT_PREFIX}-menu[data-placement="bottom-start"],
+        .${SCRIPT_PREFIX}-menu[data-placement="bottom-end"] {
+          --${SCRIPT_PREFIX}-menu-origin: 50% 0%;
+          --${SCRIPT_PREFIX}-menu-origin-x: 50%;
+          --${SCRIPT_PREFIX}-menu-origin-y: 0%;
+          --${SCRIPT_PREFIX}-menu-start-x: 0px;
+          --${SCRIPT_PREFIX}-menu-start-y: -10px;
+        }
+        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-menu,
+        .${SCRIPT_PREFIX}-menu.light {
+          color: #111;
+          color-scheme: light;
           background: rgba(255, 255, 255, 0.98);
           border-color: rgba(0, 0, 0, 0.08);
           box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
         }
+
         .${SCRIPT_PREFIX}-button {
           border: 0;
           border-radius: 6px;
@@ -3002,7 +3899,8 @@
           border-radius: 0;
           background: transparent;
         }
-        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-button { color: #111; }
+        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-button,
+        .${SCRIPT_PREFIX}-menu.light .${SCRIPT_PREFIX}-button { color: #111; }
         .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button:hover,
         .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button:focus-visible,
         .${SCRIPT_PREFIX}-button:hover {
@@ -3015,22 +3913,323 @@
           color: #fff;
           background: #fe2c55;
         }
-        .${SCRIPT_PREFIX}-toast {
+        .${SCRIPT_PREFIX}-notification-stack {
           position: fixed;
+          top: 76px;
           right: 18px;
-          bottom: 24px;
-          z-index: 2147483700;
-          max-width: min(360px, calc(100vw - 36px));
-          padding: 9px 12px;
-          border-radius: 6px;
-          color: #fff;
-          background: rgba(0, 0, 0, 0.82);
-          font: 13px Arial, sans-serif;
+          z-index: 2147483702;
+          width: min(372px, calc(100vw - 28px));
+          height: var(--${SCRIPT_PREFIX}-notification-stack-collapsed-height, 90px);
+          pointer-events: auto;
+          perspective: 900px;
+          transition: height 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
         }
-        .${SCRIPT_PREFIX}-toast.light {
+        .${SCRIPT_PREFIX}-notification-stack:hover {
+          height: var(--${SCRIPT_PREFIX}-notification-stack-expanded-height, var(--${SCRIPT_PREFIX}-notification-stack-collapsed-height, 92px));
+        }
+        .${SCRIPT_PREFIX}-notification-card {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 100%;
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr) 34px;
+          gap: 10px;
+          align-items: center;
+          padding: 14px 10px 14px 14px;
+          border-radius: 14px;
+          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
+          background: rgba(18, 18, 18, 0.94);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          box-shadow: 0 14px 42px rgba(0, 0, 0, 0.36);
+          -webkit-backdrop-filter: blur(18px);
+          backdrop-filter: blur(18px);
+          font: 13px/1.42 Arial, sans-serif;
+          pointer-events: auto;
+          overflow: hidden;
+          transform-origin: 50% 0;
+          transform: translate3d(0, var(--${SCRIPT_PREFIX}-stack-y, 0px), 0) scale(var(--${SCRIPT_PREFIX}-stack-scale, 1));
+          opacity: var(--${SCRIPT_PREFIX}-stack-opacity, 1);
+          transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 120ms ease, background 150ms ease, border-color 150ms ease;
+          animation: ${SCRIPT_PREFIX}-notification-card-in 170ms cubic-bezier(0.18, 0.89, 0.32, 1.12);
+          isolation: isolate;
+        }
+        .${SCRIPT_PREFIX}-notification-stack:hover .${SCRIPT_PREFIX}-notification-card {
+          transform: translate3d(0, var(--${SCRIPT_PREFIX}-stack-expanded-y, var(--${SCRIPT_PREFIX}-stack-y, 0px)), 0) scale(1);
+          opacity: 1;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light {
           color: #111;
-          background: rgba(255, 255, 255, 0.94);
-          box-shadow: 0 6px 26px rgba(0, 0, 0, 0.14);
+          background: rgba(255, 255, 255, 0.96);
+          border-color: rgba(0, 0, 0, 0.08);
+          box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+        }
+        .${SCRIPT_PREFIX}-notification-card::before {
+          content: none;
+        }
+        .${SCRIPT_PREFIX}-notification-card > * {
+          position: relative;
+          z-index: 3;
+        }
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image {
+          background: rgba(18, 18, 18, 0.94);
+          border-color: rgba(255, 255, 255, 0.18);
+        }
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image {
+          background: rgba(255, 255, 255, 0.96);
+          border-color: rgba(0, 0, 0, 0.10);
+        }
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy::after,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album::after,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          padding: 1px;
+          border-radius: inherit;
+          background: conic-gradient(
+            from var(--${SCRIPT_PREFIX}-border-angle, 0deg),
+            rgba(255, 255, 255, 0.10) 0deg,
+            rgba(255, 255, 255, 0.10) 205deg,
+            rgba(255, 255, 255, 0.86) 252deg,
+            rgba(255, 255, 255, 0.24) 296deg,
+            rgba(255, 255, 255, 0.10) 360deg
+          );
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 2;
+          animation: ${SCRIPT_PREFIX}-notification-border-orbit 900ms linear infinite;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy::after,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album::after,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image::after {
+          background: conic-gradient(
+            from var(--${SCRIPT_PREFIX}-border-angle, 0deg),
+            rgba(22, 24, 35, 0.08) 0deg,
+            rgba(22, 24, 35, 0.08) 205deg,
+            rgba(22, 24, 35, 0.42) 252deg,
+            rgba(22, 24, 35, 0.14) 296deg,
+            rgba(22, 24, 35, 0.08) 360deg
+          );
+        }
+        .${SCRIPT_PREFIX}-notification-icon,
+        .${SCRIPT_PREFIX}-download-status-icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: rgba(255, 255, 255, 0.10);
+          color: #fff;
+          font-weight: 700;
+          font-size: 17px;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-icon,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-icon {
+          background: rgba(22, 24, 35, 0.06);
+          color: #111;
+        }
+        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-icon,
+        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-download-status-icon {
+          background: rgba(254, 44, 85, 0.18);
+          color: #fe2c55;
+        }
+        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-icon,
+        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-download-status-icon {
+          background: rgba(37, 244, 238, 0.14);
+          color: #25f4ee;
+        }
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy .${SCRIPT_PREFIX}-download-status-icon,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album .${SCRIPT_PREFIX}-download-status-icon,
+        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image .${SCRIPT_PREFIX}-download-status-icon {
+          background: rgba(255, 255, 255, 0.10);
+          color: #25f4ee;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy .${SCRIPT_PREFIX}-download-status-icon,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album .${SCRIPT_PREFIX}-download-status-icon,
+        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image .${SCRIPT_PREFIX}-download-status-icon {
+          background: rgba(22, 24, 35, 0.06);
+          color: #fe2c55;
+        }
+        .${SCRIPT_PREFIX}-download-status-spinner {
+          width: 36px;
+          height: 36px;
+          display: inline-grid;
+          place-items: center;
+          color: currentColor;
+        }
+        .${SCRIPT_PREFIX}-download-status-spinner svg {
+          width: 36px;
+          height: 36px;
+          display: block;
+          animation: ${SCRIPT_PREFIX}-download-spin 720ms linear infinite;
+        }
+        .${SCRIPT_PREFIX}-download-status-spinner .${SCRIPT_PREFIX}-spinner-ring {
+          fill: none;
+          stroke: currentColor;
+          stroke-width: 1.9;
+          opacity: 0.28;
+        }
+        .${SCRIPT_PREFIX}-download-status-spinner .${SCRIPT_PREFIX}-spinner-arrow {
+          fill: none;
+          stroke: currentColor;
+          stroke-width: 2.1;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+        .${SCRIPT_PREFIX}-notification-main,
+        .${SCRIPT_PREFIX}-download-status-main { min-width: 0; }
+        .${SCRIPT_PREFIX}-notification-head,
+        .${SCRIPT_PREFIX}-download-status-head {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          min-width: 0;
+        }
+        .${SCRIPT_PREFIX}-notification-title,
+        .${SCRIPT_PREFIX}-download-status-title {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-weight: 700;
+          font-size: 14px;
+        }
+        .${SCRIPT_PREFIX}-notification-meta,
+        .${SCRIPT_PREFIX}-download-status-meta {
+          flex: none;
+          color: rgba(255, 255, 255, 0.74);
+          font-weight: 700;
+          font-size: 13px;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-meta,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-meta {
+          color: rgba(22, 24, 35, 0.56);
+        }
+        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-meta,
+        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-download-status-meta { color: #fe2c55; }
+        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-meta,
+        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-download-status-meta { color: #25f4ee; }
+        .${SCRIPT_PREFIX}-notification-detail,
+        .${SCRIPT_PREFIX}-download-status-detail {
+          margin-top: 4px;
+          color: rgba(255, 255, 255, 0.70);
+          font-size: 12px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-detail,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-detail {
+          color: rgba(22, 24, 35, 0.62);
+        }
+        .${SCRIPT_PREFIX}-notification-close,
+        .${SCRIPT_PREFIX}-download-status-close {
+          width: 34px;
+          height: 34px;
+          border: 0;
+          border-radius: 999px;
+          color: rgba(255, 255, 255, 0.72);
+          background: transparent;
+          cursor: pointer;
+          font-size: 22px;
+          line-height: 1;
+          padding: 0;
+          display: grid;
+          place-items: center;
+          align-self: center;
+        }
+        .${SCRIPT_PREFIX}-notification-close:hover,
+        .${SCRIPT_PREFIX}-notification-close:focus-visible,
+        .${SCRIPT_PREFIX}-download-status-close:hover,
+        .${SCRIPT_PREFIX}-download-status-close:focus-visible {
+          color: #fff;
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close {
+          color: rgba(22, 24, 35, 0.58);
+        }
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close:hover,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close:focus-visible,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close:hover,
+        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close:focus-visible {
+          color: #111;
+          background: rgba(22, 24, 35, 0.06);
+        }
+        .${SCRIPT_PREFIX}-notification-card.fading {
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(-6px) scale(0.97);
+          transition: opacity 70ms ease, transform 70ms ease;
+        }
+        .${SCRIPT_PREFIX}-notification-card.attention {
+          animation: ${SCRIPT_PREFIX}-notification-card-shake 360ms ease-in-out,
+            ${SCRIPT_PREFIX}-notification-card-flash 1000ms ease-out;
+        }
+        .${SCRIPT_PREFIX}-notification-card.light.attention {
+          animation: ${SCRIPT_PREFIX}-notification-card-shake 360ms ease-in-out,
+            ${SCRIPT_PREFIX}-notification-card-flash-light 1000ms ease-out;
+        }
+        @property --${SCRIPT_PREFIX}-border-angle {
+          syntax: '<angle>';
+          inherits: false;
+          initial-value: 0deg;
+        }
+        @keyframes ${SCRIPT_PREFIX}-download-spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes ${SCRIPT_PREFIX}-notification-border-orbit {
+          to { --${SCRIPT_PREFIX}-border-angle: 360deg; }
+        }
+        @keyframes ${SCRIPT_PREFIX}-menu-slide-fade-in {
+          0% {
+            opacity: 0;
+            filter: blur(5px);
+            transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0) scale(0.985);
+          }
+          100% {
+            opacity: 1;
+            filter: blur(0);
+            transform: translate3d(0, 0, 0) scale(1);
+          }
+        }
+        @keyframes ${SCRIPT_PREFIX}-menu-slide-fade-out {
+          0% {
+            opacity: 1;
+            filter: blur(0);
+            transform: translate3d(0, 0, 0) scale(1);
+          }
+          100% {
+            opacity: 0;
+            filter: blur(4px);
+            transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0) scale(0.985);
+          }
+        }
+        @keyframes ${SCRIPT_PREFIX}-notification-card-in {
+          from { opacity: 0; transform: translateX(22px) translateY(-10px) scale(0.96) rotateX(-6deg); }
+          to { opacity: 1; transform: translateX(0) translateY(0) scale(1) rotateX(0); }
+        }
+        @keyframes ${SCRIPT_PREFIX}-notification-card-shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-8px); }
+          40% { transform: translateX(7px); }
+          60% { transform: translateX(-5px); }
+          80% { transform: translateX(3px); }
+        }
+        @keyframes ${SCRIPT_PREFIX}-notification-card-flash {
+          0% { background: rgba(72, 72, 72, 0.98); border-color: rgba(255, 255, 255, 0.28); }
+          100% { background: rgba(18, 18, 18, 0.94); border-color: rgba(255, 255, 255, 0.12); }
+        }
+        @keyframes ${SCRIPT_PREFIX}-notification-card-flash-light {
+          0% { background: rgba(22, 24, 35, 0.10); border-color: rgba(22, 24, 35, 0.18); }
+          100% { background: rgba(255, 255, 255, 0.96); border-color: rgba(0, 0, 0, 0.08); }
         }
         .${SCRIPT_PREFIX}-modal-backdrop {
           position: fixed;
@@ -3143,6 +4342,13 @@
           background: #242424;
           border-color: #3a3a3a;
         }
+        .${SCRIPT_PREFIX}-modal input[type="checkbox"] {
+          width: auto;
+          min-width: 18px;
+          height: 18px;
+          padding: 0;
+          accent-color: #fe2c55;
+        }
         .${SCRIPT_PREFIX}-modal textarea {
           min-height: 78px;
           resize: vertical;
@@ -3188,7 +4394,7 @@
         }
         .${SCRIPT_PREFIX}-detail-section h3 {
           margin: 0;
-          font-size: 15px;
+          font-size: 14px;
         }
         .${SCRIPT_PREFIX}-detail-grid,
         .${SCRIPT_PREFIX}-stats-grid {
@@ -3352,7 +4558,7 @@
         .${SCRIPT_PREFIX}-detail-fieldset legend {
           padding: 0 12px;
           font-weight: 800;
-          font-size: 15px;
+          font-size: 14px;
         }
         .${SCRIPT_PREFIX}-detail-cover-row,
         .${SCRIPT_PREFIX}-detail-author-head {
@@ -4002,9 +5208,6 @@
     return context;
   }
 
-  function hasImageOverlayContext(element, win, viewportArea) {
-    return getImageOverlayContext(element, win, viewportArea).matched;
-  }
 
   function hasSmallOverlayImageSize(rect) {
     return (
@@ -4057,17 +5260,19 @@
         continue;
       }
     }
-    try {
-      for (const image of Array.from(doc.querySelectorAll("img"))) addCandidate(image);
-    } catch (_err) {
-      // Ignore selector failures in unusual DOM shims.
-    }
-    try {
-      for (const background of Array.from(doc.querySelectorAll('[style*="background-image"]'))) {
-        addCandidate(background);
+    if (options.allowDocumentFallbackScan) {
+      try {
+        for (const image of Array.from(doc.querySelectorAll("img"))) addCandidate(image);
+      } catch (_err) {
+        // Ignore selector failures in unusual DOM shims.
       }
-    } catch (_err) {
-      // Ignore selector failures in unusual DOM shims.
+      try {
+        for (const background of Array.from(doc.querySelectorAll('[style*="background-image"]'))) {
+          addCandidate(background);
+        }
+      } catch (_err) {
+        // Ignore selector failures in unusual DOM shims.
+      }
     }
 
     let best = null;
@@ -4180,7 +5385,7 @@
       const hosts = Array.from(
         this.app.document.querySelectorAll(hostSelectors.join(",")),
       )
-        .filter((element) => !this.app.panel?.contains(element))
+        .filter((element) => !this.app.isOwnUiElement?.(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!this.isVisibleAnchorRect(rect)) return false;
@@ -4200,7 +5405,7 @@
       const controls = Array.from(
         this.app.document.querySelectorAll('button,[role="button"]'),
       )
-        .filter((element) => !this.app.panel?.contains(element))
+        .filter((element) => !this.app.isOwnUiElement?.(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!rect) return false;
@@ -4215,7 +5420,7 @@
       const hostScores = new Map();
       for (const rect of controls) {
         const host = rect.element.closest?.('[class*="FeedNavigationContainer"], [class*="NavigationContainer"], div');
-        if (!host || this.app.panel?.contains(host)) continue;
+        if (!host || this.app.isOwnUiElement?.(host)) continue;
         const hostRect = this.getElementRect(host);
         if (!this.isVisibleAnchorRect(hostRect)) continue;
         const current = hostScores.get(host) || { hostRect, count: 0 };
@@ -4230,11 +5435,114 @@
       return null;
     }
 
+    findStackedNavigationGroupContext(anchorRect) {
+      if (!anchorRect) return null;
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
+      const maxDistance = Math.max(140, Math.min(320, viewportHeight * 0.42));
+      const controls = Array.from(
+        this.app.document.querySelectorAll?.('button,[role="button"],a') || [],
+      )
+        .filter((element) => !this.app.isOwnUiElement?.(element))
+        .filter((element) => element !== anchorRect.element)
+        .map((element) => this.getElementRect(element))
+        .filter((rect) => {
+          if (!rect) return false;
+          if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
+          if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
+          if (rect.bottom > anchorRect.top + 2) return false;
+          if (anchorRect.top - rect.bottom > maxDistance) return false;
+          if (Math.abs(rect.centerX - anchorRect.centerX) > 112) return false;
+          return true;
+        })
+        .sort((left, right) => left.top - right.top);
+      const columns = [];
+      for (const rect of controls) {
+        let column = columns.find((entry) => Math.abs(entry.centerX - rect.centerX) <= 42);
+        if (!column) {
+          column = { centerX: rect.centerX, rects: [] };
+          columns.push(column);
+        }
+        column.rects.push(rect);
+        column.centerX =
+          column.rects.reduce((total, item) => total + item.centerX, 0) / column.rects.length;
+      }
+
+      const candidates = [];
+      for (const column of columns) {
+        const sorted = column.rects.slice().sort((left, right) => left.top - right.top);
+        let run = [];
+        const flushRun = () => {
+          if (run.length < 2) {
+            run = [];
+            return;
+          }
+          const groupRect = getBoundingRect(run);
+          if (!groupRect || groupRect.width > 128 || groupRect.height < 64 || groupRect.height > 180) {
+            run = [];
+            return;
+          }
+          const buttonRect = run.slice().sort((left, right) => right.bottom - left.bottom)[0];
+          const verticalDistance = Math.max(0, anchorRect.top - groupRect.bottom);
+          const centerDistance = Math.abs(groupRect.centerX - anchorRect.centerX);
+          candidates.push({
+            rect: groupRect,
+            buttonRect,
+            score: verticalDistance * 2 + centerDistance,
+          });
+          run = [];
+        };
+
+        for (const rect of sorted) {
+          if (!run.length) {
+            run = [rect];
+            continue;
+          }
+          const previous = run[run.length - 1];
+          const gap = Math.max(0, rect.top - previous.bottom);
+          const maxGap = Math.max(12, Math.min(36, previous.height * 0.75));
+          if (gap <= maxGap) {
+            run.push(rect);
+          } else {
+            flushRun();
+            run = [rect];
+          }
+        }
+        flushRun();
+      }
+
+      return candidates.sort((left, right) => left.score - right.score)[0] || null;
+    }
+
+    findNavigationContext(anchorRect = null) {
+      const navigationRect = this.findNavigationHostRect();
+      if (navigationRect) {
+        const viewportWidth = this.app.window.innerWidth || 0;
+        const viewportHeight = this.app.window.innerHeight || 0;
+        const buttonRect = Array.from(
+          navigationRect.element.querySelectorAll?.("button,[role='button']") || [],
+        )
+          .map((element) => this.getElementRect(element))
+          .filter((rect) => {
+            if (!rect) return false;
+            if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
+            return getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.55;
+          })
+          .sort((left, right) => right.bottom - left.bottom)[0] || null;
+        return { rect: navigationRect, buttonRect };
+      }
+
+      if (anchorRect) return this.findStackedNavigationGroupContext(anchorRect);
+
+      const fallbackAnchorRect = this.findNavigationAnchorRect();
+      return fallbackAnchorRect ? { rect: fallbackAnchorRect, buttonRect: fallbackAnchorRect } : null;
+    }
+
     findNavigationAnchorRect() {
       const controls = Array.from(
         this.app.document.querySelectorAll('button,[role="button"]'),
       )
-        .filter((element) => !this.app.panel?.contains(element))
+        .filter((element) => !this.app.isOwnUiElement?.(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!rect) return false;
@@ -4266,39 +5574,34 @@
     findActionBarHost() {
       const viewportWidth = this.app.window.innerWidth || 0;
       const viewportHeight = this.app.window.innerHeight || 0;
-      const referenceVideoRect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
+      const referenceMediaRect = this.getElementRect(this.app.extractor?.getVisibleMediaElement?.());
       const scoreHostRect = (rect) => {
         const className = String(rect.element.className || "");
         let score =
           scoreActionBarRect(rect, viewportWidth, viewportHeight) +
           (className.includes("SectionActionBarContainer") ? 12 : 0);
-        if (referenceVideoRect) {
+        if (referenceMediaRect) {
           const overlap =
             Math.max(
               0,
-              Math.min(rect.bottom, referenceVideoRect.bottom) -
-                Math.max(rect.top, referenceVideoRect.top),
-            ) / Math.max(1, Math.min(rect.height, referenceVideoRect.height));
+              Math.min(rect.bottom, referenceMediaRect.bottom) -
+                Math.max(rect.top, referenceMediaRect.top),
+            ) / Math.max(1, Math.min(rect.height, referenceMediaRect.height));
           const verticalDistance =
-            Math.abs(rect.centerY - referenceVideoRect.centerY) / Math.max(1, viewportHeight);
-          if (rect.left >= referenceVideoRect.right - 20) score += 12;
+            Math.abs(rect.centerY - referenceMediaRect.centerY) / Math.max(1, viewportHeight);
+          if (rect.left >= referenceMediaRect.right - 20) score += 12;
           score += overlap * 60 - verticalDistance * 80;
         }
         return score;
       };
-      const selectors = [
-        'section[class*="SectionActionBarContainer"]',
-        '[class*="SectionActionBarContainer"]',
-        'section[class*="ActionBarContainer"]',
-        '[class*="ActionBarContainer"]',
-      ];
-      const hosts = Array.from(this.app.document.querySelectorAll(selectors.join(",")))
-        .filter((element) => !this.app.panel?.contains(element))
+      const hosts = Array.from(this.app.document.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR))
+        .filter((element) => !this.app.isOwnUiElement?.(element))
         .filter((element) => isActionBarClassName(element.className))
         .map((element) => this.getElementRect(element))
         .filter((rect) => {
           if (!this.isVisibleActionBarRect(rect)) return false;
-          const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || []);
+          const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || [])
+            .filter((button) => !this.app.panel?.contains(button));
           return buttons.length >= 2;
         })
         .sort((left, right) => {
@@ -4354,13 +5657,51 @@
       return true;
     }
 
+    findPreviousActionControlContext(anchorRect) {
+      if (!anchorRect) return null;
+      const viewportWidth = this.app.window.innerWidth || 0;
+      const viewportHeight = this.app.window.innerHeight || 0;
+      const maxDistance = Math.max(120, Math.min(220, viewportWidth * 0.28));
+      const rects = Array.from(this.app.document.querySelectorAll?.('button,[role="button"],a') || [])
+        .filter((element) => !this.app.isOwnUiElement?.(element))
+        .filter((element) => element !== anchorRect.element)
+        .map((element) => this.getElementRect(element))
+        .filter((rect) => {
+          if (!rect) return false;
+          if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
+          if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
+          if (Math.abs(rect.centerX - anchorRect.centerX) > 48) return false;
+          if (rect.bottom > anchorRect.top + 2) return false;
+          if (anchorRect.top - rect.bottom > maxDistance) return false;
+          return true;
+        })
+        .sort((left, right) => left.top - right.top);
+      const previousRect = rects.slice().sort((left, right) => right.bottom - left.bottom)[0] || null;
+      if (!previousRect) return null;
+
+      const groupGap = Math.max(12, Math.min(36, previousRect.height * 0.75));
+      const groupRects = [previousRect];
+      let groupTop = previousRect.top;
+      const aboveNearestFirst = rects
+        .filter((rect) => rect !== previousRect && rect.bottom <= groupTop + 2)
+        .sort((left, right) => right.bottom - left.bottom);
+      for (const rect of aboveNearestFirst) {
+        const gap = Math.max(0, groupTop - rect.bottom);
+        if (gap > groupGap) break;
+        groupRects.push(rect);
+        groupTop = Math.min(groupTop, rect.top);
+      }
+
+      return { rect: previousRect, groupRect: getBoundingRect(groupRects) };
+    }
+
     findActionControlColumnContext() {
-      const videoRect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
+      const videoRect = this.getElementRect(this.app.extractor?.getVisibleMediaElement?.());
       if (!videoRect) return null;
       const controls = Array.from(
         this.app.document.querySelectorAll?.('button,[role="button"],a') || [],
       )
-        .filter((element) => !this.app.panel?.contains(element))
+        .filter((element) => !this.app.isOwnUiElement?.(element))
         .map((element) => this.getElementRect(element))
         .filter((rect) => this.isActionControlCandidate(rect, videoRect));
 
@@ -4411,6 +5752,12 @@
       const avatarIndex = best.rects.findIndex((rect) => isAvatarActionChild(rect.element));
       const anchorIndex = avatarIndex >= 0 ? avatarIndex : 0;
       const anchorRect = best.rects[anchorIndex];
+      const navigationContext = this.findNavigationContext(anchorRect);
+      const previousRects = best.rects
+        .slice(0, anchorIndex)
+        .filter((rect) => Math.abs(rect.centerX - anchorRect.centerX) <= 48);
+      const previousRect = previousRects.slice().reverse()[0] || null;
+      const previousGroupRect = getBoundingRect(previousRects);
       const nextRect =
         best.rects.slice(anchorIndex + 1).find((rect) => Math.abs(rect.centerX - anchorRect.centerX) <= 48) ||
         null;
@@ -4419,13 +5766,17 @@
         hostRect: best.hostRect,
         anchor: anchorRect.element,
         anchorRect,
+        previousRect,
+        previousGroupRect,
+        navigationRect: navigationContext?.rect || null,
+        navigationButtonRect: navigationContext?.buttonRect || null,
         nextRect,
         fallback: true,
       };
     }
 
     getNativeActionChildren(host) {
-      return Array.from(host?.children || []).filter((child) => child !== this.app.panel);
+      return Array.from(host?.children || []).filter((child) => !this.app.isOwnUiElement?.(child));
     }
 
     getActionBarInsertionReference(host) {
@@ -4448,6 +5799,10 @@
       if (anchorIndex < 0) anchorIndex = 0;
       const anchor = nativeChildren[anchorIndex] || host;
       const anchorRect = this.getElementRect(anchor) || hostRect;
+      const navigationContext = this.findNavigationContext(anchorRect);
+      const previousContext = this.findPreviousActionControlContext(anchorRect);
+      const previousRect = previousContext?.rect || null;
+      const previousGroupRect = previousContext?.groupRect || null;
       let nextRect = null;
       for (const child of nativeChildren.slice(anchorIndex + 1)) {
         if (!child || child === this.app.panel || isAvatarActionChild(child)) continue;
@@ -4457,7 +5812,17 @@
         nextRect = rect;
         break;
       }
-      return { host, hostRect, anchor, anchorRect, nextRect };
+      return {
+        host,
+        hostRect,
+        anchor,
+        anchorRect,
+        previousRect,
+        previousGroupRect,
+        navigationRect: navigationContext?.rect || null,
+        navigationButtonRect: navigationContext?.buttonRect || null,
+        nextRect,
+      };
     }
 
     findActionBarAnchorRect() {
@@ -4472,6 +5837,29 @@
     }
   }
 
+
+
+  class RecommendPlacementAdapter {
+    constructor(app) {
+      this.app = app;
+    }
+
+    mount() {
+      const host = this.app.findActionBarHost();
+      if (host && this.app.mountPanelInActionBar(host)) return true;
+      this.app.hidePanelForInactivePlacement();
+      return false;
+    }
+
+    refresh() {
+      return this.mount();
+    }
+
+    unmount() {
+      this.app.hidePanelForInactivePlacement();
+    }
+  }
+
   class TikTokDlApp {
     constructor(win, runtimeCache = null) {
       this.window = win;
@@ -4480,7 +5868,8 @@
       this.runtimeCache = runtimeCache;
       this.extractor = new TikTokMediaExtractor(this.document, win, runtimeCache);
       this.actionBarLocator = new ActionBarLocator(this);
-      this.downloader = new Downloader(win, gmXmlHttpRequest);
+      this.recommendPlacementAdapter = new RecommendPlacementAdapter(this);
+      this.downloader = new Downloader(win, gmXmlHttpRequest, gmDownload);
       this.panel = null;
       this.menu = null;
       this.launcher = null;
@@ -4491,18 +5880,31 @@
       this.positionObserver = null;
       this.positionFrame = null;
       this.positionPoll = null;
+      this.routeChangeCleanup = null;
+      this.routeChangeFrame = null;
       this.lastPanelPositionSignature = "";
       this.outsideMenuBound = false;
+      this.menuCloseTimer = null;
       this.openImageOverlay = null;
+      this.isDownloading = false;
+      this.isCapturingFrame = false;
+      this.lastToastAnchorRect = null;
+      this.lastToastAnchorAt = 0;
+      this.downloadStatusEl = null;
+      this.downloadStatusHideTimer = null;
+      this.notificationStackEl = null;
+      this.notificationId = 0;
       this.imageDownloadButton = null;
       this.imageOverlayWatcherBound = false;
       this.lastImageOpenGestureAt = 0;
       this.appStartTime = Date.now();
+      this.tampermonkeyMenuRegistered = false;
     }
 
     start() {
       this.injectStyles();
       this.renderPanel();
+      this.registerTampermonkeyMenu();
       this.refreshMedia();
       this.bindHotkey();
       this.watchRouteChanges();
@@ -4517,9 +5919,32 @@
       this.document.head.appendChild(style);
     }
 
+    registerTampermonkeyMenu() {
+      if (this.tampermonkeyMenuRegistered || typeof gmRegisterMenuCommand !== "function") return;
+      this.tampermonkeyMenuRegistered = true;
+      try {
+        gmRegisterMenuCommand(this.t("settings"), () => this.openSettings());
+      } catch (_error) {
+        // Some userscript engines expose the API but reject registration before page init.
+        this.tampermonkeyMenuRegistered = false;
+      }
+    }
+
     renderPanel() {
+      if (this.menu) this.menu.remove();
       if (this.panel) this.panel.remove();
       const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
+      const launcherShell = createElement(this.document, "div", `${SCRIPT_PREFIX}-launcher-shell`);
+      const launcherIconWrapper = createElement(
+        this.document,
+        "span",
+        `${SCRIPT_PREFIX}-launcher-icon-wrapper`,
+      );
+      const launcherContainer = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-launcher-container`,
+      );
       const launcher = createElement(
         this.document,
         "button",
@@ -4527,28 +5952,34 @@
       );
       launcher.type = "button";
       launcher.innerHTML = `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path fill="currentColor" d="M11 4a1 1 0 0 1 2 0v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4Z"></path>
-          <path fill="currentColor" d="M5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"></path>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path d="M12 3v12" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
+          <path d="M7 11l5 5 5-5" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M5 20h14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
         </svg>
       `;
       launcher.addEventListener("click", (event) => {
         event.stopPropagation();
         this.toggleMenu();
       });
+      launcherContainer.appendChild(launcher);
+      launcherIconWrapper.appendChild(launcherContainer);
+      launcherShell.appendChild(launcherIconWrapper);
 
       const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
       menu.addEventListener("pointerdown", (event) => event.stopPropagation());
       menu.addEventListener("click", (event) => event.stopPropagation());
+      menu.addEventListener("mouseleave", () => this.toggleMenu(false));
       const downloadButton = createElement(
         this.document,
         "button",
         `${SCRIPT_PREFIX}-button`,
-        this.t("download_video"),
+        this.t("download"),
       );
       downloadButton.addEventListener("click", () => {
+        this.captureToastAnchor(downloadButton);
         this.toggleMenu(false);
-        this.downloadVideo();
+        this.downloadVideo(downloadButton);
       });
 
       const frameButton = createElement(
@@ -4584,8 +6015,78 @@
         this.openSettings();
       });
 
-      menu.append(downloadButton, frameButton, detailsButton, settingsButton);
-      panel.append(menu, launcher);
+      const debugInfoButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        this.t("debug_info"),
+      );
+      debugInfoButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.copyMediaDebugInfo();
+      });
+
+      const testNoticeButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        "测试通知",
+      );
+      testNoticeButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.toast("测试普通通知", {
+          detail: "普通通知会自动关闭，点击 × 可提前关闭。",
+          iconText: "i",
+        });
+      });
+
+      const testBusyButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        "测试下载中",
+      );
+      testBusyButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.showVideoPreparing("demo-video.mp4");
+      });
+
+      const testAlbumButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        "测试图集进度",
+      );
+      testAlbumButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.showAlbumProgress(2, 5, "demo-image-02.jpg");
+      });
+
+      const testErrorButton = createElement(
+        this.document,
+        "button",
+        `${SCRIPT_PREFIX}-button secondary`,
+        "测试失败",
+      );
+      testErrorButton.addEventListener("click", () => {
+        this.toggleMenu(false);
+        this.showDownloadError("这是一个测试错误，点击 × 关闭。");
+      });
+
+      const menuItems = [
+        downloadButton,
+        frameButton,
+        detailsButton,
+        settingsButton,
+        debugInfoButton,
+        testNoticeButton,
+        testBusyButton,
+        testAlbumButton,
+        testErrorButton,
+      ];
+      menu.append(...menuItems);
+      panel.append(launcherShell);
+      this.document.body.appendChild(menu);
       this.panel = panel;
       this.menu = menu;
       this.launcher = launcher;
@@ -4593,6 +6094,11 @@
       this.frameButtonEl = frameButton;
       this.detailsButtonEl = detailsButton;
       this.settingsButtonEl = settingsButton;
+      this.debugInfoButtonEl = debugInfoButton;
+      this.testNoticeButtonEl = testNoticeButton;
+      this.testBusyButtonEl = testBusyButton;
+      this.testAlbumButtonEl = testAlbumButton;
+      this.testErrorButtonEl = testErrorButton;
       this.applyPanelState();
       this.mountPanel();
       this.bindMenuOutsideClose();
@@ -4663,6 +6169,7 @@
       const handleClick = (event) => {
         const target = event.target;
         if (!target) return;
+        if (this.getCurrentPageType() !== "recommend") return;
         if (this.panel?.contains(target) || this.imageDownloadButton?.contains(target)) return;
         const isImage =
           target.tagName === "IMG" ||
@@ -4678,17 +6185,29 @@
 
     // Re-checks whether an image preview is currently open and updates both the dedicated
     // download-image button and the main panel's visibility accordingly. Unlike the regular
-    // position refresh (gated behind getPanelPositionSignature(), which only reacts to the
-    // video/action-bar's own geometry changing), this only cares about "is there an overlay
-    // right now", so it needs its own independent triggers -- see bindImageOverlayWatcher()
-    // and the MutationObserver hookup in watchPanelPosition().
+    // placement refresh (gated behind getPanelPositionSignature()), this only cares
+    // about "is there an overlay right now", so it needs its own independent triggers -- see
+    // bindImageOverlayWatcher() and the MutationObserver hookup in watchPanelPosition().
     refreshImageOverlayState() {
+      if (this.getCurrentPageType() !== "recommend") {
+        const wasOpen = Boolean(this.openImageOverlay);
+        this.openImageOverlay = null;
+        this.renderImageDownloadButton();
+        if (wasOpen) {
+          this.mountPanel();
+          this.applyPanelState();
+        }
+        return;
+      }
+
       const recentImageOpenGesture =
         this.lastImageOpenGestureAt > 0 &&
         Date.now() - this.lastImageOpenGestureAt <= IMAGE_OVERLAY_RECENT_GESTURE_MS;
+      const previousOverlayElement = this.openImageOverlay?.element || null;
       const overlay = findOpenImageOverlay(this.document, this.window, this.panel, {
         recentImageOpenGesture,
-        previousOverlayElement: this.openImageOverlay?.element || null,
+        previousOverlayElement,
+        allowDocumentFallbackScan: recentImageOpenGesture || Boolean(previousOverlayElement),
       });
       const wasOpen = Boolean(this.openImageOverlay);
       const isOpen = Boolean(overlay);
@@ -4715,19 +6234,35 @@
     applyPanelState() {
       if (!this.panel) return;
       const isOpen = this.panel.classList.contains("open");
-      const isEmbedded = this.panel.classList.contains("embedded");
       const isPending = this.panel.classList.contains("pending");
+      const isClosing = this.panel.classList.contains("closing");
+      const isEmbedded = this.panel.classList.contains("embedded");
+      const config = this.configStore.get();
       const nextClassName = [
         `${SCRIPT_PREFIX}-panel`,
         this.getTheme(),
-        isOpen ? "open" : "",
         isEmbedded ? "embedded" : "",
+        isOpen ? "open" : "",
         isPending ? "pending" : "",
+        isClosing ? "closing" : "",
       ]
         .filter(Boolean)
         .join(" ");
       if (this.panel.className !== nextClassName) {
         this.panel.className = nextClassName;
+      }
+      if (this.menu) {
+        const nextMenuClassName = [
+          `${SCRIPT_PREFIX}-menu`,
+          this.getTheme(),
+          isOpen ? "open" : "",
+          isClosing ? "closing" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        if (this.menu.className !== nextMenuClassName) {
+          this.menu.className = nextMenuClassName;
+        }
       }
       if (this.launcher) {
         this.launcher.setAttribute("aria-label", this.t("menu"));
@@ -4737,23 +6272,58 @@
       // into a querySelectorAll list -- keeps this correct regardless of how many buttons
       // are in the menu or what order they're in.
       if (this.downloadButtonEl) {
-        this.downloadButtonEl.textContent = this.currentMedia?.isImagePost
-          ? this.t("download_album")
-          : this.t("download_video");
+        this.downloadButtonEl.textContent = this.t("download");
       }
       if (this.frameButtonEl) this.frameButtonEl.textContent = this.t("frame_capture");
       if (this.detailsButtonEl) this.detailsButtonEl.textContent = this.t("details");
       if (this.settingsButtonEl) this.settingsButtonEl.textContent = this.t("settings");
+      if (this.debugInfoButtonEl) {
+        this.debugInfoButtonEl.textContent = this.t("debug_info");
+        this.debugInfoButtonEl.hidden = !Boolean(config.show_debug_info_menu);
+      }
+      const showTestItems = Boolean(config.show_test_notification_menu);
+      for (const button of [
+        this.testNoticeButtonEl,
+        this.testBusyButtonEl,
+        this.testAlbumButtonEl,
+        this.testErrorButtonEl,
+      ]) {
+        if (button) button.hidden = !showTestItems;
+      }
       if (this.imageDownloadButton) this.renderImageDownloadButton();
     }
 
     toggleMenu(force = null) {
       if (!this.panel) return;
-      const shouldOpen =
-        force === null ? !this.panel.classList.contains("open") : Boolean(force);
-      this.panel.classList.toggle("open", shouldOpen);
-      this.mountPanel();
+      const isOpen = this.panel.classList.contains("open");
+      const isClosing = this.panel.classList.contains("closing");
+      const shouldOpen = force === null ? !isOpen || isClosing : Boolean(force);
+
+      if (this.menuCloseTimer) {
+        this.window.clearTimeout?.(this.menuCloseTimer);
+        this.menuCloseTimer = null;
+      }
+
+      if (shouldOpen) {
+        this.panel.classList.remove("closing");
+        this.panel.classList.add("open");
+        this.refreshMedia();
+        this.applyPanelState();
+        this.updatePanelMenuPosition();
+        return;
+      }
+
+      if (!isOpen && !isClosing) return;
+      this.panel.classList.add("open", "closing");
+      this.applyPanelState();
       this.updatePanelMenuPosition();
+      this.menuCloseTimer = this.window.setTimeout?.(() => {
+        this.menuCloseTimer = null;
+        this.panel?.classList.remove("open", "closing");
+        this.applyPanelState();
+        this.mountPanel();
+        this.updatePanelMenuPosition();
+      }, 170) || null;
     }
 
     clearPanelMenuPosition() {
@@ -4761,35 +6331,60 @@
       for (const property of ["left", "right", "top", "bottom"]) {
         this.menu.style[property] = "";
       }
+      this.menu.style.position = "";
+      this.menu.style.transform = "";
       delete this.menu.dataset.placement;
     }
 
     updatePanelMenuPosition() {
       if (!this.panel || !this.menu) return;
-      const shouldPosition =
-        this.panel.classList.contains("embedded") && this.panel.classList.contains("open");
       this.clearPanelMenuPosition();
-      if (!shouldPosition) {
-        return;
-      }
-      this.menu.dataset.placement = "top";
+      if (!this.panel.classList.contains("open")) return;
+      const panelRect = this.panel.getBoundingClientRect?.();
+      const launcherRect = this.launcher?.getBoundingClientRect?.();
+      const menuRect = this.menu.getBoundingClientRect?.();
+      const placement = calculatePanelMenuPlacement({
+        panelRect,
+        launcherRect,
+        menuWidth: menuRect?.width || 160,
+        menuHeight: menuRect?.height || 320,
+        viewportWidth: this.window.innerWidth || 0,
+        viewportHeight: this.window.innerHeight || 0,
+      });
+      this.menu.style.position = "fixed";
+      this.menu.style.left = `${Math.round(placement.left)}px`;
+      this.menu.style.top = `${Math.round(placement.top)}px`;
+      this.menu.style.right = "auto";
+      this.menu.style.bottom = "auto";
+      this.menu.style.transform = "none";
+      this.menu.dataset.placement = placement.placement;
     }
+
 
     bindMenuOutsideClose() {
       if (this.outsideMenuBound) return;
       this.outsideMenuBound = true;
-      this.document.addEventListener(
-        "pointerdown",
-        (event) => {
-          if (!this.panel?.classList.contains("open")) return;
-          if (this.panel.contains(event.target)) return;
-          this.toggleMenu(false);
-        },
-        true,
-      );
       this.document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") this.toggleMenu(false);
       });
+      this.document.addEventListener("pointerdown", (event) => {
+        if (!this.panel?.classList.contains("open")) return;
+        const target = event.target;
+        if (this.menu?.contains?.(target) || this.launcher?.contains?.(target)) return;
+        this.toggleMenu(false);
+      });
+    }
+
+    isOwnUiElement(element) {
+      return Boolean(
+        element &&
+          (this.panel?.contains?.(element) ||
+            this.menu?.contains?.(element) ||
+            this.imageDownloadButton?.contains?.(element) ||
+            element === this.panel ||
+            element === this.menu ||
+            element === this.imageDownloadButton)
+      );
     }
 
     // DOM-locator heuristics live in ActionBarLocator (see above); these delegate to it
@@ -4850,14 +6445,7 @@
       return this.actionBarLocator.findActionBarAnchorRect();
     }
 
-    getPanelButtonSize() {
-      const value = this.panel?.style?.getPropertyValue?.(`--${SCRIPT_PREFIX}-action-size`) || "";
-      const size = Number(String(value).replace(/[^\d.]/g, ""));
-      return Number.isFinite(size) && size > 0 ? size : 44;
-    }
-
-    // Shared by syncEmbeddedButtonMetrics() and syncEmbeddedButtonMetricsFromContext():
-    // sets the --${SCRIPT_PREFIX}-action-{bg,color,hover-bg} custom properties for the "auto" theme
+    // Shared by embedded placement sync:    // sets the --${SCRIPT_PREFIX}-action-{bg,color,hover-bg} custom properties for the "auto" theme
     // (derived from the native control's computed style) or for the explicit light/dark
     // overrides. `resolveComputedColors` is only invoked for the "auto" theme and should
     // return `{ backgroundColor, color }` (or a falsy value if no source element is usable).
@@ -4867,12 +6455,16 @@
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(241, 241, 241)");
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(22, 24, 35)");
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(232, 232, 232)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
+        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
         return;
       }
       if (theme === "dark") {
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(36, 36, 36)");
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(255, 255, 255)");
         this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(47, 47, 47)");
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
+        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
         return;
       }
       if (typeof this.window.getComputedStyle !== "function") return;
@@ -4882,139 +6474,244 @@
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, palette.background);
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, palette.color);
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, palette.hoverBackground);
+      if (computed.borderRadius) {
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, computed.borderRadius);
+      } else {
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
+      }
+      if (computed.backdropFilter && computed.backdropFilter !== "none") {
+        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`, computed.backdropFilter);
+      } else {
+        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
+      }
     }
 
-    syncEmbeddedButtonMetrics(host) {
-      if (!this.panel || !host) return;
+    getEmbeddedNativeButtonSample(host) {
       const nativeChildren = this.getNativeActionChildren(host);
       const sampleChildren = [
         ...nativeChildren.filter((child) => !isAvatarActionChild(child)),
         ...nativeChildren,
       ];
-      let nativeChild = null;
-      let nativeControl = null;
+      let best = null;
+      let bestScore = -Infinity;
+
+      // Prefer TikTok's real action item metrics (`like/comment/favorite/share-icon`).
+      // On narrow viewports these action items shrink to 32x62 with a 32x32 icon
+      // container; using the old fixed 48px fallback made the helper button stay too large.
       for (const child of sampleChildren) {
-        const control = getNativeActionControl(child);
-        const rect = control?.getBoundingClientRect?.();
-        if (!rect || rect.width < 34 || rect.height < 34) continue;
-        nativeChild = child;
-        nativeControl = control;
-        break;
+        if (!child || isAvatarActionChild(child)) continue;
+        const action = getOfficialActionMetricElement(child);
+        if (!action) continue;
+        const actionRect = action.getBoundingClientRect?.();
+        if (!actionRect || actionRect.width < 24 || actionRect.height < 32) continue;
+        const visual = getBestSquareMetricElement(action) || getOfficialActionButtonCandidate(action) || action;
+        const visualRect = visual?.getBoundingClientRect?.();
+        if (!visualRect || visualRect.width < 20 || visualRect.height < 20) continue;
+        const button = getOfficialActionButtonCandidate(action);
+        const buttonRect = button?.getBoundingClientRect?.();
+        const dataE2E = String(action.getAttribute?.("data-e2e") || "");
+        const priority = /comment-icon/i.test(dataE2E)
+          ? 12
+          : /like-icon/i.test(dataE2E)
+            ? 10
+            : /favorite-icon/i.test(dataE2E)
+              ? 8
+              : /share-icon/i.test(dataE2E)
+                ? 6
+                : 0;
+        const size = Math.max(visualRect.width, visualRect.height);
+        const squarePenalty = Math.abs(visualRect.width - visualRect.height) * 6;
+        const score = 260 + priority - squarePenalty - Math.abs(size - Math.min(48, Math.max(32, size))) * 0.5;
+        if (score > bestScore) {
+          bestScore = score;
+          best = {
+            child: action,
+            action,
+            visual,
+            control: button || visual,
+            styleElement: button || visual || action,
+            childRect: actionRect,
+            actionRect,
+            controlRect: visualRect,
+            visualRect,
+            buttonRect,
+          };
+        }
       }
-      const rect = nativeControl?.getBoundingClientRect?.();
-      const size = rect
-        ? Math.round(Math.max(44, Math.min(50, Math.max(rect.width, rect.height))))
-        : 48;
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${size}px`);
-      this.applyEmbeddedThemeVariables(() => {
-        if (!nativeControl) return null;
-        const controlStyle = this.window.getComputedStyle(nativeControl);
-        const childStyle =
-          nativeChild && nativeChild !== nativeControl
-            ? this.window.getComputedStyle(nativeChild)
-            : null;
-        const backgroundColor = isTransparentColor(controlStyle.backgroundColor)
-          ? childStyle?.backgroundColor
-          : controlStyle.backgroundColor;
-        return { backgroundColor, color: controlStyle.color };
-      });
+      if (best) return best;
+
+      // Fallback for future layouts without the data-e2e action markers.
+      for (const child of sampleChildren) {
+        if (!child || isAvatarActionChild(child)) continue;
+        const control = getOfficialActionButtonCandidate(child);
+        const controlRect = control?.getBoundingClientRect?.();
+        if (!controlRect || controlRect.width < 28 || controlRect.height < 28) continue;
+        const childRect = child?.getBoundingClientRect?.();
+        const size = Math.max(controlRect.width, controlRect.height);
+        const squarePenalty = Math.abs(controlRect.width - controlRect.height);
+        const officialBonus = /(?:^|\s)tux-button__element|TUX|tux-button/i.test(String(control.className || "")) ? 40 : 0;
+        const buttonBonus = control.tagName === "BUTTON" ? 16 : 0;
+        const sizePenalty = Math.abs(size - 40);
+        const oversizedPenalty = size > 64 ? 100 : 0;
+        const score = 140 + officialBonus + buttonBonus - squarePenalty * 5 - sizePenalty - oversizedPenalty;
+        if (score > bestScore) {
+          bestScore = score;
+          best = { child, action: child, visual: control, control, styleElement: control, childRect, actionRect: childRect, controlRect, visualRect: controlRect };
+        }
+      }
+      return best;
     }
 
-    syncEmbeddedButtonMetricsFromContext(context = null) {
-      if (context?.host) {
-        this.syncEmbeddedButtonMetrics(context.host);
+    applyOfficialEmbeddedButtonClass(nativeControl = null) {
+      if (!this.launcher) return;
+      const baseClass = `${SCRIPT_PREFIX}-launcher`;
+      if (!nativeControl) {
+        this.launcher.className = baseClass;
         return;
       }
-      if (!this.panel || !context?.anchorRect) return;
-      const rect = context.anchorRect;
-      const size = Math.round(Math.max(44, Math.min(50, Math.max(rect.width, rect.height))));
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${size}px`);
+      const nativeClassName = String(nativeControl.className || "");
+      const nextClassName = mergeClassNames(nativeClassName, baseClass, `${SCRIPT_PREFIX}-official-launcher`);
+      if (this.launcher.className !== nextClassName) {
+        this.launcher.className = nextClassName;
+      }
+    }
+
+    syncEmbeddedButtonMetrics(host) {
+      if (!this.panel || !host) return;
+      const sample = this.getEmbeddedNativeButtonSample(host);
+      const nativeChild = sample?.child || null;
+      const nativeControl = sample?.control || null;
+      const styleElement = sample?.styleElement || nativeControl || nativeChild;
+      const controlRect = sample?.controlRect || nativeControl?.getBoundingClientRect?.();
+      const childRect = sample?.childRect || nativeChild?.getBoundingClientRect?.();
+
+      const rawControlSize = controlRect ? Math.max(controlRect.width, controlRect.height) : 48;
+      const controlSize = Math.round(clampNumber(rawControlSize, 28, 64, 48));
+      const itemWidth = childRect
+        ? Math.round(clampNumber(childRect.width || controlSize, controlSize, 88, controlSize))
+        : controlSize;
+      const itemHeight = childRect
+        ? Math.round(clampNumber(childRect.height || controlSize * 1.625, controlSize, 104, Math.round(controlSize * 1.625)))
+        : Math.round(controlSize * 1.625);
+      const iconSize = Math.round(clampNumber(controlSize * 0.62, 18, 28, Math.round(controlSize * 0.55)));
+
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${controlSize}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-item-width`, `${itemWidth}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-item-height`, `${itemHeight}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-size`, `${iconSize}px`);
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`, "0px");
+      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-gap`, "0px");
+      this.applyOfficialEmbeddedButtonClass(nativeControl);
+
+      const nativeStyle = getComputedStyleSafe(this.window, styleElement);
+      if (nativeStyle) {
+        const buttonPadding = getStyleValue(nativeStyle, ["padding"]);
+        const buttonRadius = getStyleValue(nativeStyle, ["borderRadius", "border-radius"]);
+        const buttonBackground = getStyleValue(nativeStyle, ["backgroundColor", "background-color"]);
+        if (buttonPadding) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-padding`, buttonPadding);
+        if (buttonRadius) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-radius`, buttonRadius);
+        if (buttonBackground) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-bg`, buttonBackground);
+      }
       this.applyEmbeddedThemeVariables(() => {
-        if (!rect.element) return null;
-        const controlStyle = this.window.getComputedStyle(rect.element);
-        return { backgroundColor: controlStyle.backgroundColor, color: controlStyle.color };
+        if (!styleElement) return null;
+        return getElementActionStyleSample(this.window, [styleElement, nativeControl, nativeChild]);
       });
     }
 
     clearEmbeddedButtonMetrics() {
       if (!this.panel) return;
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-size`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-icon-size`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-item-width`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-item-height`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-gap`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-padding`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-radius`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-bg`);
+      this.applyOfficialEmbeddedButtonClass(null);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-bg`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-color`);
       this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-hover-bg`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-radius`);
+      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
+    }
+
+    getCurrentPageType() {
+      return getTikTokPageType(this.window.location, this.document);
+    }
+
+    shouldEmbedPanelInActionBar(pageType = this.getCurrentPageType()) {
+      return pageType === "recommend";
+    }
+
+    clearPanelFixedPosition() {
+      if (!this.panel?.style) return;
+      for (const property of ["left", "right", "top", "bottom"]) {
+        this.panel.style[property] = "auto";
+      }
+    }
+
+    mountPanelInActionBar(host) {
+      if (!this.panel || !host) return false;
+      if (this.menu && this.menu.parentElement !== this.document.body) {
+        this.document.body.appendChild(this.menu);
+      }
+      const reference = this.getActionBarInsertionReference(host);
+      if (this.panel.parentElement !== host || this.panel.nextSibling !== reference) {
+        host.insertBefore(this.panel, reference || host.firstChild);
+      }
+      this.currentActionBarHost = host;
+      this.currentActionBarContext = this.findActionBarPositionContext();
+      this.panel.classList.remove("pending");
+      this.panel.classList.add("embedded");
+      this.clearPanelFixedPosition();
+      this.syncEmbeddedButtonMetrics(host);
+      this.updatePanelMenuPosition();
+      return true;
+    }
+
+    hidePanelForInactivePlacement() {
+      if (!this.panel) return;
+      if (this.panel.parentElement !== this.document.body) {
+        this.document.body.appendChild(this.panel);
+      }
+      if (this.menu && this.menu.parentElement !== this.document.body) {
+        this.document.body.appendChild(this.menu);
+      }
+      this.currentActionBarHost = null;
+      this.currentActionBarContext = null;
+      this.clearEmbeddedButtonMetrics();
+      this.panel.classList.add("pending");
+      this.panel.classList.remove("embedded", "open", "closing");
+      this.clearPanelMenuPosition();
     }
 
     mountPanel() {
       if (!this.panel) return;
 
+      const pageType = this.getCurrentPageType();
+
+      // Current placement support is intentionally limited to the Recommend feed.
+      // Other page types should not fall back to the legacy floating button,
+      // otherwise UI changes such as opening comments can accidentally move the launcher
+      // back into an inactive/unsupported placement.
+      if (!this.shouldEmbedPanelInActionBar(pageType)) {
+        this.recommendPlacementAdapter?.unmount?.();
+        return;
+      }
+
       if (this.openImageOverlay) {
-        // An image preview is open (see refreshImageOverlayState()) and the dedicated
-        // image-download button is showing instead -- hide the main panel entirely rather
-        // than embedding it near the (now visually covered) video action bar, so it can't
-        // end up rendered on top of the enlarged image.
-        if (this.panel.parentElement !== this.document.body) {
-          this.document.body.appendChild(this.panel);
-        }
-        this.currentActionBarHost = null;
-        this.currentActionBarContext = null;
-        this.clearEmbeddedButtonMetrics();
-        this.panel.classList.add("pending");
-        this.panel.classList.remove("embedded", "open");
-        this.clearPanelMenuPosition();
+        this.hidePanelForInactivePlacement();
         return;
       }
 
-      const actionContext = this.findActionBarPositionContext();
-      if (actionContext?.anchorRect) {
-        const actionHost = actionContext.host || this.findActionBarHost?.() || null;
-        const resolvedActionContext = actionHost
-          ? { ...actionContext, host: actionHost }
-          : actionContext;
-        this.currentActionBarHost = actionHost;
-        this.currentActionBarContext = resolvedActionContext;
-        if (this.panel.parentElement !== this.document.body) {
-          this.document.body.appendChild(this.panel);
-        }
-        this.panel.classList.remove("pending");
-        this.panel.classList.add("embedded");
-        this.syncEmbeddedButtonMetricsFromContext(resolvedActionContext);
-        this.updatePanelPosition(resolvedActionContext);
-        return;
-      }
-
-      if (this.panel.parentElement !== this.document.body) {
-        this.document.body.appendChild(this.panel);
-      }
-      this.currentActionBarHost = null;
-      this.currentActionBarContext = null;
-      this.panel.classList.add("pending");
-      this.panel.classList.remove("embedded", "open");
-      this.clearEmbeddedButtonMetrics();
-      this.clearPanelMenuPosition();
+      this.recommendPlacementAdapter?.mount?.();
     }
 
-    updatePanelPosition(actionContext = null) {
+    updatePanelPosition(_actionContext = null) {
       if (!this.panel) return;
-      const embedded = this.panel.classList.contains("embedded");
-      const resolvedActionContext = embedded
-        ? actionContext || this.findActionBarPositionContext()
-        : null;
-      const anchorRect = embedded
-        ? resolvedActionContext?.anchorRect
-        : this.findNavigationHostRect() || this.findNavigationAnchorRect();
-      const buttonSize = embedded ? this.getPanelButtonSize() : 44;
-      const position = (embedded ? calculateEmbeddedPanelPosition : calculatePanelPosition)({
-        anchorRect,
-        nextRect: resolvedActionContext?.nextRect,
-        buttonSize,
-        viewportWidth: this.window.innerWidth || 0,
-        viewportHeight: this.window.innerHeight || 0,
-      });
-      this.panel.style.left = `${position.left}px`;
-      this.panel.style.top = `${position.top}px`;
-      this.panel.style.right = "auto";
-      this.panel.style.bottom = "auto";
-      this.updatePanelMenuPosition();
+      this.mountPanel();
     }
 
     getCurrentActionAnchor() {
@@ -5071,15 +6768,18 @@
 
     getFilename(media, suffix = "mp4") {
       const base = buildFilename(media, this.configStore.get());
-      return suffix ? `${base}.${suffix}` : base;
+      const extension = normalizeFileExtension(suffix, "mp4");
+      return extension ? `${base}.${extension}` : base;
     }
 
     getImageFilename(media, image = {}, index = 0) {
       const config = this.configStore.get();
       const base = buildFilename(media, config);
       const url = String(image.url || "");
-      const extension =
-        url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || "jpg";
+      const extension = normalizeFileExtension(
+        url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1],
+        "jpg",
+      );
       return normalizeFilename(`${base}_image${formatAlbumIndex(index, config.album_index_format)}.${extension}`, {
         maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 16,
       });
@@ -5119,80 +6819,265 @@
       };
     }
 
-    async downloadVideo() {
-      const media = await this.waitForCurrentMedia();
-      const images = ensureArray(media?.images).filter((image) => image?.url);
-      if (!media?.video?.primaryUrl && images.length) {
-        let lastFilename = "";
-        try {
-          for (const [index, image] of images.entries()) {
-            const filename = this.getImageFilename(media, image, index);
-            lastFilename = filename;
-            await this.downloader.downloadUrl(
-              unique([image.url, ...ensureArray(image.fallbackUrls)]),
-              filename,
-            );
-          }
-          this.toast(`${this.t("download_started")}: ${lastFilename}`);
-        } catch (err) {
-          this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
-        }
-        return;
-      }
-      if (!media?.video?.primaryUrl) {
-        this.toast(this.t("no_media"));
-        return;
-      }
-      const filename = this.getFilename(media, media.video.format || "mp4");
-      const urls = [media.video.primaryUrl, ...media.video.fallbackUrls];
+    summarizeElementForDebug(element = null) {
+      if (!element) return null;
+      const rect = toPlainRect(element.getBoundingClientRect?.());
+      return {
+        tag: String(element.tagName || "").toLowerCase(),
+        id: element.id || "",
+        className: String(element.className || "").slice(0, 240),
+        dataE2e: element.getAttribute?.("data-e2e") || "",
+        href: element.href || element.getAttribute?.("href") || "",
+        src: element.currentSrc || element.src || element.getAttribute?.("src") || "",
+        poster: element.poster || element.getAttribute?.("poster") || "",
+        rect,
+        text: String(element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 320),
+      };
+    }
+
+    summarizeMediaForDebug(media = null) {
+      if (!media) return null;
+      return {
+        id: media.id || "",
+        pageUrl: media.pageUrl || "",
+        shareUrl: media.shareUrl || "",
+        isImagePost: Boolean(media.isImagePost),
+        imageCount: ensureArray(media.images).length,
+        hasVideoPrimaryUrl: Boolean(media.video?.primaryUrl),
+        videoSourceCount: ensureArray(media.video?.sources).length,
+        author: {
+          uniqueId: media.author?.uniqueId || "",
+          nickname: media.author?.nickname || "",
+        },
+        desc: String(media.desc || "").slice(0, 240),
+        firstImageUrl: ensureArray(media.images)[0]?.url || "",
+        videoQuality: media.video?.quality || "",
+      };
+    }
+
+    collectMediaDebugInfo() {
+      const config = this.configStore.get();
+      const anchor = this.getCurrentActionAnchor();
+      const requireContext = Boolean(this.panel?.classList.contains("embedded"));
+      const visibleMedia = this.extractor.getVisibleMediaElement();
+      const visibleVideo = this.extractor.getVisibleVideoElement();
+      const visibleImages = this.extractor.getImageMediaCandidates(this.document).slice(0, 10);
+      const context =
+        this.extractor.getMediaContextElement(anchor) ||
+        this.extractor.getMediaContextElement(visibleMedia) ||
+        this.extractor.getMediaContextElement(visibleVideo);
+      const contextUrls = unique([
+        ...this.extractor.getMediaUrlsFromScopes([context, anchor].filter(Boolean)),
+        ...this.extractor.getVisibleMediaContextUrls(visibleMedia || visibleVideo),
+      ]);
+      const dataCandidates = [
+        parsePageDataFromDocument(this.document),
+        ...getWindowDataCandidates(this.window),
+      ].filter(Boolean);
+      const pageDataSummary = dataCandidates.map((data, index) => {
+        const items = collectVideoItemsDeep(data).slice(0, 18);
+        return {
+          index,
+          itemCountSample: items.length,
+          itemIds: items.map((item) => ({
+            id: getVideoItemId(item),
+            hasVideo: Boolean(item?.video),
+            hasImagePost: Boolean(getImagePostPayload(item)),
+            desc: String(item?.desc || item?.description || "").slice(0, 80),
+          })),
+        };
+      });
+      const freshMedia = this.extractor.getCurrentMedia(config, anchor, { requireContext });
+      const fallbackMedia = this.extractor.getCurrentMedia(config, null, { requireContext: false });
+      const cacheItems = Array.from(this.runtimeCache?.items?.values?.() || [])
+        .slice(-20)
+        .map((entry) => ({
+          id: getVideoItemId(entry.item),
+          sourceUrl: entry.sourceUrl || "",
+          hasVideo: Boolean(entry.item?.video),
+          hasImagePost: Boolean(getImagePostPayload(entry.item)),
+          seenAt: entry.seenAt || 0,
+        }));
+
+      return {
+        version: "debug-v1",
+        capturedAt: new Date().toISOString(),
+        url: this.window.location?.href || "",
+        viewport: { width: this.window.innerWidth || 0, height: this.window.innerHeight || 0, scrollY: this.window.scrollY || 0 },
+        panel: { embedded: requireContext, open: Boolean(this.panel?.classList.contains("open")) },
+        selectedMedia: this.summarizeMediaForDebug(this.currentMedia),
+        freshMedia: this.summarizeMediaForDebug(freshMedia),
+        fallbackMedia: this.summarizeMediaForDebug(fallbackMedia),
+        anchor: this.summarizeElementForDebug(anchor),
+        context: this.summarizeElementForDebug(context),
+        visibleMediaElement: this.summarizeElementForDebug(visibleMedia),
+        visibleVideoElement: this.summarizeElementForDebug(visibleVideo),
+        visibleImageCandidates: visibleImages.map((image) => this.summarizeElementForDebug(image)),
+        contextUrls,
+        pageVideoId: getVideoIdFromUrl(this.window.location?.href || ""),
+        pageDataSummary,
+        runtimeCacheSummary: cacheItems,
+      };
+    }
+
+    copyTextToClipboard(value = "", successMessage = "") {
+      const text = String(value || "");
+      if (!text) return;
       try {
-        await this.downloader.downloadUrl(urls, filename);
-        this.toast(`${this.t("download_started")}: ${filename}`);
-      } catch (err) {
-        this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
+        const result = this.window.navigator.clipboard?.writeText(text);
+        if (result?.catch) result.catch(() => {});
+        this.toast(successMessage || this.t("copied"));
+      } catch (_err) {
+        this.toast(text);
       }
     }
 
-    async downloadAsset(url, filename) {
-      // `url` may be a single string or an array of fallback URLs (see makeDownloadPill in
-      // openDetails). `!url` alone never catches an empty array since arrays are always
-      // truthy in JS, so normalize first and check length.
-      const urls = unique(ensureArray(url));
-      if (!urls.length) {
-        this.toast(this.t("asset_empty"));
+    copyMediaDebugInfo() {
+      const json = JSON.stringify(this.collectMediaDebugInfo(), null, 2);
+      try {
+        const writeText = this.window.navigator.clipboard?.writeText;
+        if (typeof writeText !== "function") {
+          this.toast(json);
+          return;
+        }
+        const result = writeText.call(this.window.navigator.clipboard, json);
+        if (result?.catch) {
+          result
+            .then(() => this.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") }))
+            .catch(() => this.toast(json));
+          return;
+        }
+        this.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") });
+      } catch (_err) {
+        this.toast(json);
+      }
+    }
+
+    async downloadVideo(anchorElement = null) {
+      if (this.isDownloading) {
+        this.nudgeDownloadStatus();
         return;
       }
+      this.captureToastAnchor(anchorElement || this.downloadButtonEl || this.launcher);
+      this.isDownloading = true;
+      this.showDownloadPreparing();
+
       try {
-        await this.downloader.downloadUrl(urls, filename);
-        this.toast(`${this.t("download_started")}: ${filename}`);
-      } catch (err) {
-        this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
+        const media = await this.waitForCurrentMedia();
+        const images = ensureArray(media?.images).filter((image) => image?.url);
+        if (!media?.video?.primaryUrl && images.length) {
+          let lastFilename = "";
+          let successCount = 0;
+          const failures = [];
+          for (const [index, image] of images.entries()) {
+            const filename = this.getImageFilename(media, image, index);
+            lastFilename = filename;
+            this.showAlbumProgress(index + 1, images.length, filename);
+            try {
+              await this.downloader.downloadUrl(
+                unique([image.url, ...ensureArray(image.fallbackUrls)]),
+                filename,
+              );
+              successCount += 1;
+            } catch (err) {
+              failures.push({ index: index + 1, filename, message: err?.message || String(err) });
+            }
+          }
+          if (!failures.length) {
+            this.showDownloadSuccess(lastFilename);
+          } else if (successCount > 0) {
+            this.showDownloadError(
+              `${this.t("download_album")}: ${successCount}/${images.length}, ${this.t("download_failed")}: ${failures.length}`,
+            );
+          } else {
+            this.showDownloadError(failures[0]?.message || this.t("download_failed"));
+          }
+          return;
+        }
+        if (!media?.video?.primaryUrl) {
+          this.showDownloadError(this.t("no_media"));
+          return;
+        }
+        const filename = this.getFilename(media, media.video.format || "mp4");
+        const urls = [media.video.primaryUrl, ...media.video.fallbackUrls];
+        this.showVideoPreparing(filename);
+        try {
+          await this.downloader.downloadUrl(urls, filename);
+          this.showDownloadSuccess(filename);
+        } catch (err) {
+          this.showDownloadError(err?.message || String(err));
+        }
+      } finally {
+        this.isDownloading = false;
+      }
+    }
+
+    async downloadAsset(url, filename, anchorElement = null) {
+      if (this.isDownloading) {
+        this.nudgeDownloadStatus();
+        return;
+      }
+      this.captureToastAnchor(anchorElement || this.downloadButtonEl || this.launcher);
+      this.isDownloading = true;
+
+      try {
+        // `url` may be a single string or an array of fallback URLs (see makeDownloadPill in
+        // openDetails). `!url` alone never catches an empty array since arrays are always
+        // truthy in JS, so normalize first and check length.
+        const urls = unique(ensureArray(url));
+        if (!urls.length) {
+          this.showDownloadError(this.t("asset_empty"));
+          return;
+        }
+        this.showImageDownloading(filename);
+        try {
+          await this.downloader.downloadUrl(urls, filename);
+          this.showDownloadSuccess(filename);
+        } catch (err) {
+          this.showDownloadError(err?.message || String(err));
+        }
+      } finally {
+        this.isDownloading = false;
       }
     }
 
     getOverlayImageFilename(media, url) {
       const config = this.configStore.get();
       const base = buildFilename(media || {}, config) || `tiktok_${Date.now()}`;
-      const extension =
-        String(url).match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() || "jpg";
+      const extension = normalizeFileExtension(
+        String(url).match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1],
+        "jpg",
+      );
       return normalizeFilename(`${base}_comment_image.${extension}`, {
         maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 20,
       });
     }
 
     async downloadOverlayImage() {
-      const overlay = this.openImageOverlay;
-      if (!overlay?.imageUrl) {
-        this.toast(this.t("asset_empty"));
+      if (this.isDownloading) {
+        this.nudgeDownloadStatus();
         return;
       }
-      const media = this.currentMedia || {};
-      const filename = this.getOverlayImageFilename(media, overlay.imageUrl);
+      this.captureToastAnchor(this.imageDownloadButton || this.downloadButtonEl || this.launcher);
+      this.isDownloading = true;
+
       try {
-        await this.downloader.downloadUrl(overlay.imageUrl, filename);
-        this.toast(`${this.t("download_started")}: ${filename}`);
-      } catch (err) {
-        this.toast(`${this.t("download_failed")}: ${err?.message || err}`);
+        const overlay = this.openImageOverlay;
+        if (!overlay?.imageUrl) {
+          this.showDownloadError(this.t("asset_empty"));
+          return;
+        }
+        const media = this.currentMedia || {};
+        const filename = this.getOverlayImageFilename(media, overlay.imageUrl);
+        this.showImageDownloading(filename);
+        try {
+          await this.downloader.downloadUrl(overlay.imageUrl, filename);
+          this.showDownloadSuccess(filename);
+        } catch (err) {
+          this.showDownloadError(err?.message || String(err));
+        }
+      } finally {
+        this.isDownloading = false;
       }
     }
 
@@ -5216,11 +7101,23 @@
       canvas.height = video.videoHeight;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Canvas is unavailable.");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise((resolve) => {
-        canvas.toBlob((value) => resolve(value), "image/png");
+      try {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch (err) {
+        throw new Error(`Canvas draw failed: ${err?.message || err}`);
+      }
+      const blob = await new Promise((resolve, reject) => {
+        try {
+          canvas.toBlob((value) => resolve(value), "image/png");
+        } catch (err) {
+          reject(err);
+        }
       });
-      if (!blob) throw new Error("Canvas export failed.");
+      if (!blob) {
+        throw new Error(
+          "Canvas export failed. The video may be blocked by browser cross-origin restrictions.",
+        );
+      }
       const media = this.currentMedia || this.refreshMedia() || {};
       return {
         blob,
@@ -5242,6 +7139,9 @@
     }
 
     async openFrameCapture() {
+      if (this.isCapturingFrame) return;
+      this.isCapturingFrame = true;
+
       try {
         const frame = await this.captureCurrentFrame();
         const modal = this.createModal(this.t("frame_title"), "", {
@@ -5275,6 +7175,8 @@
         main.append(preview, meta, actions);
       } catch (err) {
         this.toast(`${this.t("frame_failed")}: ${err?.message || err}`);
+      } finally {
+        this.isCapturingFrame = false;
       }
     }
 
@@ -5390,7 +7292,7 @@
       };
 
       const makeDownloadPill = (urls, filename, label = this.t("download")) => {
-        const button = makePillButton(label, () => this.downloadAsset(urls, filename));
+        const button = makePillButton(label, () => this.downloadAsset(urls, filename, button));
         button.removeAttribute?.("title");
         return button;
       };
@@ -5824,11 +7726,33 @@
       );
       shortcutGrid.append(...shortcutInputs.map((input) => input.wrapper), shortcutNote);
 
+      const advancedGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      const showTestMenu = this.input(
+        this.t("show_test_notification_menu"),
+        "checkbox",
+        "show_test_notification_menu",
+        "1",
+        "",
+        "full",
+      );
+      showTestMenu.checked = Boolean(config.show_test_notification_menu);
+      const showDebugInfoMenu = this.input(
+        this.t("show_debug_info_menu"),
+        "checkbox",
+        "show_debug_info_menu",
+        "1",
+        "",
+        "full",
+      );
+      showDebugInfoMenu.checked = Boolean(config.show_debug_info_menu);
+      advancedGrid.append(showTestMenu.wrapper, showDebugInfoMenu.wrapper);
+
       main.append(
         makeFieldset(this.t("appearance_section"), appearanceGrid),
         makeFieldset(this.t("download_section"), downloadGrid),
         makeFieldset(this.t("filename_section"), filenameGrid),
         makeFieldset(this.t("shortcut_section"), shortcutGrid),
+        makeFieldset(this.t("advanced_section"), advancedGrid),
       );
 
       headerActions.append(
@@ -5837,6 +7761,8 @@
           modal.querySelectorAll("[data-config-key]").forEach((input) => {
             formValues[input.dataset.configKey] = input.value;
           });
+          formValues.show_test_notification_menu = Boolean(showTestMenu.checked);
+          formValues.show_debug_info_menu = Boolean(showDebugInfoMenu.checked);
           formValues.filename_max_length = Number(formValues.filename_max_length || 80);
           formValues.video_source_columns = Array.from(
             modal.querySelectorAll("[data-source-column]:checked"),
@@ -6072,17 +7998,347 @@
       return modal;
     }
 
-    toast(message) {
-      const previous = this.document.querySelector(`.${SCRIPT_PREFIX}-toast`);
-      if (previous) previous.remove();
-      const toast = createElement(this.document, "div", `${SCRIPT_PREFIX}-toast`, message);
-      toast.classList.add(this.getTheme());
-      this.document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 2600);
+    captureToastAnchor(element) {
+      const rect = toPlainRect(element?.getBoundingClientRect?.());
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      this.lastToastAnchorRect = rect;
+      this.lastToastAnchorAt = Date.now();
+      return rect;
+    }
+
+    getNotificationStackElement() {
+      if (this.notificationStackEl?.isConnected) return this.notificationStackEl;
+      const stack = createElement(this.document, "div", `${SCRIPT_PREFIX}-notification-stack`);
+      this.document.body.appendChild(stack);
+      this.notificationStackEl = stack;
+      return stack;
+    }
+
+    updateNotificationStackLayout() {
+      const stack = this.notificationStackEl;
+      if (!stack?.isConnected) return;
+      const cards = Array.from(stack.querySelectorAll(`.${SCRIPT_PREFIX}-notification-card`));
+      let expandedY = 0;
+      let collapsedHeight = 0;
+      const gap = 6;
+      cards.forEach((card, index) => {
+        const depth = Math.min(index, 5);
+        const height = Math.max(68, Math.round(card.offsetHeight || card.getBoundingClientRect?.().height || 78));
+        const collapsedY = depth * 7;
+        card.style.zIndex = String(1000 - index);
+        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-y`, `${collapsedY}px`);
+        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-expanded-y`, `${expandedY}px`);
+        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-scale`, String(1 - depth * 0.026));
+        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-opacity`, String(index > 5 ? 0 : 1 - depth * 0.06));
+        expandedY += height + gap;
+        collapsedHeight = Math.max(collapsedHeight, height + collapsedY);
+      });
+      const expandedHeight = Math.max(92, Math.min(expandedY, (this.window.innerHeight || 720) - 92));
+      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-collapsed-height`, `${Math.max(92, collapsedHeight)}px`);
+      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-expanded-height`, `${expandedHeight}px`);
+      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-height`, `${Math.max(92, collapsedHeight)}px`);
+    }
+
+    removeNotificationCard(card, { immediate = false } = {}) {
+      if (!card) return;
+      const remove = () => {
+        card.remove();
+        this.updateNotificationStackLayout();
+      };
+      if (immediate) {
+        remove();
+        return;
+      }
+      card.classList.add("fading");
+      this.window.setTimeout?.(remove, 75);
+    }
+
+    createNotificationCard({ type = "info", title = "", detail = "", meta = "", iconText = "i", spinner = false, download = false } = {}) {
+      const stack = this.getNotificationStackElement();
+      const card = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-card${download ? ` ${SCRIPT_PREFIX}-download-status` : ""}`,
+      );
+      card.classList.add(this.getTheme(), type);
+      card.dataset.notificationId = String(++this.notificationId);
+
+      const icon = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-icon` : `${SCRIPT_PREFIX}-notification-icon`,
+      );
+      const main = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-main` : `${SCRIPT_PREFIX}-notification-main`,
+      );
+      const head = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-head` : `${SCRIPT_PREFIX}-notification-head`,
+      );
+      const titleEl = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-title` : `${SCRIPT_PREFIX}-notification-title`,
+        title,
+      );
+      const metaEl = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-meta` : `${SCRIPT_PREFIX}-notification-meta`,
+        meta,
+      );
+      const detailEl = createElement(
+        this.document,
+        "div",
+        download ? `${SCRIPT_PREFIX}-download-status-detail` : `${SCRIPT_PREFIX}-notification-detail`,
+        detail,
+      );
+      const close = createElement(
+        this.document,
+        "button",
+        download ? `${SCRIPT_PREFIX}-download-status-close` : `${SCRIPT_PREFIX}-notification-close`,
+        "×",
+      );
+
+      close.type = "button";
+      close.setAttribute("aria-label", this.t("close"));
+      close.addEventListener("click", () => this.removeNotificationCard(card));
+
+      if (spinner) {
+        icon.appendChild(createDownloadSpinner(this.document));
+      } else {
+        icon.textContent = iconText || "i";
+      }
+
+      head.append(titleEl, metaEl);
+      main.append(head, detailEl);
+      card.append(icon, main, close);
+      stack.prepend(card);
+      this.updateNotificationStackLayout();
+
+      return { card, icon, titleEl, metaEl, detailEl };
+    }
+
+    getDownloadStatusElement() {
+      if (this.downloadStatusEl?.isConnected) {
+        const stack = this.getNotificationStackElement();
+        if (this.downloadStatusEl.parentElement !== stack || stack.firstElementChild !== this.downloadStatusEl) {
+          stack.prepend(this.downloadStatusEl);
+          this.updateNotificationStackLayout();
+        }
+        return this.downloadStatusEl;
+      }
+
+      const refs = this.createNotificationCard({
+        type: "busy",
+        title: "",
+        detail: "",
+        iconText: "↓",
+        spinner: false,
+        download: true,
+      });
+      this.downloadStatusEl = refs.card;
+      this.downloadStatusIconEl = refs.icon;
+      this.downloadStatusTitleEl = refs.titleEl;
+      this.downloadStatusMetaEl = refs.metaEl;
+      this.downloadStatusDetailEl = refs.detailEl;
+
+      const close = this.downloadStatusEl.querySelector(`.${SCRIPT_PREFIX}-download-status-close`);
+      close?.addEventListener?.("click", () => {
+        this.stopDownloadTitleDots();
+        if (this.downloadStatusEl) this.removeNotificationCard(this.downloadStatusEl);
+        this.downloadStatusEl = null;
+      }, { once: true });
+
+      return this.downloadStatusEl;
+    }
+
+    stripAnimatedDotsTitle(title = "") {
+      return String(title || "").replace(/[.。…]+$/g, "").trim();
+    }
+
+    stopDownloadTitleDots() {
+      if (this.downloadStatusDotsTimer) {
+        this.window.clearInterval?.(this.downloadStatusDotsTimer);
+        this.downloadStatusDotsTimer = null;
+      }
+      this.downloadStatusDotsBaseTitle = "";
+      this.downloadStatusDotsIndex = 0;
+    }
+
+    startDownloadTitleDots(title = "") {
+      this.stopDownloadTitleDots();
+      this.downloadStatusDotsBaseTitle = this.stripAnimatedDotsTitle(title);
+      this.downloadStatusDotsIndex = 0;
+      const render = () => {
+        if (!this.downloadStatusTitleEl) return;
+        const count = (this.downloadStatusDotsIndex % 3) + 1;
+        this.downloadStatusTitleEl.textContent = `${this.downloadStatusDotsBaseTitle}${".".repeat(count)}`;
+        this.downloadStatusDotsIndex += 1;
+      };
+      render();
+      this.downloadStatusDotsTimer = this.window.setInterval?.(render, 320);
+    }
+
+    setDownloadStatus({ type = "busy", title = "", detail = "", meta = "", spinner = false, autoHideMs = 0 } = {}) {
+      if (this.downloadStatusHideTimer) {
+        this.window.clearTimeout?.(this.downloadStatusHideTimer);
+        this.downloadStatusHideTimer = null;
+      }
+
+      const card = this.getDownloadStatusElement();
+      card.className = `${SCRIPT_PREFIX}-notification-card ${SCRIPT_PREFIX}-download-status ${this.getTheme()} ${type}`;
+
+      const isActiveDownload = ["busy", "album", "image"].includes(type);
+      if (this.downloadStatusTitleEl) {
+        if (isActiveDownload) this.startDownloadTitleDots(title || "");
+        else {
+          this.stopDownloadTitleDots();
+          this.downloadStatusTitleEl.textContent = title || "";
+        }
+      }
+      if (this.downloadStatusMetaEl) this.downloadStatusMetaEl.textContent = meta || "";
+      if (this.downloadStatusDetailEl) this.downloadStatusDetailEl.textContent = detail || "";
+      if (this.downloadStatusIconEl) {
+        this.downloadStatusIconEl.textContent = "";
+        if (type === "success") {
+          this.downloadStatusIconEl.textContent = "✓";
+        } else if (type === "error") {
+          this.downloadStatusIconEl.textContent = "!";
+        } else if (type === "album") {
+          this.downloadStatusIconEl.textContent = "▦";
+        } else if (type === "image") {
+          this.downloadStatusIconEl.textContent = "◧";
+        } else {
+          this.downloadStatusIconEl.textContent = "↓";
+        }
+      }
+
+      this.updateNotificationStackLayout();
+      if (autoHideMs > 0) this.hideDownloadStatus(autoHideMs);
+      return card;
+    }
+
+    hideDownloadStatus(delay = 0, immediate = false) {
+      const remove = () => {
+        const card = this.downloadStatusEl;
+        if (!card) return;
+        this.stopDownloadTitleDots();
+        this.removeNotificationCard(card, { immediate });
+        if (this.downloadStatusEl === card) this.downloadStatusEl = null;
+      };
+
+      if (this.downloadStatusHideTimer) {
+        this.window.clearTimeout?.(this.downloadStatusHideTimer);
+        this.downloadStatusHideTimer = null;
+      }
+
+      if (immediate || delay <= 0) {
+        remove();
+        return;
+      }
+
+      this.downloadStatusHideTimer = this.window.setTimeout?.(remove, delay);
+    }
+
+    nudgeDownloadStatus(message = this.t("download_already_running")) {
+      const card = this.getDownloadStatusElement();
+      card.classList.remove("attention");
+      void card.offsetWidth;
+      card.classList.add("attention");
+
+      const detailEl = this.downloadStatusDetailEl;
+      const previousDetail = detailEl?.textContent || "";
+      if (detailEl && message) {
+        detailEl.textContent = message;
+      }
+
+      this.window.setTimeout?.(() => card.classList.remove("attention"), 1050);
+      this.window.clearTimeout?.(this.downloadStatusRepeatHintTimer);
+      this.downloadStatusRepeatHintTimer = this.window.setTimeout?.(() => {
+        if (detailEl?.isConnected && detailEl.textContent === message) {
+          detailEl.textContent = previousDetail;
+        }
+      }, 1600);
+    }
+
+    showDownloadPreparing(detail = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("download_preparing"),
+        detail,
+        spinner: false,
+      });
+    }
+
+    showVideoPreparing(filename = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("preparing_video_download"),
+        detail: filename,
+        spinner: false,
+      });
+    }
+
+    showAlbumProgress(index, total, filename = "") {
+      this.setDownloadStatus({
+        type: "album",
+        title: `${index}/${total} ${this.t("downloading_album")}`,
+        detail: filename,
+        meta: "",
+        spinner: false,
+      });
+    }
+
+    showImageDownloading(filename = "") {
+      this.setDownloadStatus({
+        type: "image",
+        title: this.t("downloading_image"),
+        detail: filename,
+        spinner: false,
+      });
+    }
+
+    showDownloadSuccess(filename = "") {
+      this.setDownloadStatus({
+        type: "success",
+        title: this.t("download_completed"),
+        detail: filename,
+        autoHideMs: 3000,
+      });
+    }
+
+    showDownloadError(message = "") {
+      this.setDownloadStatus({
+        type: "error",
+        title: this.t("download_failed"),
+        detail: message,
+      });
+    }
+
+    toast(message, options = {}) {
+      const refs = this.createNotificationCard({
+        type: options.type || "info",
+        title: String(message || ""),
+        detail: options.detail || "",
+        meta: options.meta || "",
+        iconText: options.iconText || "i",
+        spinner: Boolean(options.spinner),
+        download: false,
+      });
+      const autoHideMs = Number(options.autoHideMs ?? 3200);
+      if (!options.persist && autoHideMs > 0) {
+        this.window.setTimeout?.(() => this.removeNotificationCard(refs.card), autoHideMs);
+      }
+      return refs.card;
     }
 
     bindHotkey() {
       this.document.addEventListener("keydown", (event) => {
+        if (event.repeat) return;
         const target = event.target;
         const tag = target?.tagName?.toLowerCase();
         if (
@@ -6103,42 +8359,99 @@
         const action = actions.find((item) => eventMatchesHotkey(event, item.hotkey));
         if (!action) return;
         event.preventDefault();
+        event.stopPropagation();
         action.run();
       });
     }
 
     watchRouteChanges() {
-      this.lastHref = this.window.location.href;
-      setInterval(() => {
-        if (this.window.location.href === this.lastHref) return;
-        this.lastHref = this.window.location.href;
-        setTimeout(() => {
-          this.refreshMedia();
-          this.mountPanel();
-        }, 500);
-      }, 1000);
+      if (this.routeChangeCleanup) return;
+      const win = this.window;
+      const history = win.history;
+      const eventName = `${SCRIPT_PREFIX}:locationchange`;
+      this.lastHref = win.location.href;
+
+      const scheduleRouteRefresh = () => {
+        if (this.routeChangeFrame) return;
+        const run = () => {
+          this.routeChangeFrame = null;
+          if (win.location.href === this.lastHref) return;
+          this.lastHref = win.location.href;
+          win.setTimeout?.(() => {
+            this.refreshMedia();
+            this.mountPanel();
+            this.applyPanelState();
+          }, 120);
+        };
+        if (typeof win.requestAnimationFrame === "function") {
+          this.routeChangeFrame = win.requestAnimationFrame(run);
+        } else {
+          this.routeChangeFrame = win.setTimeout(run, 50);
+        }
+      };
+
+      const dispatchLocationChange = () => {
+        try {
+          win.dispatchEvent(new win.Event(eventName));
+        } catch (_err) {
+          scheduleRouteRefresh();
+        }
+      };
+
+      const restoreFns = [];
+      const patchHistoryMethod = (methodName) => {
+        if (!history || typeof history[methodName] !== "function") return;
+        const original = history[methodName];
+        if (original.__tthelperPatched) return;
+        const patched = function patchedHistoryMethod(...args) {
+          const result = original.apply(this, args);
+          dispatchLocationChange();
+          return result;
+        };
+        try {
+          Object.defineProperty(patched, "__tthelperPatched", { value: true });
+          Object.defineProperty(patched, "__tthelperOriginal", { value: original });
+        } catch (_err) {}
+        try {
+          history[methodName] = patched;
+          restoreFns.push(() => {
+            if (history[methodName] === patched) history[methodName] = original;
+          });
+        } catch (_err) {}
+      };
+
+      patchHistoryMethod("pushState");
+      patchHistoryMethod("replaceState");
+      win.addEventListener?.(eventName, scheduleRouteRefresh);
+      win.addEventListener?.("popstate", scheduleRouteRefresh);
+      win.addEventListener?.("hashchange", scheduleRouteRefresh);
+      this.routeChangeCleanup = () => {
+        win.removeEventListener?.(eventName, scheduleRouteRefresh);
+        win.removeEventListener?.("popstate", scheduleRouteRefresh);
+        win.removeEventListener?.("hashchange", scheduleRouteRefresh);
+        for (const restore of restoreFns) restore();
+      };
     }
 
     getPanelPositionSignature() {
-      const rectSignature = (source) => {
-        const rect = source?.getBoundingClientRect?.() || source;
-        if (!rect) return "none";
-        return [
-          Math.round(Number(rect.left || 0)),
-          Math.round(Number(rect.top || 0)),
-          Math.round(Number(rect.width || 0)),
-          Math.round(Number(rect.height || 0)),
-        ].join(",");
-      };
-      const actionContext = this.findActionBarPositionContext?.();
+      const config = this.configStore?.get?.() || {};
+      const pageType = this.getCurrentPageType();
+      let actionBarSignature = "";
+      if (this.shouldEmbedPanelInActionBar(pageType)) {
+        const host = this.findActionBarHost();
+        const rect = this.getElementRect(host);
+        const childCount = this.getNativeActionChildren(host).length;
+        actionBarSignature = rect
+          ? `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${childCount}`
+          : "no-action-bar";
+      }
       return [
         this.window.location?.href || "",
+        pageType,
         this.window.innerWidth || 0,
         this.window.innerHeight || 0,
-        rectSignature(actionContext?.host || this.findActionBarHost()),
-        rectSignature(actionContext?.anchorRect),
-        rectSignature(actionContext?.nextRect),
-        rectSignature(this.extractor?.getVisibleVideoElement?.()),
+        this.openImageOverlay?.imageUrl || "",
+        actionBarSignature,
       ].join("|");
     }
 
@@ -6165,10 +8478,9 @@
       };
 
       // Separate from the position-signature dedup above: whether an image preview overlay
-      // is open or closed generally does NOT change the video/action-bar's own geometry (see
-      // getPanelPositionSignature()), so scheduleIfChanged() alone would often never notice
-      // it. This runs on every DOM mutation instead (rAF-throttled so a burst of mutations
-      // still only costs one check per frame), independent of the position-signature gate.
+      // is open or closed may not change our placement signature, so this runs on
+      // every DOM mutation instead (rAF-throttled so a burst of mutations still only costs
+      // one check per frame), independent of the position-signature gate.
       let imageOverlayFrame = null;
       const checkImageOverlay = () => {
         if (imageOverlayFrame) return;
@@ -6185,11 +8497,8 @@
 
       // NOTE: high-frequency triggers (scroll/wheel/touchmove/mutations/poll) are wired to
       // `scheduleIfChanged`, not the raw `schedule`. `scheduleIfChanged` does a cheap
-      // rect-signature comparison first and only pays for the expensive
-      // mountPanel()/applyPanelState() DOM recompute when the layout actually moved.
-      // (Previously every listener called `schedule` directly, so the signature check was
-      // computed once at setup and never consulted again afterward — every scroll pixel or
-      // React re-render on the page forced a full DOM re-scan on each animation frame.)
+      // placement-signature comparison first and only pays for mountPanel()/applyPanelState()
+      // when route, viewport, overlay state, or current placement actually changed.
       if (typeof this.window.MutationObserver === "function" && this.document.body) {
         this.positionObserver = new this.window.MutationObserver(() => {
           scheduleIfChanged();
@@ -6243,7 +8552,6 @@
     collectVideoItemsDeep,
     RuntimeMediaCache,
     findBestMediaMatch,
-    collectVideoItemsDeep,
     TikTokMediaExtractor,
     TikTokDlApp,
     ActionBarLocator,
@@ -6282,6 +8590,10 @@
     formatNumber,
     formatOptionalNumber,
     normalizeHeaders,
+    normalizeSafeDownloadUrl,
+    isAllowedDownloadHost,
+    shouldInspectRuntimeResponse,
+    normalizeFileExtension,
     toShortId,
   };
 
@@ -6289,17 +8601,22 @@
     module.exports = { __test: testApi };
   }
 
-  const runtimeCache = root?.__tkDlRuntimeCache || new RuntimeMediaCache();
-  if (root?.document) {
-    root.__tkDlRuntimeCache = runtimeCache;
-    new RuntimeResponseObserver(root, runtimeCache).install();
-  }
+  const INSTALL_FLAG = "__tthelperInstalled__";
 
-  if (root?.document) {
+  if (root?.document && !root[INSTALL_FLAG]) {
+    Object.defineProperty(root, INSTALL_FLAG, {
+      value: true,
+      configurable: false,
+      enumerable: false,
+      writable: false,
+    });
+
+    const runtimeCache = new RuntimeMediaCache();
+    new RuntimeResponseObserver(root, runtimeCache).install();
+
     const start = () => {
-      if (root.__tikTokDlApp) return;
-      root.__tikTokDlApp = new TikTokDlApp(root, runtimeCache);
-      root.__tikTokDlApp.start();
+      const app = new TikTokDlApp(root, runtimeCache);
+      app.start();
     };
     if (root.document.readyState === "loading") {
       root.document.addEventListener("DOMContentLoaded", start, { once: true });
