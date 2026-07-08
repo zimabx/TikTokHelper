@@ -1,8 +1,10 @@
 // ==UserScript==
-// @name            TikTokHelper
+// @name         TikTokHelper
+// @name:zh-CN  TikTokHelper - TikTok 下载助手
+// @description  Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
+// @description:zh-CN  为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
 // @namespace       https://github.com/zimabx/TikTokHelper
-// @version         0.9.17
-// @description     Add download tools to TikTok web pages.
+// @version         0.9.19
 // @author          zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -27,6 +29,8 @@
 // @connect         muscdn.com
 // @connect         *.muscdn.com
 // @run-at          document-start
+// @downloadURL https://update.greasyfork.org/scripts/586126/TikTokHelper.user.js
+// @updateURL https://update.greasyfork.org/scripts/586126/TikTokHelper.meta.js
 // ==/UserScript==
 
 (function (root) {
@@ -217,9 +221,6 @@
     { value: " ", display: "Space", en: "Space", zh: "空格" },
   ];
 
-  // Values only: display labels always come from t(`quality_${value}`) via getMessage(),
-  // never from a second tuple element (unlike LANGUAGE_OPTIONS/THEME_OPTIONS below, whose
-  // labels are shown as-is without translation).
   const VIDEO_QUALITY_OPTIONS = [
     "highest_resolution",
     "highest_bitrate",
@@ -240,9 +241,6 @@
     ["dark", "Dark / 暗黑"],
     ["light", "Light / 白天"],
   ];
-
-  // Values only, same reasoning as VIDEO_QUALITY_OPTIONS above: label comes from
-  // t(`download_method_${value}`).
   const DOWNLOAD_METHOD_OPTIONS = ["browser"];
 
   const ALBUM_INDEX_FORMAT_OPTIONS = [
@@ -349,7 +347,6 @@
       quality_720p: "720p",
       quality_540p: "540p",
       quality_lowest: "Lowest resolution",
-      // -- merged from former Object.assign(MESSAGES.en, {...}) patch blocks --
       details_tab_media: "Media Resources",
       details_tab_author: "Author Info",
       details_tab_post: "Post Info",
@@ -531,7 +528,6 @@
       quality_720p: "720p",
       quality_540p: "540p",
       quality_lowest: "最低分辨率",
-      // -- merged from former Object.assign(MESSAGES.zh, {...}) patch blocks --
       details_tab_media: "媒体资源",
       details_tab_author: "作者信息",
       details_tab_post: "作品信息",
@@ -653,14 +649,6 @@
   }
 
   function stripTemplateBackticks(template = "") {
-    // Pure sanitizer: strips a single pair of wrapping backticks (and any stray backticks)
-    // from whatever string is given. Deliberately does NOT fall back to the default
-    // template when `template` is empty/falsy — callers that are editing a live textarea
-    // value (appendFilenameTemplateToken/appendFilenameTemplateLiteral) need an empty
-    // input to stay empty, otherwise clicking an available-field chip while the template
-    // box is empty would silently prepend the default template before appending the token.
-    // Callers that want "the effective template, falling back to default when unset"
-    // should use getFilenameTemplate() below instead.
     const value = String(template ?? "").trim();
     let next = value;
     if (value.length >= 2 && value.startsWith("`") && value.endsWith("`")) {
@@ -1052,17 +1040,9 @@
     const compactContext = compactLiveContextText(contextText);
     const combined = `${compactAction}${compactContext}`;
     if (!combined) return false;
-
-    // TikTok's live cards in the feed expose stable text markers even when the backing item
-    // cannot be resolved as a normal video/photo post: e.g. "LIVE16573" in the action bar
-    // and Chinese localized labels such as "点击以观看直播" / "直播中" in the feed context.
     if (/(点击以观看直播|观看直播|直播中|正在直播|进入直播间|LIVE中)/i.test(combined)) {
       return true;
     }
-
-    // Keep the generic English marker conservative: a normal caption may contain the word
-    // "live", but the action column usually compresses live cards into "LIVE" + viewer
-    // count. Only treat short action-bar text as live, never arbitrary long descriptions.
     if (/^LIVE\d*$/i.test(compactAction)) return true;
     return /^LIVE\d{1,8}$/i.test(compactAction) && compactAction.length <= 16;
   }
@@ -1670,14 +1650,7 @@
     }
     return items;
   }
-
-  // Shared by RuntimeMediaCache.getMediaByVideoElement() (matches against network-captured
-  // responses) and TikTokMediaExtractor.getCurrentMedia()'s page-data fallback (matches
-  // against SSR/window JSON). Given a pool of raw item objects, find the one that best
-  // corresponds to the currently visible <video> element: first by comparing actual media
-  // resource URLs (cover/poster/playAddr), falling back to a fuzzy score against the
-  // surrounding DOM text (author name, description) when the element's URLs are unusable
-  // (e.g. a blob: URL from MSE-based playback, which carries no resource identity at all).
+  
   function findBestMediaMatch(items = [], videoElement = null, contextText = "", config = {}, pageUrl = "") {
     const elementUrls = getVideoElementResourceUrls(videoElement);
     let bestTextMatch = null;
@@ -1781,10 +1754,6 @@
       if (typeof originalFetch !== "function") return;
       const cache = this.cache;
       win.fetch = function patchedFetch(...args) {
-        // Always bind to `win`, not the call-site `this`: some app bundles read
-        // `window.fetch` into a bare reference (e.g. `const f = window.fetch`) and invoke
-        // it without a receiver, which would make `this` undefined here and cause the
-        // native fetch implementation to throw "Illegal invocation".
         return originalFetch.apply(win, args).then((response) => {
           try {
             const url = response?.url || String(args[0]?.url || args[0] || "");
@@ -2099,9 +2068,6 @@
   function truncateAtUtf16Boundary(text, maxLength) {
     if (text.length <= maxLength) return text;
     let sliced = text.slice(0, maxLength);
-    // If the cut falls between a UTF-16 surrogate pair (e.g. mid-emoji), the trailing
-    // code unit is a lone high surrogate (0xD800-0xDBFF) with no following low surrogate.
-    // Drop it instead of keeping a broken/unpaired surrogate in the filename.
     const lastCode = sliced.charCodeAt(sliced.length - 1);
     if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
       sliced = sliced.slice(0, -1);
@@ -2682,9 +2648,6 @@
         if (urlsShareResource(imageUrls, getMediaResourceUrls(media))) return media;
       }
 
-      // If the screen clearly shows a Photo Mode carousel but the backing API item has not
-      // been matched yet, return a temporary image-post media object instead of falling back
-      // to a nearby ordinary video. This avoids downloading/showing details for the next item.
       return this.buildDomImagePostMedia(imageElements, pageUrl);
     }
 
@@ -2745,12 +2708,6 @@
       );
       if (hasUsableMedia(cachedVisibleMedia)) return cachedVisibleMedia;
 
-      // Fallback fuzzy match against SSR/window page data (dataCandidates), mirroring the
-      // runtime-cache fuzzy match above. Without this, videos whose data only ever arrives
-      // via the page's initial SSR payload (rather than a later fetch/XHR response captured
-      // into runtimeCache) — typically the first handful of videos in a feed — could never
-      // be resolved once the DOM-based exact-id lookup above fails to find a matching link,
-      // no matter how long you wait or how many times you revisit them.
       for (const data of dataCandidates) {
         const items = collectVideoItemsDeep(data);
         if (!items.length) continue;
@@ -3374,9 +3331,6 @@
     if (pathname === "/" || /^\/(?:foryou|feed|recommend)(?:\/|$)/i.test(pathname)) {
       return "recommend";
     }
-    // TikTok may switch the URL to /@user/video/id when the comment sidebar is open while
-    // the page is still visually the For You / feed layout. In that state keep using the
-    // recommend placement adapter as long as a visible feed action bar is present.
     if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
     if (hasVisibleProfileBrowseDialog(doc)) return "profile-dialog";
     if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
@@ -3709,10 +3663,6 @@
       hoverBackground: light ? "rgb(232, 232, 232)" : "rgb(47, 47, 47)",
     };
   }
-
-  // Extracted from the TikTokDlApp UI so the ~900 lines of injected CSS live in one
-  // place, independent of DOM/class state (it only interpolates the static
-  // SCRIPT_PREFIX constant). See injectStyles() for where this gets attached.
   function getPanelStyleSheet() {
     return `
         .${SCRIPT_PREFIX}-panel {
@@ -5398,15 +5348,6 @@
         }
     `;
   }
-
-  // Best-effort heuristic for detecting an open image preview / lightbox — most commonly
-  // the full-size viewer TikTok shows when a user clicks an image attached to a comment.
-  // TikTok's own CSS class names are hashed and change between deploys, so this can't be a
-  // precise selector; it looks for a large, visible <img> living inside something that looks
-  // like a modal/overlay container. If this stops matching after a TikTok redesign, the fix
-  // is almost always just adding another substring to CANDIDATE_IMAGE_OVERLAY_SELECTORS below
-  // (open the real overlay in DevTools, inspect the ancestor chain of the <img>, and add a
-  // `[class*="..."]` selector for whatever wrapper class it uses).
   const CANDIDATE_IMAGE_OVERLAY_SELECTORS = [
     '[class*="ImagePreview"]',
     '[class*="ImageViewer"]',
@@ -5417,9 +5358,6 @@
     '[class*="CommentPicture"]',
     '[role="dialog"]',
   ];
-  // Large images can be detected by viewport ratio alone. Small images need stronger proof
-  // that they are in an opened preview, otherwise comment avatars/stickers/thumbnails would
-  // be too easy to mistake for the active overlay image.
   const IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO = 0.12;
   const IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO = 0.18;
   const IMAGE_OVERLAY_SMALL_MIN_AREA_PX = 6400;
@@ -5714,13 +5652,6 @@
         }
       : null;
   }
-
-  // Encapsulates the DOM heuristics used to locate TikTok's native action bar / video
-  // controls (these rely on scanning for TikTok's auto-generated, frequently-changing
-  // CSS class names, so keeping them in one place makes it easier to patch when TikTok
-  // ships a redesign). Instantiated once per TikTokDlApp as `this.actionBarLocator`;
-  // TikTokDlApp keeps thin delegator methods with the original names so every existing
-  // call site continues to work unchanged.
   class ActionBarLocator {
     constructor(app) {
       this.app = app;
@@ -6167,10 +6098,6 @@
     }
 
     getActionBarInsertionReference(host) {
-      // Kept for backward compatibility with any external tooling that might reference it,
-      // but note that the panel is positioned with `position: fixed` and appended directly
-      // to `document.body` (see mountPanel()), so no code path actually inserts it into
-      // `host`'s children at a specific index. This simply returns the first native child.
       const nativeChildren = this.getNativeActionChildren(host);
       return nativeChildren[0] || null;
     }
@@ -6931,7 +6858,6 @@
       try {
         gmRegisterMenuCommand(this.t("settings"), () => this.openSettings());
       } catch (_error) {
-        // Some userscript engines expose the API but reject registration before page init.
         this.tampermonkeyMenuRegistered = false;
       }
     }
@@ -7112,11 +7038,6 @@
       this.bindImageOverlayWatcher();
     }
 
-    // Standalone button shown only while an open image preview (see findOpenImageOverlay())
-    // is detected, e.g. after the user opens a photo attached to a comment. It is a separate
-    // element from the main panel/menu -- while it's visible, the main panel is hidden
-    // entirely (see mountPanel()/refreshImageOverlayState()) so there's only ever one thing
-    // to click, and it always has one job: download that specific image.
     ensureImageDownloadButton() {
       if (this.imageDownloadButton) return this.imageDownloadButton;
       const button = createElement(this.document, "button", `${SCRIPT_PREFIX}-image-button`);
@@ -7161,14 +7082,6 @@
       button.style.display = "";
     }
 
-    // Listens for clicks on <img> elements anywhere outside our own UI (per the idea that
-    // the moment a user clicks a comment image is the most reliable signal that a preview is
-    // about to open -- much more direct than waiting for a generic DOM-mutation poll, since
-    // opening the preview usually doesn't change the underlying video/action-bar geometry
-    // that the regular position-refresh logic keys off of, so that path alone could miss it).
-    // The actual open/closed decision still goes through findOpenImageOverlay() shortly after
-    // (the overlay needs a moment to mount), so a mis-guessed click target here just means we
-    // check and find nothing -- it can't produce a false "image open" state on its own.
     bindImageOverlayWatcher() {
       if (this.imageOverlayWatcherBound) return;
       this.imageOverlayWatcherBound = true;
@@ -7183,17 +7096,11 @@
             (target.closest("img") || target.closest('[style*="background-image"]')));
         if (!isImage) return;
         this.lastImageOpenGestureAt = Date.now();
-        // Give the overlay a moment to actually mount before we go looking for it.
         this.window.setTimeout?.(() => this.refreshImageOverlayState(), 80);
       };
       this.document.addEventListener?.("click", handleClick, true);
     }
 
-    // Re-checks whether an image preview is currently open and updates both the dedicated
-    // download-image button and the main panel's visibility accordingly. Unlike the regular
-    // placement refresh (gated behind getPanelPositionSignature()), this only cares
-    // about "is there an overlay right now", so it needs its own independent triggers -- see
-    // bindImageOverlayWatcher() and the MutationObserver hookup in watchPanelPosition().
     refreshImageOverlayState() {
       if (this.getCurrentPageType() !== "recommend") {
         const wasOpen = Boolean(this.openImageOverlay);
@@ -7276,9 +7183,6 @@
         this.launcher.setAttribute("aria-label", this.t("menu"));
         this.launcher.removeAttribute?.("title");
       }
-      // Explicit element references (set up in renderPanel()) rather than positional index
-      // into a querySelectorAll list -- keeps this correct regardless of how many buttons
-      // are in the menu or what order they're in.
       const hideMediaActionsForLive = Boolean(this.isCurrentLiveItem);
       if (this.downloadButtonEl) {
         this.downloadButtonEl.textContent = this.t("download");
@@ -7401,8 +7305,6 @@
       );
     }
 
-    // DOM-locator heuristics live in ActionBarLocator (see above); these delegate to it
-    // so every existing call site (`this.findActionBarHost()`, etc.) keeps working.
     getElementRect(element) {
       return this.actionBarLocator.getElementRect(element);
     }
@@ -7459,10 +7361,6 @@
       return this.actionBarLocator.findActionBarAnchorRect();
     }
 
-    // Shared by embedded placement sync:    // sets the --${SCRIPT_PREFIX}-action-{bg,color,hover-bg} custom properties for the "auto" theme
-    // (derived from the native control's computed style) or for the explicit light/dark
-    // overrides. `resolveComputedColors` is only invoked for the "auto" theme and should
-    // return `{ backgroundColor, color }` (or a falsy value if no source element is usable).
     applyEmbeddedThemeVariables(resolveComputedColors) {
       const theme = this.getTheme();
       if (theme === "light") {
@@ -7509,9 +7407,6 @@
       let best = null;
       let bestScore = -Infinity;
 
-      // Prefer TikTok's real action item metrics (`like/comment/favorite/share-icon`).
-      // On narrow viewports these action items shrink to 32x62 with a 32x32 icon
-      // container; using the old fixed 48px fallback made the helper button stay too large.
       for (const child of sampleChildren) {
         if (!child || isAvatarActionChild(child)) continue;
         const action = getOfficialActionMetricElement(child);
@@ -7554,7 +7449,6 @@
       }
       if (best) return best;
 
-      // Fallback for future layouts without the data-e2e action markers.
       for (const child of sampleChildren) {
         if (!child || isAvatarActionChild(child)) continue;
         const control = getOfficialActionButtonCandidate(child);
@@ -7681,7 +7575,6 @@
       const color = anchorColor || "rgb(255, 255, 255)";
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, bg);
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, color);
-      // In profile browse dialogs, keep the open/hover state visually aligned with the native ellipsis button.
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, bg);
       this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, anchorRadius || "100px");
       if (anchorBackdropFilter && anchorBackdropFilter !== "none") {
@@ -7800,10 +7693,6 @@
 
       const pageType = this.getCurrentPageType();
 
-      // Current placement support is intentionally limited to the Recommend feed.
-      // Other page types should not fall back to the legacy floating button,
-      // otherwise UI changes such as opening comments can accidentally move the launcher
-      // back into an inactive/unsupported placement.
       if (pageType === "profile-dialog") {
         this.profilePageBulkAdapter?.suspend?.();
         this.profileBrowseDialogAdapter?.mount?.();
@@ -8261,9 +8150,6 @@
       this.isDownloading = true;
 
       try {
-        // `url` may be a single string or an array of fallback URLs (see makeDownloadPill in
-        // openDetails). `!url` alone never catches an empty array since arrays are always
-        // truthy in JS, so normalize first and check length.
         const urls = unique(ensureArray(url));
         if (!urls.length) {
           this.showDownloadError(this.t("asset_empty"));
@@ -9919,10 +9805,6 @@
         schedule();
       };
 
-      // Separate from the position-signature dedup above: whether an image preview overlay
-      // is open or closed may not change our placement signature, so this runs on
-      // every DOM mutation instead (rAF-throttled so a burst of mutations still only costs
-      // one check per frame), independent of the position-signature gate.
       let imageOverlayFrame = null;
       const checkImageOverlay = () => {
         if (imageOverlayFrame) return;
@@ -9937,10 +9819,6 @@
         }
       };
 
-      // NOTE: high-frequency triggers (scroll/wheel/touchmove/mutations/poll) are wired to
-      // `scheduleIfChanged`, not the raw `schedule`. `scheduleIfChanged` does a cheap
-      // placement-signature comparison first and only pays for mountPanel()/applyPanelState()
-      // when route, viewport, overlay state, or current placement actually changed.
       if (typeof this.window.MutationObserver === "function" && this.document.body) {
         this.positionObserver = new this.window.MutationObserver(() => {
           scheduleIfChanged();
