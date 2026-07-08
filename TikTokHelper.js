@@ -29,7 +29,7 @@
 // @run-at          document-start
 // ==/UserScript==
 
-function (root) {
+(function (root) {
   "use strict";
 
   const SCRIPT_PREFIX = "tthelper";
