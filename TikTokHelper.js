@@ -1,10 +1,11 @@
 // ==UserScript==
-// @name         TikTokHelper
-// @name:zh-CN  TikTokHelper - TikTok 下载助手
-// @description  Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
-// @description:zh-CN  为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
+// @name			TikTokHelper
+// @name:zh-CN		TikTokHelper - TikTok 下载助手
+// @description		Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
+// @description:zh-CN   为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
 // @namespace       https://github.com/zimabx/TikTokHelper
-// @version         0.9.19
+// @namespace       https://github.com/zimabx/TikTokHelper
+// @version         1.0.0
 // @author          zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -48,16 +49,7 @@
     typeof GM_registerMenuCommand !== "undefined"
       ? GM_registerMenuCommand
       : root?.GM_registerMenuCommand;
-  const MEDIA_READY_ATTEMPTS = 6;
-  const MEDIA_READY_INTERVAL_MS = 120;
-  const MEDIA_READY_COLD_START_ATTEMPTS = 24;
-  const MEDIA_READY_COLD_START_INTERVAL_MS = 200;
-  const MEDIA_READY_COLD_START_WINDOW_MS = 8000;
-  const RUNTIME_OBSERVER_MAX_TEXT_BYTES = 2 * 1024 * 1024;
-  const RUNTIME_OBSERVER_CONTENT_TYPE_RE =
-    /(?:application\/json|text\/plain|application\/x-ndjson|application\/ld\+json)/i;
-  const RUNTIME_OBSERVER_URL_HINT_RE =
-    /(?:\/api\/|\/aweme\/|\/item\/|\/feed\/|\/detail\/|\/node\/share|\/v1\/|\/v2\/|\/tiktok\/)/i;
+  const PANEL_POSITION_CHECK_THROTTLE_MS = 32;
 
   const DEFAULT_VIDEO_SOURCE_COLUMNS = ["quality", "resolution", "codec", "fps", "bitrate", "size"];
   const VIDEO_SOURCE_COLUMN_DEFINITIONS = [
@@ -81,9 +73,7 @@
     album_index_format: "_01",
     video_quality: "highest_resolution",
     video_source_columns: [...DEFAULT_VIDEO_SOURCE_COLUMNS],
-    download_method: "browser",
     language: "auto",
-    theme: "auto",
     shortcut_download: "M",
     shortcut_frame: "",
     shortcut_details: "",
@@ -234,13 +224,6 @@
     ["zh", "中文"],
   ];
 
-  const THEME_OPTIONS = [
-    ["auto", "Auto / 自动"],
-    ["dark", "Dark / 暗黑"],
-    ["light", "Light / 白天"],
-  ];
-  const DOWNLOAD_METHOD_OPTIONS = ["browser"];
-
   const ALBUM_INDEX_FORMAT_OPTIONS = [
     { value: "_01", label: "_01", template: "_{nn}" },
     { value: "_1", label: "_1", template: "_{n}" },
@@ -254,7 +237,6 @@
     en: {
       menu: "TikTok Helper menu",
       download: "Download",
-      download_video: "Download Video",
       download_album: "Download Album",
       download_image: "Download Image",
       details: "Details",
@@ -266,35 +248,32 @@
       music: "Music",
       copy_json: "Copy JSON",
       no_media: "No TikTok media found on this page.",
+      current_item_not_found: "Could not confirm the current TikTok post.",
+      current_item_author_not_found: "The current post was found, but its creator could not be confirmed.",
+      current_item_author_ambiguous: "The current post was found, but multiple creator identities conflict.",
+      current_item_ambiguous: "Multiple post IDs were found in the current area.",
+      detail_data_missing: "The post detail page did not contain usable media data.",
+      detail_id_mismatch: "The returned post did not match the selected post.",
       asset_empty: "Asset URL is empty.",
       download_preparing: "Preparing download...",
-      downloading: "Downloading",
       download_completed: "Download completed",
       preparing_video_download: "Preparing video download...",
+      downloading_video: "Downloading video",
+      downloading_music: "Downloading music",
       downloading_album: "Downloading album",
       downloading_image: "Downloading image",
-      download_busy: "Download in progress",
-      download_started: "Download started",
       download_failed: "Download failed",
+      download_cancelled: "Download cancelled",
       settings_saved: "Settings saved.",
-      media_json_copied: "Media JSON copied.",
-      settings_title: "TikTok Helper Settings",
-      settings_subtitle: "Appearance, video quality, and filename rules.",
       details_title: "TikTok Helper Details",
       appearance_section: "Appearance",
       download_section: "Download",
       filename_section: "Filename",
       language: "Language",
-      theme: "Theme",
       video_resolution: "Video Resolution",
-      downloader: "Downloader",
-      download_method_browser: "Browser",
-      browser_downloads_only: "Downloader: browser",
       details_tab_json: "JSON",
-      media_resources: "Media Resources",
       video_sources: "Video Sources",
       image_album: "Image Album",
-      post_info: "Post Info",
       raw_json: "Raw JSON",
       url: "URL",
       open: "Open",
@@ -304,6 +283,7 @@
       bitrate: "Bitrate",
       size: "Size",
       source: "Source",
+      watermarked: "Watermarked",
       actions: "Actions",
       duration: "Duration",
       created_at: "Created",
@@ -316,29 +296,21 @@
       share_count: "Shares",
       collect_count: "Favorites",
       no_items: "No data",
-      template_mode: "Template Mode",
       available_fields: "Available attributes",
-      filename_template: "Filename Template",
       filename_max_length: "Filename Max Length",
       album_index_format: "Album Increment",
       copy: "Copy",
-      remove: "Remove",
-      reset: "Reset",
       save: "Save",
       cancel: "Cancel",
       id: "ID",
       author: "Author",
       description: "Description",
-      time: "Time",
-      file: "File",
       tooltip_language: "Choose the interface language. Auto follows your browser language.",
-      tooltip_theme: "Choose the script theme. Auto follows your system color scheme.",
       tooltip_video_resolution: "Pick which TikTok video source should be preferred when multiple qualities are available.",
-      tooltip_available_fields: "All filename attributes supported by this script. Click one to append its `${name}` token to the filename template.",
-      tooltip_custom_template: "Plain filename template. Click an available attribute below to append it at the end. Example: `${nickname}_${short_id}_${desc}`.",
+      tooltip_available_fields: "All filename attributes supported by this script. Click one to insert its `${name}` token at the current cursor position.",
+      tooltip_custom_template: "Plain filename template. Click an available attribute below to insert it at the current cursor position. Example: `${nickname}_${short_id}_${desc}`.",
       tooltip_filename_max_length: "Maximum filename length before the extension is added. Invalid filename characters are replaced automatically.",
       tooltip_album_index_format: "Numbering style appended to each image in an album.",
-      tooltip_browser_downloads_only: "Downloads use the browser flow with a userscript request fallback. Additional host settings are intentionally omitted.",
       quality_highest_resolution: "Highest resolution",
       quality_highest_bitrate: "Highest bitrate",
       quality_1080p: "1080p",
@@ -390,10 +362,6 @@
       frame_failed: "Could not capture the current frame.",
       frame_copy_unsupported: "Image clipboard copy is unavailable in this browser.",
       filename_preview: "Current filename",
-      downloader_config: "Downloader",
-      video_download_settings: "Video Download Settings",
-      browser_downloader_note: "Only browser downloads are enabled. External downloader host settings are hidden.",
-      source_properties: "Available source properties",
       source_columns: "Video source columns",
       shortcut_section: "Shortcuts",
       shortcut_download: "Download shortcut",
@@ -427,7 +395,8 @@
       bulk_type_unknown: "Unknown",
       bulk_downloading: "Bulk downloading",
       bulk_download_done: "Bulk download finished",
-      bulk_download_result: "Success ${success}, failed ${failed}.",
+      bulk_download_result_detailed: "Success ${success}, failed ${failed}.",
+      bulk_download_cancelled: "Bulk download cancelled",
       show_test_notification_menu: "Show notification test items",
       show_debug_info_menu: "Show test info item",
       template: "Template",
@@ -435,7 +404,6 @@
     zh: {
       menu: "TikTok Helper 菜单",
       download: "下载",
-      download_video: "下载视频",
       download_album: "下载图集",
       download_image: "下载图片",
       details: "详情",
@@ -447,35 +415,32 @@
       music: "音乐",
       copy_json: "复制 JSON",
       no_media: "当前页面未找到 TikTok 媒体。",
+      current_item_not_found: "无法确认当前 TikTok 作品。",
+      current_item_author_not_found: "已确认当前作品，但无法确认作者账号。",
+      current_item_author_ambiguous: "已确认当前作品，但存在互相冲突的作者身份。",
+      current_item_ambiguous: "当前区域中发现了多个冲突的作品 ID。",
+      detail_data_missing: "作品详情页中没有可用的媒体数据。",
+      detail_id_mismatch: "详情页返回的作品与当前选择的作品不一致。",
       asset_empty: "资源链接为空。",
       download_preparing: "正在准备下载...",
-      downloading: "正在下载",
       download_completed: "下载完成",
       preparing_video_download: "正在准备视频下载...",
+      downloading_video: "正在下载视频",
+      downloading_music: "正在下载音乐",
       downloading_album: "正在下载图集",
       downloading_image: "正在下载图片",
-      download_busy: "下载正在进行",
-      download_started: "已开始下载",
       download_failed: "下载失败",
+      download_cancelled: "下载已取消",
       settings_saved: "设置已保存。",
-      media_json_copied: "媒体 JSON 已复制。",
-      settings_title: "TikTok Helper 设置",
-      settings_subtitle: "外观、视频质量和文件名规则。",
       details_title: "TikTok Helper 详情",
       appearance_section: "外观",
       download_section: "下载",
       filename_section: "文件名",
       language: "语言",
-      theme: "主题",
       video_resolution: "视频分辨率",
-      downloader: "下载器",
-      download_method_browser: "浏览器",
-      browser_downloads_only: "下载器：浏览器",
       details_tab_json: "JSON",
-      media_resources: "媒体资源",
       video_sources: "视频源",
       image_album: "图集",
-      post_info: "作品信息",
       raw_json: "原始 JSON",
       url: "链接",
       open: "打开",
@@ -485,6 +450,7 @@
       bitrate: "码率",
       size: "大小",
       source: "来源",
+      watermarked: "带水印",
       actions: "操作",
       duration: "时长",
       created_at: "发布时间",
@@ -497,29 +463,21 @@
       share_count: "分享",
       collect_count: "收藏",
       no_items: "无数据",
-      template_mode: "模板模式",
       available_fields: "可用属性",
-      filename_template: "文件名模板",
       filename_max_length: "文件名最大长度",
       album_index_format: "图集递增",
       copy: "复制",
-      remove: "移除",
-      reset: "重置",
       save: "保存",
       cancel: "取消",
       id: "ID",
       author: "作者",
       description: "描述",
-      time: "时间",
-      file: "文件",
       tooltip_language: "选择界面语言。自动会跟随浏览器语言。",
-      tooltip_theme: "选择脚本主题。自动会跟随系统颜色模式。",
       tooltip_video_resolution: "当 TikTok 提供多个视频源时，优先选择哪一种清晰度。",
-      tooltip_available_fields: "脚本支持的全部文件名属性。点击属性会把 `${name}` 追加到文件名模板末尾。",
-      tooltip_custom_template: "手动填写普通文件名模板。点击下方可用属性会追加到末尾。示例：`${nickname}_${short_id}_${desc}`。",
+      tooltip_available_fields: "脚本支持的全部文件名属性。点击属性会在模板当前光标处插入 `${name}`。",
+      tooltip_custom_template: "手动填写普通文件名模板。点击下方可用属性会在当前光标处插入。示例：`${nickname}_${short_id}_${desc}`。",
       tooltip_filename_max_length: "扩展名前的文件名最大长度。非法文件名字符会自动替换。",
       tooltip_album_index_format: "图集中每张图片追加的序号样式。",
-      tooltip_browser_downloads_only: "只使用浏览器下载，并保留用户脚本请求兜底。不显示额外主机设置。",
       quality_highest_resolution: "最高分辨率",
       quality_highest_bitrate: "最高码率",
       quality_1080p: "1080p",
@@ -571,10 +529,6 @@
       frame_failed: "无法获取当前视频帧。",
       frame_copy_unsupported: "当前浏览器不可用图片剪贴板复制。",
       filename_preview: "当前文件名",
-      downloader_config: "下载器",
-      video_download_settings: "视频下载设置",
-      browser_downloader_note: "当前仅启用浏览器下载，外部下载器主机配置已隐藏。",
-      source_properties: "可用源属性",
       source_columns: "视频源列",
       shortcut_section: "快捷键",
       shortcut_download: "下载快捷键",
@@ -608,7 +562,8 @@
       bulk_type_unknown: "待识别",
       bulk_downloading: "批量下载中",
       bulk_download_done: "批量下载完成",
-      bulk_download_result: "成功 ${success}，失败 ${failed}。",
+      bulk_download_result_detailed: "成功 ${success}，失败 ${failed}。",
+      bulk_download_cancelled: "批量下载已取消",
       show_test_notification_menu: "显示通知测试菜单项",
       show_debug_info_menu: "显示获取测试信息菜单项",
       template: "模板",
@@ -620,21 +575,6 @@
     if (value === "zh" || value === "en") return value;
     const language = String(navigatorLike?.language || navigatorLike?.userLanguage || "");
     return language.toLowerCase().startsWith("zh") ? "zh" : "en";
-  }
-
-  function resolveTheme(config = {}, mediaQuery = null) {
-    const value = String(config.theme || DEFAULT_CONFIG.theme);
-    if (value === "dark" || value === "light") return value;
-    if (mediaQuery && typeof mediaQuery.matches === "boolean") {
-      return mediaQuery.matches ? "dark" : "light";
-    }
-    try {
-      return root?.matchMedia?.("(prefers-color-scheme: dark)")?.matches
-        ? "dark"
-        : "light";
-    } catch (_err) {
-      return "dark";
-    }
   }
 
   function getMessage(key, config = {}, navigatorLike = root?.navigator) {
@@ -659,15 +599,11 @@
     return stripTemplateBackticks(config.filename_template) || DEFAULT_CONFIG.filename_template;
   }
 
-  function appendFilenameTemplateToken(template = "", field = "") {
-    const name = String(field || "");
-    const current = stripTemplateBackticks(template);
-    if (!getFilenameField(name)) return current;
-    return `${current}\${${name}}`;
-  }
-
-  function appendFilenameTemplateLiteral(template = "", literal = "") {
-    return `${stripTemplateBackticks(template)}${String(literal ?? "")}`;
+  function insertTextAtSelection(input, text) {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    input.setRangeText(String(text ?? ""), start, end, "end");
+    input.focus({ preventScroll: true });
   }
 
   function getVideoSourceColumnDefinition(key) {
@@ -776,8 +712,18 @@
       next[key] = merged[key];
     }
     next.filename_template = getFilenameTemplate(next);
-    next.filename_max_length = Number(next.filename_max_length || 80);
+    const filenameMaxLength = Number(next.filename_max_length);
+    next.filename_max_length =
+      Number.isFinite(filenameMaxLength) && filenameMaxLength > 0
+        ? Math.floor(filenameMaxLength)
+        : DEFAULT_CONFIG.filename_max_length;
     next.album_index_format = normalizeAlbumIndexFormat(next.album_index_format);
+    if (!VIDEO_QUALITY_OPTIONS.includes(next.video_quality)) {
+      next.video_quality = DEFAULT_CONFIG.video_quality;
+    }
+    if (!LANGUAGE_OPTIONS.some(([value]) => value === next.language)) {
+      next.language = DEFAULT_CONFIG.language;
+    }
     next.video_source_columns = normalizeVideoSourceColumns(next.video_source_columns);
     next.profile_bulk_checkbox_size = clampNumber(
       Number(next.profile_bulk_checkbox_size),
@@ -797,9 +743,6 @@
       next.show_debug_info_menu,
       DEFAULT_CONFIG.show_debug_info_menu,
     );
-    if (!DOWNLOAD_METHOD_OPTIONS.includes(next.download_method)) {
-      next.download_method = DEFAULT_CONFIG.download_method;
-    }
     return next;
   }
 
@@ -901,18 +844,13 @@
     }
   }
 
-  function parsePageDataFromDocument(doc) {
-    if (!doc || !doc.querySelector) return null;
-    const universalScript = doc.querySelector(
-      'script#__UNIVERSAL_DATA_FOR_REHYDRATION__[type="application/json"]',
-    );
-    const universal = parseJsonScriptText(universalScript?.textContent || "");
-    if (universal) return universal;
 
-    const sigiScript = doc.querySelector(
-      'script#SIGI_STATE[type="application/json"]',
+  function parsePageDataFromDocument(doc) {
+    if (!doc?.querySelector) return null;
+    const script = doc.querySelector(
+      'script#__UNIVERSAL_DATA_FOR_REHYDRATION__[type="application/json"],script#SIGI_STATE[type="application/json"]',
     );
-    return parseJsonScriptText(sigiScript?.textContent || "");
+    return parseJsonScriptText(script?.textContent || "");
   }
 
   function getWindowDataCandidates(win) {
@@ -924,8 +862,11 @@
     ].filter((value) => value && typeof value === "object");
   }
 
-  function parsePageDataFromWindow(win) {
-    return getWindowDataCandidates(win)[0] || null;
+  function collectPageDataCandidates(doc, win) {
+    return [
+      parsePageDataFromDocument(doc),
+      ...getWindowDataCandidates(win),
+    ].filter(Boolean);
   }
 
   function getAddressUrls(address) {
@@ -949,53 +890,12 @@
     return getAddressUrls(addresses.flatMap(ensureArray))[0] || firstString(...addresses);
   }
 
-  function getUrlResourceKeys(url = "") {
-    const text = String(url || "").trim();
-    if (!text || text.startsWith("blob:")) return [];
-    const keys = [text, text.split("#")[0].split("?")[0]];
-    try {
-      const parsed = new URL(text, "https://www.tiktok.com");
-      if (/^https?:$/i.test(parsed.protocol)) {
-        keys.push(parsed.pathname);
-        const parts = parsed.pathname.split("/").filter(Boolean);
-        keys.push(parts.slice(-3).join("/"));
-        keys.push(parts.slice(-2).join("/"));
-      }
-    } catch (_err) {}
-    return unique(keys.filter((key) => key && key.length > 8));
-  }
-
-  function urlsShareResource(leftUrls = [], rightUrls = []) {
-    const rightKeys = new Set(rightUrls.flatMap(getUrlResourceKeys));
-    if (!rightKeys.size) return false;
-    return leftUrls.flatMap(getUrlResourceKeys).some((key) => rightKeys.has(key));
-  }
-
   function getVideoElementResourceUrls(videoElement) {
     if (!videoElement) return [];
     return unique([
       pickVideoElementSource(videoElement),
       videoElement.poster || "",
       videoElement.getAttribute?.("poster") || "",
-    ]);
-  }
-
-  function getMediaResourceUrls(media = {}) {
-    const sources = ensureArray(media?.video?.sources);
-    const images = ensureArray(media?.images);
-    return unique([
-      media?.video?.primaryUrl || "",
-      ...ensureArray(media?.video?.fallbackUrls),
-      ...sources.flatMap((source) => [
-        source?.url || "",
-        ...ensureArray(source?.fallbackUrls),
-      ]),
-      media?.cover?.url || "",
-      media?.cover?.dynamicUrl || "",
-      ...images.flatMap((image) => [
-        image?.url || "",
-        ...ensureArray(image?.fallbackUrls),
-      ]),
     ]);
   }
 
@@ -1006,27 +906,26 @@
       .trim();
   }
 
-  function contextContainsText(contextText = "", value = "") {
-    const text = compactMatchText(contextText);
-    const needle = compactMatchText(value);
-    if (!text || needle.length < 3) return false;
-    if (text.includes(needle)) return true;
-    return needle.length > 24 && text.includes(needle.slice(0, 24));
-  }
-
-  function scoreItemAgainstContextText(item = {}, contextText = "") {
-    if (!compactMatchText(contextText)) return 0;
-    const author = item.author || item.authorInfo || {};
-    const values = [
-      { value: item.desc || item.description || "", score: 55 },
-      { value: author.uniqueId || author.unique_id || "", score: 35 },
-      { value: author.nickname || author.nickName || "", score: 28 },
-      { value: author.secUid || author.sec_uid || "", score: 16 },
-    ];
-    return values.reduce(
-      (score, entry) => score + (contextContainsText(contextText, entry.value) ? entry.score : 0),
-      0,
-    );
+  function getReactInternalRoots(element = null) {
+    if (!element || (typeof element !== "object" && typeof element !== "function")) return [];
+    const roots = [];
+    let keys = [];
+    try {
+      keys = Object.getOwnPropertyNames(element);
+    } catch (_err) {
+      return roots;
+    }
+    const prefixes = ["__reactProps$", "__reactFiber$", "__reactContainer$"];
+    for (const prefix of prefixes) {
+      for (const key of keys) {
+        if (!key.startsWith(prefix)) continue;
+        try {
+          const value = element[key];
+          if (value && typeof value === "object") roots.push(value);
+        } catch (_err) {}
+      }
+    }
+    return roots;
   }
 
   function compactLiveContextText(value = "") {
@@ -1045,16 +944,6 @@
     return /^LIVE\d{1,8}$/i.test(compactAction) && compactAction.length <= 16;
   }
 
-  function getItemPageUrl(item = {}, fallbackUrl = "") {
-    const id = getVideoItemId(item);
-    const author = item.author || item.authorInfo || {};
-    const uniqueId = author.uniqueId || author.unique_id || "";
-    if (getVideoIdFromUrl(fallbackUrl) === id) return fallbackUrl;
-    if (id && uniqueId) {
-      return `https://www.tiktok.com/@${uniqueId}/${getImagePostPayload(item) ? "photo" : "video"}/${id}`;
-    }
-    return fallbackUrl || "";
-  }
 
   function getAddressDimension(address, key) {
     const first = ensureArray(address).find(
@@ -1179,6 +1068,36 @@
     return parts.join(" ") || source.gearName || source.qualityType || "video";
   }
 
+  function detectVideoSourceWatermark(sourceType = "unknown", raw = {}, address = {}) {
+    const positive = firstDefined(
+      raw?.hasWatermark,
+      raw?.has_watermark,
+      raw?.isWatermark,
+      raw?.is_watermark,
+      address?.hasWatermark,
+      address?.has_watermark,
+      address?.isWatermark,
+      address?.is_watermark,
+    );
+    const positiveFlag = normalizeBoolFlag(positive);
+    if (positiveFlag !== null) return positiveFlag ? "watermarked" : "clean";
+
+    const negative = firstDefined(
+      raw?.withoutWatermark,
+      raw?.without_watermark,
+      raw?.noWatermark,
+      raw?.no_watermark,
+      address?.withoutWatermark,
+      address?.without_watermark,
+      address?.noWatermark,
+      address?.no_watermark,
+    );
+    const negativeFlag = normalizeBoolFlag(negative);
+    if (negativeFlag !== null) return negativeFlag ? "clean" : "watermarked";
+
+    return sourceType === "download" ? "watermarked" : "unknown";
+  }
+
   function makeVideoSource(input = {}) {
     const urls = getAddressUrls(input.address || input.url || input.urls);
     const qualityType = firstDefined(input.qualityType, input.quality_type);
@@ -1188,6 +1107,13 @@
       qualityFromText(gearName, input.definition, input.label) ||
       (qualityType !== undefined ? String(qualityType) : "");
     const source = {
+      sourceType: String(input.sourceType || "unknown"),
+      sourceIndex: Number.isInteger(input.sourceIndex) ? input.sourceIndex : null,
+      watermarkStatus: detectVideoSourceWatermark(
+        String(input.sourceType || "unknown"),
+        input.raw,
+        input.address,
+      ),
       url: urls[0] || "",
       fallbackUrls: urls.slice(1),
       width: Number(input.width || getAddressDimension(input.address, "Width") || 0),
@@ -1217,14 +1143,67 @@
           ]) ||
           0,
       ),
-      rawProperties: collectSourceProperties(input.raw, input.address),
     };
+    const rawPropertyInputs = [input.raw, input.address].filter(
+      (value) => value && typeof value === "object",
+    );
+    Object.defineProperty(source, "rawProperties", {
+      configurable: true,
+      enumerable: false,
+      get() {
+        const value = collectSourceProperties(...rawPropertyInputs);
+        Object.defineProperty(source, "rawProperties", {
+          configurable: true,
+          enumerable: false,
+          writable: false,
+          value,
+        });
+        return value;
+      },
+    });
     source.resolution = getSourceResolution(source);
     source.label = sourceLabel(source);
     return source.url ? source : null;
   }
 
-  function getVideoSourceFromBitrateInfo(info = {}, video = {}) {
+  function getDirectVideoSource(video, address, sizeFallbackPaths, sourceType) {
+    return makeVideoSource({
+      sourceType,
+      raw: video,
+      address,
+      width: video.width,
+      height: video.height,
+      codec: video.codecType || video.encodedType || "",
+      fps:
+        video.FPS ||
+        video.fps ||
+        video.BitrateFPS ||
+        video.bitrateFPS ||
+        video.bitrate_fps ||
+        video.VideoFPS ||
+        video.videoFPS ||
+        video.FrameRate ||
+        video.frameRate ||
+        video.frame_rate ||
+        readNumberPath(video, ["videoMeta.fps", "VideoMeta.FPS"]),
+      quality:
+        sourceType === "download"
+          ? ""
+          : video.videoQuality || video.definition || video.ratio || "",
+      qualityType:
+        sourceType === "download"
+          ? undefined
+          : firstDefined(video.QualityType, video.qualityType, video.quality_type),
+      format: video.format || "",
+      size:
+        video.size ||
+        video.DataSize ||
+        video.dataSize ||
+        readNumberPath(video, sizeFallbackPaths),
+    });
+  }
+
+  function getVideoSourceFromBitrateInfo(info = {}, video = {}, index = 0) {
     const playAddr =
       info.PlayAddr ||
       info.playAddr ||
@@ -1241,6 +1220,8 @@
       info.video_quality,
     );
     return makeVideoSource({
+      sourceType: "bitrate",
+      sourceIndex: index,
       raw: info,
       address: playAddr,
       width:
@@ -1308,80 +1289,34 @@
     });
   }
 
-  function sortBitrateInfo(items) {
-    return [...items].sort((left, right) => {
-      const leftBitrate = Number(left.Bitrate || left.bitrate || 0);
-      const rightBitrate = Number(right.Bitrate || right.bitrate || 0);
-      return rightBitrate - leftBitrate;
-    });
-  }
-
   function extractVideoSources(video = {}) {
-    const bitrateSources = sortBitrateInfo(
-      ensureArray(
-        video.bitrateInfo ||
-          video.bitrate_info ||
-          video.bitrateInfos ||
-          video.bitrate_infos,
-      ),
+    const bitrateSources = ensureArray(
+      video.bitrateInfo ||
+        video.bitrate_info ||
+        video.bitrateInfos ||
+        video.bitrate_infos,
     )
-      .map((info) => getVideoSourceFromBitrateInfo(info, video))
+      .map((info, index) => ({ info, index }))
+      .sort((left, right) => {
+        const leftBitrate = Number(left.info?.Bitrate || left.info?.bitrate || 0);
+        const rightBitrate = Number(right.info?.Bitrate || right.info?.bitrate || 0);
+        return rightBitrate - leftBitrate;
+      })
+      .map(({ info, index }) => getVideoSourceFromBitrateInfo(info, video, index))
       .filter(Boolean);
     const directSources = [
-      makeVideoSource({
-        raw: video,
-        address: video.playAddr || video.PlayAddr || video.play_addr,
-        width: video.width,
-        height: video.height,
-        codec: video.codecType || video.encodedType || "",
-        fps:
-          video.FPS ||
-          video.fps ||
-          video.BitrateFPS ||
-          video.bitrateFPS ||
-          video.bitrate_fps ||
-          video.VideoFPS ||
-          video.videoFPS ||
-          video.FrameRate ||
-          video.frameRate ||
-          video.frame_rate ||
-          readNumberPath(video, ["videoMeta.fps", "VideoMeta.FPS"]),
-        quality: video.videoQuality || video.definition || video.ratio || "",
-        qualityType: firstDefined(video.QualityType, video.qualityType, video.quality_type),
-        format: video.format || "",
-        size:
-          video.size ||
-          video.DataSize ||
-          video.dataSize ||
-          readNumberPath(video, ["playAddr.dataSize", "PlayAddr.DataSize"]),
-      }),
-      makeVideoSource({
-        raw: video,
-        address: video.downloadAddr || video.DownloadAddr || video.download_addr,
-        width: video.width,
-        height: video.height,
-        codec: video.codecType || video.encodedType || "",
-        fps:
-          video.FPS ||
-          video.fps ||
-          video.BitrateFPS ||
-          video.bitrateFPS ||
-          video.bitrate_fps ||
-          video.VideoFPS ||
-          video.videoFPS ||
-          video.FrameRate ||
-          video.frameRate ||
-          video.frame_rate ||
-          readNumberPath(video, ["videoMeta.fps", "VideoMeta.FPS"]),
-        quality: video.videoQuality || video.definition || video.ratio || "",
-        qualityType: firstDefined(video.QualityType, video.qualityType, video.quality_type),
-        format: video.format || "",
-        size:
-          video.size ||
-          video.DataSize ||
-          video.dataSize ||
-          readNumberPath(video, ["downloadAddr.dataSize", "DownloadAddr.DataSize"]),
-      }),
+      getDirectVideoSource(
+        video,
+        video.playAddr || video.PlayAddr || video.play_addr,
+        ["playAddr.dataSize", "PlayAddr.DataSize"],
+        "play",
+      ),
+      getDirectVideoSource(
+        video,
+        video.downloadAddr || video.DownloadAddr || video.download_addr,
+        ["downloadAddr.dataSize", "DownloadAddr.DataSize"],
+        "download",
+      ),
     ].filter(Boolean);
 
     const byUrl = new Map();
@@ -1491,52 +1426,74 @@
     );
   }
 
-  function compareByResolutionThenBitrate(left, right) {
-    const resolutionDiff = Number(left.resolution || 0) - Number(right.resolution || 0);
-    if (resolutionDiff) return resolutionDiff;
-    return Number(left.bitrate || 0) - Number(right.bitrate || 0);
+  function compareKnownBitrate(left, right, direction = 1) {
+    const leftBitrate = Number(left?.bitrate || 0);
+    const rightBitrate = Number(right?.bitrate || 0);
+    const leftKnown = leftBitrate > 0;
+    const rightKnown = rightBitrate > 0;
+    if (leftKnown && rightKnown) return (leftBitrate - rightBitrate) * direction;
+    if (leftKnown !== rightKnown) return leftKnown ? -1 : 1;
+    return 0;
+  }
+
+  function compareByResolutionThenBitrate(left, right, direction = 1) {
+    const leftResolution = Number(left?.resolution || 0);
+    const rightResolution = Number(right?.resolution || 0);
+    if (leftResolution !== rightResolution) {
+      return (leftResolution - rightResolution) * direction;
+    }
+    return compareKnownBitrate(left, right, direction);
   }
 
   function selectVideoSource(sources, preference = DEFAULT_CONFIG.video_quality) {
-    const candidates = ensureArray(sources).filter((source) => source?.url);
-    if (!candidates.length) return null;
+    const allCandidates = ensureArray(sources).filter((source) => source?.url);
+    if (!allCandidates.length) return null;
+    const normalCandidates = allCandidates.filter((source) => source.sourceType !== "download");
+    const nonWatermarkedCandidates = normalCandidates.filter(
+      (source) => source.watermarkStatus !== "watermarked",
+    );
+    const candidates = nonWatermarkedCandidates.length
+      ? nonWatermarkedCandidates
+      : normalCandidates.length
+        ? normalCandidates
+        : allCandidates;
     const value = String(preference || DEFAULT_CONFIG.video_quality);
     if (value === "highest_bitrate") {
-      return [...candidates].sort(
-        (left, right) => Number(right.bitrate || 0) - Number(left.bitrate || 0),
-      )[0];
+      return [...candidates].sort((left, right) => compareKnownBitrate(left, right, -1))[0];
     }
     if (value === "lowest") {
-      return [...candidates].sort(compareByResolutionThenBitrate)[0];
+      return [...candidates].sort((left, right) => compareByResolutionThenBitrate(left, right, 1))[0];
     }
     const targetMatch = value.match(/^(\d{3,4})p$/);
     if (targetMatch) {
       const target = Number(targetMatch[1]);
       const exact = candidates.filter((source) => Number(source.resolution || 0) === target);
       if (exact.length) {
-        return exact.sort(
-          (left, right) => Number(right.bitrate || 0) - Number(left.bitrate || 0),
-        )[0];
+        return exact.sort((left, right) => compareKnownBitrate(left, right, -1))[0];
       }
       return [...candidates].sort((left, right) => {
         const leftDistance = Math.abs(Number(left.resolution || 0) - target);
         const rightDistance = Math.abs(Number(right.resolution || 0) - target);
         if (leftDistance !== rightDistance) return leftDistance - rightDistance;
-        return Number(right.bitrate || 0) - Number(left.bitrate || 0);
+        return compareKnownBitrate(left, right, -1);
       })[0];
     }
-    return [...candidates].sort(
-      (left, right) => compareByResolutionThenBitrate(right, left),
-    )[0];
+    return [...candidates].sort((left, right) => compareByResolutionThenBitrate(left, right, -1))[0];
   }
 
   function extractVideoUrls(video = {}, qualityPreference = DEFAULT_CONFIG.video_quality) {
     const sources = extractVideoSources(video);
     const primarySource = selectVideoSource(sources, qualityPreference);
+    const automaticSources = sources.filter(
+      (source) =>
+        source.sourceType !== "download" &&
+        source.watermarkStatus !== "watermarked",
+    );
+    const fallbackSources = automaticSources.length ? automaticSources : sources;
     const urls = unique([
       primarySource?.url || "",
       ...(primarySource?.fallbackUrls || []),
-      ...sources.flatMap((source) => [source.url, ...source.fallbackUrls]),
+      ...fallbackSources.flatMap((source) => [source.url, ...source.fallbackUrls]),
     ]);
     return {
       primaryUrl: urls[0] || "",
@@ -1562,256 +1519,104 @@
     return unique([...fromChallenges, ...fromText, ...fromContents]);
   }
 
-  function findVideoItemInPageData(data, pageUrl = "") {
-    if (!data || typeof data !== "object") return null;
-    const videoId = getVideoIdFromUrl(pageUrl);
-    const scope = data.__DEFAULT_SCOPE__ || data;
-    const detail = scope["webapp.video-detail"];
-    const directItem =
-      detail?.itemInfo?.itemStruct || detail?.itemStruct || detail?.itemInfo;
-    if (
-      (directItem?.video || directItem?.imagePost) &&
-      (!videoId || getVideoItemId(directItem) === videoId)
-    ) {
-      return directItem;
-    }
-
-    const itemModule = scope.ItemModule || data.ItemModule;
-    if (itemModule && typeof itemModule === "object") {
-      if (videoId && itemModule[videoId]) return itemModule[videoId];
-      if (!videoId) {
-        const firstItem = Object.values(itemModule).find(
-          (item) => item?.video || item?.imagePost,
-        );
-        if (firstItem) return firstItem;
-      }
-    }
-
-    return findVideoItemDeep(scope, videoId) || findVideoItemDeep(data, videoId);
-  }
-
   function getVideoItemId(item = {}) {
     return String(
       item.id || item.awemeId || item.aweme_id || item.itemId || item.item_id || "",
     );
   }
 
-  function isVideoItemCandidate(value) {
+
+  function normalizeTikTokItemFragment(rawItem = {}) {
+    if (!rawItem || typeof rawItem !== "object") return null;
+    const id = getVideoItemId(rawItem);
+    if (!id) return rawItem;
+    const nestedAuthor = rawItem.author || rawItem.authorInfo || {};
+    const author = mergeFilledItemRecords([
+      {
+        id: firstString(
+          nestedAuthor.id,
+          nestedAuthor.uid,
+          nestedAuthor.userId,
+          nestedAuthor.user_id,
+          rawItem.authorId,
+          rawItem.author_id,
+        ),
+        uniqueId: firstString(
+          nestedAuthor.uniqueId,
+          nestedAuthor.unique_id,
+          nestedAuthor.shortId,
+          nestedAuthor.short_id,
+          rawItem.authorUniqueId,
+          rawItem.author_unique_id,
+        ),
+        secUid: firstString(
+          nestedAuthor.secUid,
+          nestedAuthor.sec_uid,
+          rawItem.authorSecId,
+          rawItem.author_sec_id,
+          rawItem.authorSecUid,
+          rawItem.author_sec_uid,
+        ),
+        nickname: firstString(
+          nestedAuthor.nickname,
+          nestedAuthor.nickName,
+          rawItem.nickname,
+          rawItem.authorNickname,
+          rawItem.author_nickname,
+        ),
+        signature: firstString(
+          nestedAuthor.signature,
+          nestedAuthor.desc,
+          rawItem.authorSignature,
+          rawItem.author_signature,
+        ),
+        avatarThumb: firstUrl(
+          nestedAuthor.avatarThumb,
+          nestedAuthor.avatar_thumb,
+          rawItem.avatarThumb,
+          rawItem.avatar_thumb,
+        ),
+        avatarMedium: firstUrl(
+          nestedAuthor.avatarMedium,
+          nestedAuthor.avatar_medium,
+          rawItem.avatarMedium,
+          rawItem.avatar_medium,
+        ),
+        avatarLarger: firstUrl(
+          nestedAuthor.avatarLarger,
+          nestedAuthor.avatar_larger,
+          rawItem.avatarLarger,
+          rawItem.avatar_larger,
+        ),
+      },
+      nestedAuthor,
+    ]);
+    return {
+      ...rawItem,
+      id,
+      author,
+    };
+  }
+
+  function isItemDataFragment(value) {
+    if (!value || typeof value !== "object" || !getVideoItemId(value)) return false;
     return Boolean(
-      value &&
-        typeof value === "object" &&
-        (value.video || value.imagePost) &&
-        (getVideoItemId(value) || value.desc || value.description),
+      value.video ||
+        getImagePostPayload(value) ||
+        value.author ||
+        value.authorInfo ||
+        value.authorStats ||
+        value.desc ||
+        value.description ||
+        value.music ||
+        value.stats ||
+        value.statsV2,
     );
-  }
-
-  function findVideoItemDeep(data, targetId = "") {
-    if (!data || typeof data !== "object") return null;
-    const stack = [data];
-    const seen = new Set();
-    let fallback = null;
-    let inspected = 0;
-    while (stack.length && inspected < 25000) {
-      const current = stack.pop();
-      if (!current || typeof current !== "object" || seen.has(current)) continue;
-      seen.add(current);
-      inspected += 1;
-      if (isVideoItemCandidate(current)) {
-        const id = getVideoItemId(current);
-        if (!targetId || id === targetId) return current;
-        if (!fallback) fallback = current;
-      }
-      for (const value of Object.values(current)) {
-        if (value && typeof value === "object") stack.push(value);
-      }
-    }
-    return targetId ? null : fallback;
-  }
-
-  function collectVideoItemsDeep(data) {
-    if (!data || typeof data !== "object") return [];
-    const stack = [data];
-    const seen = new Set();
-    const items = [];
-    let inspected = 0;
-    while (stack.length && inspected < 30000) {
-      const current = stack.pop();
-      if (!current || typeof current !== "object" || seen.has(current)) continue;
-      seen.add(current);
-      inspected += 1;
-      if (isVideoItemCandidate(current)) {
-        items.push(current);
-      }
-      for (const value of Object.values(current)) {
-        if (value && typeof value === "object") stack.push(value);
-      }
-    }
-    return items;
-  }
-  
-  function findBestMediaMatch(items = [], videoElement = null, contextText = "", config = {}, pageUrl = "") {
-    const elementUrls = getVideoElementResourceUrls(videoElement);
-    let bestTextMatch = null;
-    for (const item of items) {
-      const itemPageUrl = getItemPageUrl(item, pageUrl);
-      const media = normalizeMediaItem(item, itemPageUrl, config);
-      if (!hasUsableMedia(media)) continue;
-      if (elementUrls.length && urlsShareResource(elementUrls, getMediaResourceUrls(media))) {
-        return media;
-      }
-      const textScore = scoreItemAgainstContextText(item, contextText);
-      if (!bestTextMatch || textScore > bestTextMatch.score) {
-        bestTextMatch = { score: textScore, media };
-      }
-    }
-    return bestTextMatch?.score >= 55 ? bestTextMatch.media : null;
-  }
-
-  class RuntimeMediaCache {
-    constructor(limit = 120) {
-      this.limit = limit;
-      this.items = new Map();
-      this.lastItemId = "";
-    }
-
-    ingestJson(data, sourceUrl = "") {
-      const items = collectVideoItemsDeep(data);
-      for (const item of items) {
-        const id = getVideoItemId(item);
-        if (!id) continue;
-        this.items.delete(id);
-        this.items.set(id, {
-          item,
-          sourceUrl,
-          seenAt: Date.now(),
-        });
-        this.lastItemId = id;
-      }
-      while (this.items.size > this.limit) {
-        const firstKey = this.items.keys().next().value;
-        this.items.delete(firstKey);
-      }
-      return items.length;
-    }
-
-    ingestText(text, sourceUrl = "") {
-      if (!text || typeof text !== "string") return 0;
-      if (!/"(?:video|itemList|itemStruct|aweme|aweme_list)"/.test(text)) return 0;
-      const data = parseJsonScriptText(text);
-      return data ? this.ingestJson(data, sourceUrl) : 0;
-    }
-
-    getItem(pageUrl = "") {
-      const id = getVideoIdFromUrl(pageUrl);
-      if (id && this.items.has(id)) return this.items.get(id).item;
-      return null;
-    }
-
-    getMedia(pageUrl = "", config = {}) {
-      return normalizeMediaItem(this.getItem(pageUrl), pageUrl, config);
-    }
-
-    getMediaByVideoElement(videoElement = null, contextText = "", config = {}, pageUrl = "") {
-      const entries = Array.from(this.items.values())
-        .reverse()
-        .map((entry) => entry.item);
-      return findBestMediaMatch(entries, videoElement, contextText, config, pageUrl);
-    }
-  }
-
-  function getResponseContentLength(headers) {
-    const value = Number(headers?.get?.("content-length") || 0);
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  }
-
-  function shouldInspectRuntimeResponse(url = "", contentType = "", contentLength = 0) {
-    const textUrl = String(url || "");
-    if (contentLength > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return false;
-    if (contentType && !RUNTIME_OBSERVER_CONTENT_TYPE_RE.test(contentType)) return false;
-    if (RUNTIME_OBSERVER_URL_HINT_RE.test(textUrl)) return true;
-    return RUNTIME_OBSERVER_CONTENT_TYPE_RE.test(contentType);
-  }
-
-  class RuntimeResponseObserver {
-    constructor(win, cache) {
-      this.window = win;
-      this.cache = cache;
-    }
-
-    install() {
-      const win = this.window;
-      if (!win || win.__tkDlRuntimeObserverInstalled) return;
-      win.__tkDlRuntimeObserverInstalled = true;
-      this.patchFetch();
-      this.patchXhr();
-    }
-
-    patchFetch() {
-      const win = this.window;
-      const originalFetch = win.fetch;
-      if (typeof originalFetch !== "function") return;
-      const cache = this.cache;
-      win.fetch = function patchedFetch(...args) {
-        return originalFetch.apply(win, args).then((response) => {
-          try {
-            const url = response?.url || String(args[0]?.url || args[0] || "");
-            const contentType = response?.headers?.get?.("content-type") || "";
-            const contentLength = getResponseContentLength(response?.headers);
-            if (!shouldInspectRuntimeResponse(url, contentType, contentLength)) {
-              return response;
-            }
-            response
-              ?.clone?.()
-              ?.text?.()
-              ?.then((text) => {
-                if (text.length > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return;
-                cache.ingestText(text, url);
-              })
-              ?.catch(() => {});
-          } catch (_err) {}
-          return response;
-        });
-      };
-    }
-
-    patchXhr() {
-      const win = this.window;
-      const Xhr = win.XMLHttpRequest;
-      if (!Xhr?.prototype) return;
-      const cache = this.cache;
-      const originalOpen = Xhr.prototype.open;
-      const originalSend = Xhr.prototype.send;
-      Xhr.prototype.open = function patchedOpen(method, url, ...rest) {
-        this.__tkDlUrl = String(url || "");
-        return originalOpen.call(this, method, url, ...rest);
-      };
-      Xhr.prototype.send = function patchedSend(...args) {
-        this.addEventListener?.("load", function onLoad() {
-          try {
-            const url = this.responseURL || this.__tkDlUrl || "";
-            const contentType = this.getResponseHeader?.("content-type") || "";
-            const contentLength = Number(this.getResponseHeader?.("content-length") || 0);
-            if (!shouldInspectRuntimeResponse(url, contentType, contentLength)) return;
-
-            const responseType = this.responseType || "";
-            if (responseType && responseType !== "text" && responseType !== "json") return;
-            if (responseType === "json") {
-              cache.ingestJson(this.response, url);
-              return;
-            }
-
-            const text = this.responseText || "";
-            if (text.length > RUNTIME_OBSERVER_MAX_TEXT_BYTES) return;
-            cache.ingestText(text, url);
-          } catch (_err) {}
-        });
-        return originalSend.apply(this, args);
-      };
-    }
   }
 
   function normalizeMediaItem(item, pageUrl = "", options = {}) {
     if (!item || typeof item !== "object") return null;
+    item = normalizeTikTokItemFragment(item) || item;
     const video = item.video || {};
     const config = { ...DEFAULT_CONFIG, ...options };
     const urls = extractVideoUrls(video, config.video_quality);
@@ -1901,8 +1706,15 @@
         size: Number(primarySource.size || video.size || 0),
       },
       cover: {
-        url: firstString(video.cover, video.originCover, item.video?.cover, imagePostCover.url),
-        dynamicUrl: firstString(video.dynamicCover),
+        url: firstUrl(
+          video.cover,
+          video.originCover,
+          video.coverAddr,
+          video.cover_addr,
+          item.video?.cover,
+          imagePostCover.url,
+        ),
+        dynamicUrl: firstUrl(video.dynamicCover, video.dynamic_cover),
         width: firstPositiveNumber(imagePostCover.width, video.width),
         height: firstPositiveNumber(imagePostCover.height, video.height),
       },
@@ -1947,10 +1759,6 @@
     };
   }
 
-  function extractMediaFromPageData(data, pageUrl = "", options = {}) {
-    return normalizeMediaItem(findVideoItemInPageData(data, pageUrl), pageUrl, options);
-  }
-
   function hasUsableMedia(media) {
     return Boolean(
       media?.video?.primaryUrl ||
@@ -1974,62 +1782,6 @@
     return firstString(sources.map((source) => source.src));
   }
 
-  function extractMediaFromVideoElement(videoElement, pageUrl = "") {
-    const source = pickVideoElementSource(videoElement);
-    if (!source) return null;
-    const id = getVideoIdFromUrl(pageUrl) || `video_${Date.now()}`;
-    return {
-      id,
-      desc: "",
-      createTime: null,
-      pageUrl,
-      author: {
-        id: "",
-        uniqueId: getAuthorFromUrl(pageUrl),
-        secUid: "",
-        nickname: getAuthorFromUrl(pageUrl),
-        avatarUrl: "",
-        signature: "",
-        verification: "",
-        verified: false,
-        followerCount: undefined,
-        totalFavorited: undefined,
-        profileUrl: getAuthorFromUrl(pageUrl) ? `https://www.tiktok.com/@${getAuthorFromUrl(pageUrl)}` : "",
-      },
-      video: {
-        primaryUrl: source,
-        fallbackUrls: [],
-        width: Number(videoElement?.videoWidth || 0),
-        height: Number(videoElement?.videoHeight || 0),
-        duration: Number(videoElement?.duration || 0),
-        format: "mp4",
-        codec: "",
-        fps: 0,
-        quality: "",
-        size: 0,
-      },
-      cover: {
-        url: videoElement?.poster || "",
-        dynamicUrl: "",
-      },
-      music: {
-        id: "",
-        title: "",
-        authorName: "",
-        coverUrl: "",
-        duration: 0,
-        url: "",
-      },
-      images: [],
-      hashtags: [],
-      stats: {},
-      shareUrl: pageUrl,
-      groupId: id,
-      permissions: {},
-      raw: null,
-    };
-  }
-
   function getAuthorFromUrl(url) {
     const match = String(url || "").match(/tiktok\.com\/@([^/?#]+)/);
     return match ? decodeURIComponent(match[1]) : "";
@@ -2039,7 +1791,7 @@
     const text = String(value || "");
     if (/^\d+$/.test(text)) {
       try {
-        return BigInt(text).toString(36);
+        return root.BigInt(text).toString(36);
       } catch (_err) {
         return text;
       }
@@ -2239,12 +1991,12 @@
   function buildDetailsModel(media = {}, config = {}, language = "en") {
     const merged = { ...DEFAULT_CONFIG, ...config };
     const t = (key) => getMessage(key, { language });
-    const videoSourceColumns = normalizeVideoSourceColumns(merged.video_source_columns).map(
-      (key) => {
-        const definition = getVideoSourceColumnDefinition(key);
-        return { key, label: t(definition?.messageKey || key) || key };
-      },
-    );
+    const videoSourceColumns = normalizeVideoSourceColumns(
+      merged.video_source_columns,
+    ).map((key) => {
+      const definition = getVideoSourceColumnDefinition(key);
+      return { key, label: t(definition?.messageKey || key) || key };
+    });
     const baseName = buildFilename(media, merged);
     const videoFormat = media.video?.format || "mp4";
     const videoName = `${baseName}.${videoFormat}`;
@@ -2256,7 +2008,13 @@
       .map((source, index) => ({
         index: index + 1,
         label: source.label || source.quality || `${t("source")} ${index + 1}`,
-        quality: source.quality || source.gearName || source.qualityType || "-",
+        sourceTypeKey: source.sourceType || "unknown",
+        watermarkStatus: source.watermarkStatus || "unknown",
+        sourceIndex: Number.isInteger(source.sourceIndex) ? source.sourceIndex : null,
+        quality:
+          source.watermarkStatus === "watermarked"
+            ? t("watermarked")
+            : source.quality || source.gearName || source.qualityType || "-",
         resolution: formatResolution(
           source.width,
           source.height,
@@ -2284,7 +2042,13 @@
       videoSources.push({
         index: 1,
         label: media.video.quality || t("video"),
-        quality: media.video.quality || "-",
+        sourceTypeKey: media.video.primarySource?.sourceType || "unknown",
+        watermarkStatus: media.video.primarySource?.watermarkStatus || "unknown",
+        sourceIndex: Number.isInteger(media.video.primarySource?.sourceIndex) ? media.video.primarySource.sourceIndex : null,
+        quality:
+          media.video.primarySource?.watermarkStatus === "watermarked"
+            ? t("watermarked")
+            : media.video.quality || "-",
         resolution: formatResolution(media.video.width, media.video.height),
         codec: media.video.codec || "-",
         fps: media.video.fps ? String(media.video.fps) : "-",
@@ -2379,9 +2143,10 @@
       { key: "isPrivate", label: t("private_video"), value: media.permissions?.isPrivate },
     ].filter((row) => typeof row.value === "boolean");
 
+    const createdAt = formatTimestamp(media.createTime);
     const post = {
       description: media.desc || "",
-      createdAt: formatTimestamp(media.createTime),
+      createdAt,
       shareUrl: media.shareUrl || media.pageUrl || "",
       stats,
       ids: {
@@ -2409,7 +2174,7 @@
       id: media.id || "",
       author,
       desc: media.desc || "",
-      createdAt: formatTimestamp(media.createTime),
+      createdAt,
       duration: formatDuration(media.video?.duration),
       hashtags: ensureArray(media.hashtags),
       videoSources,
@@ -2464,6 +2229,1164 @@
     return result;
   }
 
+
+  const ITEM_DETAIL_CACHE_LIMIT = 50;
+  const ITEM_DETAIL_CACHE_TTL_MS = 5 * 60 * 1000;
+  const LOCAL_REACT_SCAN_MAX_OBJECTS = 320;
+  const LOCAL_REACT_SCAN_MAX_DEPTH = 5;
+  const IDENTITY_VERSION_WAIT_MS = 500;
+  const IDENTITY_EVIDENCE_RANK = Object.freeze({
+    "page-url": 500,
+    "local-permalink": 450,
+    "local-wrapper-author": 400,
+    "local-react-canonical": 350,
+    "local-react-wrapper-author": 340,
+    "local-react-page-exact": 330,
+  });
+
+  function parseTikTokItemIdentityFromUrl(rawUrl = "") {
+    let parsed = null;
+    try {
+      parsed = new URL(String(rawUrl || ""), "https://www.tiktok.com/");
+    } catch (_err) {
+      return null;
+    }
+    const match = parsed.pathname.match(
+      /^\/@([^/]+)\/(video|photo)\/(\d+)(?:\/|$)/i,
+    );
+    if (!match) return null;
+    const username = decodeURIComponent(match[1] || "").replace(/^@/, "").trim();
+    const type = String(match[2] || "").toLowerCase();
+    const id = String(match[3] || "");
+    if (!username || !/^[0-9]{10,}$/.test(id)) return null;
+    return {
+      id,
+      type: type === "photo" ? "photo" : "video",
+      username,
+      permalink: `https://www.tiktok.com/@${encodeURIComponent(username)}/${type}/${id}`,
+    };
+  }
+
+  function buildTikTokItemPermalink({ id = "", type = "video", username = "" } = {}) {
+    const itemId = String(id || "");
+    const handle = String(username || "").replace(/^@/, "").trim();
+    const itemType = type === "photo" ? "photo" : "video";
+    if (!handle || !/^[0-9]{10,}$/.test(itemId)) return "";
+    return `https://www.tiktok.com/@${encodeURIComponent(handle)}/${itemType}/${itemId}`;
+  }
+
+  function getProfileUsernameFromUrl(rawUrl = "") {
+    try {
+      const parsed = new URL(String(rawUrl || ""), "https://www.tiktok.com/");
+      const match = parsed.pathname.match(/^\/@([^/]+)(?:\/|$)/);
+      return match ? decodeURIComponent(match[1] || "").replace(/^@/, "") : "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  function getItemTypeFromRawItem(item = {}) {
+    return getImagePostPayload(item) ? "photo" : "video";
+  }
+
+  function getItemUsername(item = {}) {
+    const author = item?.author || item?.authorInfo || {};
+    return String(
+      author.uniqueId ||
+        author.unique_id ||
+        author.shortId ||
+        author.short_id ||
+        item.authorUniqueId ||
+        item.author_unique_id ||
+        "",
+    ).replace(/^@/, "");
+  }
+
+  function hasUsableRawMediaItem(item, pageUrl = "", config = DEFAULT_CONFIG) {
+    return Boolean(
+      item &&
+        hasUsableMedia(
+          normalizeMediaItem(item, pageUrl, config),
+        ),
+    );
+  }
+
+  function collectExactItemsInKnownData(data, targetId = "") {
+    const id = String(targetId || "");
+    if (!data || typeof data !== "object" || !id) return [];
+    const queue = [{ value: data, depth: 0 }];
+    const seen = new Set();
+    const itemSeen = new Set();
+    const items = [];
+    let inspected = 0;
+    const allowedKey = /^(?:__DEFAULT_SCOPE__|ItemModule|itemModule|itemInfo|itemStruct|itemList|item_list|items|aweme|awemeList|aweme_list|data|body|result|props|pageProps|state|webapp\.[\w.-]+)$/i;
+    const add = (value) => {
+      if (
+        !value ||
+        typeof value !== "object" ||
+        itemSeen.has(value) ||
+        getVideoItemId(value) !== id ||
+        !isItemDataFragment(value)
+      ) {
+        return;
+      }
+      itemSeen.add(value);
+      items.push(value);
+    };
+
+    while (queue.length && inspected < 1000 && items.length < 40) {
+      const { value, depth } = queue.shift();
+      if (!value || typeof value !== "object" || seen.has(value)) continue;
+      seen.add(value);
+      inspected += 1;
+      add(value);
+
+      const itemModule = value.ItemModule || value.itemModule;
+      add(itemModule?.[id]);
+      add(value?.itemInfo?.itemStruct);
+      add(value?.itemStruct);
+      add(value?.itemInfo);
+
+      if (depth >= 6) continue;
+      let entries = [];
+      try {
+        entries = Object.entries(value);
+      } catch (_err) {
+        continue;
+      }
+      for (const [key, child] of entries) {
+        if (!child || typeof child !== "object" || !allowedKey.test(key)) continue;
+        if (Array.isArray(child)) {
+          for (const entry of child.slice(0, 180)) {
+            if (entry && typeof entry === "object") {
+              queue.push({ value: entry, depth: depth + 1 });
+            }
+          }
+        } else {
+          queue.push({ value: child, depth: depth + 1 });
+        }
+      }
+    }
+    return items;
+  }
+
+  function collectLocalReactItems(elements = [], options = {}) {
+    const maxObjects = Math.max(
+      50,
+      Number(options.maxObjects || LOCAL_REACT_SCAN_MAX_OBJECTS),
+    );
+    const maxDepth = Math.max(
+      2,
+      Number(options.maxDepth || LOCAL_REACT_SCAN_MAX_DEPTH),
+    );
+    const starts = ensureArray(elements)
+      .map((entry, index) => {
+        if (entry?.element) return entry;
+        return { element: entry, source: `element-${index}` };
+      })
+      .filter((entry) => entry.element);
+    const queue = [];
+    for (const start of starts) {
+      let element = start.element;
+      for (let distance = 0; element && distance <= 2; distance += 1) {
+        for (const rootValue of getReactInternalRoots(element)) {
+          queue.push({
+            value: rootValue,
+            depth: 0,
+            source: start.source || "element",
+            distance,
+          });
+        }
+        element = element.parentElement || null;
+      }
+    }
+
+    const seen = new Set();
+    const entries = [];
+    let inspected = 0;
+    const allowedKey = /^(?:memoizedProps|pendingProps|memoizedState|props|item|itemInfo|itemStruct|itemData|aweme|awemeInfo|data|children|child|content|videoData|videoInfo|photoData|photoInfo)$/i;
+
+    while (queue.length && inspected < maxObjects) {
+      const current = queue.shift();
+      const { value, depth, source, distance } = current;
+      if (!value || typeof value !== "object" || seen.has(value)) continue;
+      seen.add(value);
+      inspected += 1;
+
+      if (isItemDataFragment(value)) {
+        entries.push({
+          id: getVideoItemId(value),
+          item: value,
+          source,
+          distance,
+        });
+      }
+      if (depth >= maxDepth) continue;
+      let objectEntries = [];
+      try {
+        objectEntries = Object.entries(value);
+      } catch (_err) {
+        continue;
+      }
+      for (const [key, child] of objectEntries) {
+        if (!child || typeof child !== "object") continue;
+        if (
+          [
+            "return",
+            "sibling",
+            "alternate",
+            "stateNode",
+            "ownerDocument",
+            "parentNode",
+            "parentElement",
+            "previousSibling",
+            "nextSibling",
+            "_debugOwner",
+          ].includes(key)
+        ) {
+          continue;
+        }
+        if (Array.isArray(child)) {
+          if (!allowedKey.test(key)) continue;
+          for (const entry of child.slice(0, 60)) {
+            if (entry && typeof entry === "object") {
+              queue.push({ value: entry, depth: depth + 1, source, distance });
+            }
+          }
+        } else if (allowedKey.test(key)) {
+          queue.push({ value: child, depth: depth + 1, source, distance });
+        }
+      }
+    }
+
+    entries.sort((left, right) => left.distance - right.distance);
+    return {
+      entries,
+      inspected,
+      truncated: queue.length > 0,
+    };
+  }
+
+  function collectCanonicalLinksInElement(element = null) {
+    const identities = [];
+    const add = (value) => {
+      const identity = parseTikTokItemIdentityFromUrl(value);
+      if (identity) identities.push(identity);
+    };
+    add(element?.href || element?.getAttribute?.("href") || "");
+    for (const anchor of Array.from(
+      element?.querySelectorAll?.('a[href*="/@"][href*="/video/"],a[href*="/@"][href*="/photo/"]') || [],
+    )) {
+      add(anchor.href || anchor.getAttribute?.("href") || "");
+    }
+    const byId = new Map();
+    for (const identity of identities) {
+      if (!byId.has(identity.id)) byId.set(identity.id, identity);
+    }
+    return [...byId.values()];
+  }
+
+  function collectAuthorUsernamesInElement(element = null) {
+    const usernames = [];
+    for (const anchor of Array.from(
+      element?.querySelectorAll?.('a[href*="/@"]') || [],
+    )) {
+      const username = getAuthorFromUrl(anchor.href || anchor.getAttribute?.("href") || "");
+      if (username) usernames.push(username.replace(/^@/, ""));
+    }
+    return unique(usernames);
+  }
+
+  function collectStructuredAuthorUsernamesInElement(element = null) {
+    if (!element?.querySelectorAll) return [];
+    const anchors = new Set();
+    const selectors = [
+      'a[data-e2e="video-author-uniqueid"][href*="/@"]',
+      '[data-e2e="video-author-uniqueid"] a[href*="/@"]',
+      'a[data-e2e="video-author-avatar"][href*="/@"]',
+      '[data-e2e="video-author-avatar"] a[href*="/@"]',
+      'a[data-e2e="browse-username"][href*="/@"]',
+      '[data-e2e="browse-username"] a[href*="/@"]',
+      'a[data-e2e="browse-user-avatar"][href*="/@"]',
+      '[data-e2e="browse-user-avatar"] a[href*="/@"]',
+    ];
+    for (const selector of selectors) {
+      for (const anchor of Array.from(element.querySelectorAll(selector))) anchors.add(anchor);
+    }
+    for (const anchor of Array.from(element.querySelectorAll('a[href*="/@"]'))) {
+      if (anchor.querySelector?.('img[src*="-avt-"],img[src*="avatar"],picture img')) {
+        anchors.add(anchor);
+      }
+    }
+    return unique(
+      [...anchors]
+        .map((anchor) => getAuthorFromUrl(anchor.href || anchor.getAttribute?.("href") || ""))
+        .filter(Boolean)
+        .map((username) => username.replace(/^@/, "")),
+    );
+  }
+
+  function compareIdentityCandidates(candidates = []) {
+    const valid = ensureArray(candidates)
+      .filter((candidate) => candidate?.identity?.id)
+      .map((candidate) => ({
+        ...candidate,
+        rank: Number(
+          candidate.rank ||
+            IDENTITY_EVIDENCE_RANK[candidate.identity.evidence] ||
+            0,
+        ),
+      }))
+      .sort((left, right) => right.rank - left.rank);
+    if (!valid.length) return { candidate: null, ambiguousIds: [] };
+    const topRank = valid[0].rank;
+    const top = valid.filter((candidate) => candidate.rank === topRank);
+    const topIds = unique(top.map((candidate) => candidate.identity.id));
+    if (topIds.length !== 1) {
+      return { candidate: null, ambiguousIds: topIds, topRank };
+    }
+    const id = topIds[0];
+    const sameId = valid.filter((candidate) => candidate.identity.id === id);
+    const primary = sameId[0];
+    return {
+      candidate: {
+        ...primary,
+        identity: {
+          ...primary.identity,
+          username:
+            primary.identity.username ||
+            sameId.map((candidate) => candidate.identity.username).find(Boolean) ||
+            "",
+          permalink:
+            primary.identity.permalink ||
+            sameId.map((candidate) => candidate.identity.permalink).find(Boolean) ||
+            "",
+        },
+      },
+      ambiguousIds: [],
+      topRank,
+    };
+  }
+
+  class CurrentItemResolver {
+    constructor(doc, win, extractor) {
+      this.document = doc;
+      this.window = win;
+      this.extractor = extractor;
+      this.lastTrace = null;
+      this.nodeIds = new WeakMap();
+      this.nextNodeId = 1;
+    }
+
+    getNodeId(node) {
+      if (!node || (typeof node !== "object" && typeof node !== "function")) return 0;
+      if (!this.nodeIds.has(node)) this.nodeIds.set(node, this.nextNodeId++);
+      return this.nodeIds.get(node);
+    }
+
+    collectWrapperIds(context, mediaElement, anchorElement) {
+      const ids = new Set();
+      const starts = [mediaElement, context, anchorElement].filter(Boolean);
+      for (const start of starts) {
+        let element = start;
+        for (let depth = 0; element && element !== this.document?.body && depth < 16; depth += 1) {
+          const rawId = String(element.id || "");
+          if (/xgwrapper/i.test(rawId)) {
+            for (const id of rawId.match(/\d{15,}/g) || []) ids.add(id);
+          }
+          element = element.parentElement || null;
+        }
+      }
+      return [...ids];
+    }
+
+    collectAncestorEvidence(starts = [], pageUsername = "") {
+      const candidates = [];
+      const ambiguousIds = new Set();
+      for (const start of ensureArray(starts).filter(Boolean)) {
+        let element = start;
+        let wrapperId = "";
+        let username = pageUsername;
+        for (let depth = 0; element && element !== this.document?.body && depth < 25; depth += 1) {
+          const links = collectCanonicalLinksInElement(element);
+          if (links.length === 1) {
+            candidates.push({
+              identity: { ...links[0], evidence: "local-permalink" },
+              rank: IDENTITY_EVIDENCE_RANK["local-permalink"] - depth / 100,
+              details: { depth },
+            });
+            break;
+          }
+          if (links.length > 1) {
+            for (const identity of links) ambiguousIds.add(identity.id);
+          }
+
+          const rawId = String(element.id || "");
+          if (/xgwrapper/i.test(rawId)) {
+            const ids = unique(rawId.match(/\d{15,}/g) || []);
+            if (ids.length === 1) wrapperId = ids[0];
+            else for (const id of ids) ambiguousIds.add(id);
+          }
+          const structuredUsernames = collectStructuredAuthorUsernamesInElement(element);
+          const allUsernames = collectAuthorUsernamesInElement(element);
+          if (structuredUsernames.length === 1) username = structuredUsernames[0];
+          else if (!username && allUsernames.length === 1) username = allUsernames[0];
+          if (wrapperId && username) {
+            const type = String(start?.tagName || "").toLowerCase() === "img" ? "photo" : "video";
+            candidates.push({
+              identity: {
+                id: wrapperId,
+                type,
+                username,
+                permalink: buildTikTokItemPermalink({ id: wrapperId, type, username }),
+                evidence: "local-wrapper-author",
+              },
+              rank: IDENTITY_EVIDENCE_RANK["local-wrapper-author"] - depth / 100,
+              details: { depth },
+            });
+            break;
+          }
+          element = element.parentElement || null;
+        }
+      }
+      return { candidates, ambiguousIds: [...ambiguousIds] };
+    }
+
+    getDomVersion(options = {}) {
+      const anchorElement = options.anchorElement || null;
+      const context =
+        this.extractor?.getMediaContextElement?.(anchorElement) ||
+        getVisibleProfileBrowseDialog(this.document) ||
+        null;
+      const mediaElement = context
+        ? this.extractor?.getContextMediaElement?.(context)
+        : this.extractor?.getVisibleMediaElement?.();
+      const links = collectCanonicalLinksInElement(context || anchorElement)
+        .map((identity) => `${identity.id}:${identity.username}`)
+        .sort();
+      const wrapperIds = this.collectWrapperIds(context, mediaElement, anchorElement).sort();
+      const mediaSource = String(
+        mediaElement?.currentSrc ||
+          mediaElement?.src ||
+          mediaElement?.getAttribute?.("src") ||
+          "",
+      );
+      return [
+        this.window?.location?.href || "",
+        this.getNodeId(anchorElement),
+        anchorElement?.isConnected === false ? 0 : 1,
+        this.getNodeId(context),
+        this.getNodeId(mediaElement),
+        mediaSource,
+        links.join(","),
+        wrapperIds.join(","),
+        context?.childElementCount || 0,
+      ].join("|");
+    }
+
+    resolve(options = {}) {
+      const pageUrl = String(this.window?.location?.href || "");
+      const anchorElement = options.anchorElement || null;
+      const trace = {
+        capturedAt: new Date().toISOString(),
+        pageUrl,
+        pageType: options.pageType || "",
+        live: Boolean(options.isLive),
+        stages: [],
+        candidates: [],
+      };
+      const fail = (code, details = {}) => {
+        const result = { ok: false, code, details, version: trace.domVersion };
+        trace.result = "failure";
+        trace.errorCode = code;
+        trace.details = details;
+        this.lastTrace = trace;
+        return result;
+      };
+      const candidates = [];
+      const pageFragmentsById = new Map();
+      const addCandidate = (identity, details = {}) => {
+        const normalized = {
+          id: String(identity.id || ""),
+          type: identity.type === "photo" ? "photo" : "video",
+          username: String(identity.username || "").replace(/^@/, ""),
+          permalink:
+            parseTikTokItemIdentityFromUrl(identity.permalink || "")?.permalink ||
+            buildTikTokItemPermalink(identity),
+          evidence: identity.evidence || "unknown",
+        };
+        if (!normalized.id || !normalized.username || !normalized.permalink) return;
+        const candidate = {
+          identity: normalized,
+          rank: Number(details.rank ?? IDENTITY_EVIDENCE_RANK[normalized.evidence] ?? 0),
+          details,
+        };
+        trace.candidates.push({
+          id: normalized.id,
+          evidence: normalized.evidence,
+          rank: candidate.rank,
+          username: normalized.username,
+          hasPermalink: true,
+          ...details,
+        });
+        candidates.push(candidate);
+      };
+
+      if (options.isLive) return fail("live-not-supported", { pageType: options.pageType || "live" });
+
+      const context =
+        this.extractor?.getMediaContextElement?.(anchorElement) ||
+        getVisibleProfileBrowseDialog(this.document) ||
+        null;
+      const mediaElement = context
+        ? this.extractor?.getContextMediaElement?.(context)
+        : this.extractor?.getVisibleMediaElement?.();
+      const videoElement = context
+        ? this.extractor?.getContextVideoElement?.(context)
+        : this.extractor?.getVisibleVideoElement?.();
+      trace.anchorFound = Boolean(anchorElement);
+      trace.contextFound = Boolean(context);
+      trace.mediaTag = String(mediaElement?.tagName || "").toLowerCase();
+      trace.domVersion = this.getDomVersion({ anchorElement });
+
+      const pageIdentity = parseTikTokItemIdentityFromUrl(pageUrl);
+      trace.stages.push({ stage: "page-url", matched: Boolean(pageIdentity) });
+      if (pageIdentity) addCandidate({ ...pageIdentity, evidence: "page-url" });
+
+      const pageUsername = ["profile", "profile-dialog"].includes(options.pageType)
+        ? getProfileUsernameFromUrl(pageUrl)
+        : "";
+      const ancestorEvidence = this.collectAncestorEvidence(
+        [videoElement, mediaElement, anchorElement, context],
+        pageUsername,
+      );
+      trace.stages.push({
+        stage: "ancestor-evidence",
+        candidates: ancestorEvidence.candidates.map((candidate) => ({
+          id: candidate.identity.id,
+          evidence: candidate.identity.evidence,
+          depth: candidate.details?.depth ?? null,
+        })),
+        ambiguousIds: ancestorEvidence.ambiguousIds,
+      });
+      for (const candidate of ancestorEvidence.candidates) {
+        addCandidate(candidate.identity, {
+          ...candidate.details,
+          rank: candidate.rank,
+        });
+      }
+
+      const reactResult = collectLocalReactItems([
+        { element: mediaElement, source: "media" },
+        { element: anchorElement, source: "anchor" },
+        { element: context, source: "context" },
+      ]);
+      const nearbyEntries = reactResult.truncated
+        ? []
+        : reactResult.entries.filter((entry) => entry.distance <= 1);
+      trace.stages.push({
+        stage: "local-react-evidence",
+        inspectedObjects: reactResult.inspected,
+        truncated: reactResult.truncated,
+        entries: reactResult.entries.map((entry) => ({
+          id: entry.id,
+          source: entry.source,
+          distance: entry.distance,
+          hasUsername: Boolean(getItemUsername(entry.item)),
+        })),
+      });
+      for (const entry of nearbyEntries) {
+        const username = getItemUsername(entry.item);
+        if (!username) continue;
+        addCandidate(
+          {
+            id: entry.id,
+            type: getItemTypeFromRawItem(entry.item),
+            username,
+            evidence: "local-react-canonical",
+          },
+          { source: entry.source, distance: entry.distance },
+        );
+      }
+
+      let compared = compareIdentityCandidates(candidates);
+      if (!compared.candidate && !compared.ambiguousIds.length) {
+        const reactIds = unique(nearbyEntries.map((entry) => entry.id));
+        const wrapperIds = this.collectWrapperIds(context, mediaElement, anchorElement);
+        const structuredDomUsernames = unique([
+          pageUsername,
+          ...collectStructuredAuthorUsernamesInElement(context || anchorElement),
+        ]);
+        const allDomUsernames = unique([
+          pageUsername,
+          ...collectAuthorUsernamesInElement(context || anchorElement),
+        ]);
+        const pageDataCandidates = collectPageDataCandidates(this.document, this.window);
+        const corroboration = [];
+        const authorAmbiguities = [];
+        let corroboratedIdFound = false;
+
+        for (const id of reactIds) {
+          const pageFragments = pageDataCandidates.flatMap((data) =>
+            collectExactItemsInKnownData(data, id),
+          );
+          if (pageFragments.length) pageFragmentsById.set(id, pageFragments);
+          const wrapperExact = wrapperIds.length === 1 && wrapperIds[0] === id;
+          const pageExact = pageFragments.length > 0;
+          if (wrapperExact || pageExact) corroboratedIdFound = true;
+
+          const pageUsernames = unique(
+            pageFragments.map((item) => getItemUsername(normalizeTikTokItemFragment(item) || item)),
+          );
+          const reactUsernames = unique(
+            nearbyEntries
+              .filter((entry) => entry.id === id)
+              .map((entry) =>
+                getItemUsername(normalizeTikTokItemFragment(entry.item) || entry.item),
+              ),
+          );
+          let username = "";
+          let authorEvidence = "";
+          let conflictingUsernames = [];
+          if (pageUsernames.length === 1) {
+            username = pageUsernames[0];
+            authorEvidence = "page-exact-author";
+          } else if (pageUsernames.length > 1) {
+            conflictingUsernames = pageUsernames;
+            authorEvidence = "page-exact-author";
+          } else if (reactUsernames.length === 1) {
+            username = reactUsernames[0];
+            authorEvidence = "local-react-author";
+          } else if (reactUsernames.length > 1) {
+            conflictingUsernames = reactUsernames;
+            authorEvidence = "local-react-author";
+          } else if (structuredDomUsernames.length === 1) {
+            username = structuredDomUsernames[0];
+            authorEvidence = "structured-dom-author";
+          } else if (structuredDomUsernames.length > 1) {
+            conflictingUsernames = structuredDomUsernames;
+            authorEvidence = "structured-dom-author";
+          } else if (allDomUsernames.length === 1) {
+            username = allDomUsernames[0];
+            authorEvidence = "single-dom-author-link";
+          } else if (allDomUsernames.length > 1) {
+            conflictingUsernames = allDomUsernames;
+            authorEvidence = "unstructured-dom-links";
+          }
+
+          const item =
+            pageFragments.find((fragment) => getImagePostPayload(fragment)) ||
+            nearbyEntries.find((entry) => entry.id === id)?.item ||
+            pageFragments[0] ||
+            null;
+          corroboration.push({
+            id,
+            wrapperExact,
+            pageExact,
+            pageUsernames,
+            reactUsernames,
+            structuredDomUsernames,
+            allDomUsernames,
+            selectedUsername: username,
+            authorEvidence,
+            conflictingUsernames,
+            fragmentCount: pageFragments.length,
+          });
+          if (conflictingUsernames.length) {
+            authorAmbiguities.push({ id, authorEvidence, usernames: conflictingUsernames });
+            continue;
+          }
+          if ((!wrapperExact && !pageExact) || !username) continue;
+          const evidence = wrapperExact
+            ? "local-react-wrapper-author"
+            : "local-react-page-exact";
+          addCandidate(
+            {
+              id,
+              type: getItemTypeFromRawItem(item || {}),
+              username,
+              evidence,
+            },
+            {
+              reactBound: true,
+              wrapperExact,
+              pageExact,
+              authorEvidence,
+              pageFragmentCount: pageFragments.length,
+            },
+          );
+        }
+        trace.stages.push({ stage: "identity-corroboration", entries: corroboration });
+        trace.authorAmbiguities = authorAmbiguities;
+        trace.corroboratedIdFound = corroboratedIdFound;
+        compared = compareIdentityCandidates(candidates);
+      }
+
+      if (!compared.candidate && ancestorEvidence.ambiguousIds.length > 1) {
+        return fail("current-item-ambiguous", {
+          candidateIds: ancestorEvidence.ambiguousIds,
+          evidence: "ancestor-evidence",
+        });
+      }
+      if (compared.ambiguousIds.length) {
+        return fail("current-item-ambiguous", {
+          candidateIds: compared.ambiguousIds,
+          evidenceRank: compared.topRank || 0,
+        });
+      }
+      if (compared.candidate) {
+        const selected = compared.candidate;
+        let pageFragments = pageFragmentsById.get(selected.identity.id) || [];
+        const shouldVerifyPageAuthor = ![
+          "page-url",
+          "local-permalink",
+        ].includes(selected.identity.evidence);
+        if (shouldVerifyPageAuthor && !pageFragments.length) {
+          pageFragments = collectPageDataCandidates(this.document, this.window).flatMap((data) =>
+            collectExactItemsInKnownData(data, selected.identity.id),
+          );
+          if (pageFragments.length) pageFragmentsById.set(selected.identity.id, pageFragments);
+        }
+        if (shouldVerifyPageAuthor) {
+          const exactPageUsernames = unique(
+            pageFragments.map((item) =>
+              getItemUsername(normalizeTikTokItemFragment(item) || item),
+            ),
+          );
+          if (exactPageUsernames.length > 1) {
+            return fail("current-item-author-ambiguous", {
+              conflicts: [
+                {
+                  id: selected.identity.id,
+                  authorEvidence: "page-exact-author",
+                  usernames: exactPageUsernames,
+                },
+              ],
+            });
+          }
+          if (exactPageUsernames.length === 1) {
+            selected.identity.username = exactPageUsernames[0];
+            selected.identity.permalink = buildTikTokItemPermalink(selected.identity);
+            selected.details = {
+              ...(selected.details || {}),
+              authorEvidence: "page-exact-author",
+            };
+          }
+        }
+        const fragments = reactResult.entries
+          .filter((entry) => entry.id === selected.identity.id)
+          .map((entry) => entry.item);
+        const result = {
+          ok: true,
+          identity: selected.identity,
+          fragments,
+          pageFragments,
+          version: trace.domVersion,
+        };
+        trace.result = "success";
+        trace.selected = {
+          ...selected.identity,
+          rank: selected.rank,
+          fragmentCount: fragments.length,
+          pageFragmentCount: pageFragments.length,
+          authorEvidence: selected.details?.authorEvidence || "",
+        };
+        this.lastTrace = trace;
+        return result;
+      }
+
+      if (ensureArray(trace.authorAmbiguities).length) {
+        return fail("current-item-author-ambiguous", {
+          conflicts: trace.authorAmbiguities,
+        });
+      }
+      if (trace.corroboratedIdFound) {
+        return fail("current-item-author-not-found", {
+          anchorFound: Boolean(anchorElement),
+          contextFound: Boolean(context),
+          mediaTag: trace.mediaTag,
+        });
+      }
+
+      const contextNotReady = Boolean(
+        !context ||
+          anchorElement?.isConnected === false ||
+          (mediaElement?.getBoundingClientRect?.().width || 0) <= 0,
+      );
+      return fail(
+        contextNotReady ? "current-item-context-not-ready" : "current-item-id-not-found",
+        {
+          anchorFound: Boolean(anchorElement),
+          contextFound: Boolean(context),
+          mediaTag: trace.mediaTag,
+        },
+      );
+    }
+
+    getDebugSnapshot() {
+      return this.lastTrace ? JSON.parse(JSON.stringify(this.lastTrace)) : null;
+    }
+  }
+
+  function isMeaningfulItemValue(value) {
+    if (value === undefined || value === null || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") {
+      try {
+        return Object.keys(value).length > 0;
+      } catch (_err) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function isPlainItemRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    try {
+      const prototype = Object.getPrototypeOf(value);
+      return prototype === Object.prototype || prototype === null;
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function mergeFilledItemRecords(records = [], depth = 0) {
+    const result = {};
+    for (const record of ensureArray(records)) {
+      if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+      for (const [key, value] of Object.entries(record)) {
+        if (!isMeaningfulItemValue(value)) continue;
+        const current = result[key];
+        if (Array.isArray(value)) {
+          if (!Array.isArray(current) || value.length >= current.length) result[key] = value;
+        } else if (
+          depth < 3 &&
+          isPlainItemRecord(value) &&
+          isPlainItemRecord(current)
+        ) {
+          result[key] = mergeFilledItemRecords([current, value], depth + 1);
+        } else {
+          result[key] = value;
+        }
+      }
+    }
+    return result;
+  }
+
+  function mergeExactItemFragments(fragments = [], targetId = "") {
+    const id = String(targetId || "");
+    const seen = new Set();
+    const exact = [];
+    for (const rawItem of ensureArray(fragments)) {
+      if (!rawItem || typeof rawItem !== "object" || seen.has(rawItem)) continue;
+      seen.add(rawItem);
+      const item = normalizeTikTokItemFragment(rawItem);
+      if (
+        !item ||
+        getVideoItemId(item) !== id ||
+        !isItemDataFragment(item)
+      ) {
+        continue;
+      }
+      exact.push(item);
+    }
+    if (!exact.length) return null;
+
+    const lastValue = (...keys) => {
+      let result;
+      for (const item of exact) {
+        for (const key of keys) {
+          if (isMeaningfulItemValue(item?.[key])) result = item[key];
+        }
+      }
+      return result;
+    };
+    const mergeAliases = (aliases) =>
+      mergeFilledItemRecords(
+        exact.flatMap((item) => aliases.map((key) => item?.[key])).filter(Boolean),
+      );
+
+    const merged = { id };
+    const scalarGroups = {
+      desc: ["description", "desc"],
+      createTime: ["create_time", "createTime"],
+      shareUrl: ["share_url", "shareUrl"],
+      groupId: ["group_id", "groupID", "groupId"],
+      duetEnabled: ["duet_enabled", "allowDuet", "duetEnabled"],
+      stitchEnabled: ["stitch_enabled", "allowStitch", "stitchEnabled"],
+      isPrivate: ["privateItem", "isPrivate"],
+      canComment: ["allowComment", "canComment"],
+      canShare: ["allowShare", "canShare"],
+      allowDownload: ["canDownload", "allowDownload"],
+    };
+    for (const [target, aliases] of Object.entries(scalarGroups)) {
+      const value = lastValue(...aliases);
+      if (isMeaningfulItemValue(value)) merged[target] = value;
+    }
+
+    const author = mergeAliases(["authorInfo", "author"]);
+    const authorStats = mergeAliases(["authorStats"]);
+    const video = mergeAliases(["video"]);
+    const imagePost = mergeFilledItemRecords(
+      exact.map((item) => getImagePostPayload(item)).filter(Boolean),
+    );
+    const music = mergeAliases(["music"]);
+    const stats = mergeAliases(["statsV2", "stats"]);
+    const shareInfo = mergeAliases(["share_info", "shareInfo"]);
+    const awemeControl = mergeAliases(["aweme_control", "awemeControl"]);
+    const download = mergeAliases(["downloadInfo", "download_info", "download"]);
+
+    if (Object.keys(author).length) merged.author = author;
+    if (Object.keys(authorStats).length) merged.authorStats = authorStats;
+    if (Object.keys(video).length) merged.video = video;
+    if (Object.keys(imagePost).length) merged.imagePost = imagePost;
+    if (Object.keys(music).length) merged.music = music;
+    if (Object.keys(stats).length) merged.stats = stats;
+    if (Object.keys(shareInfo).length) merged.shareInfo = shareInfo;
+    if (Object.keys(awemeControl).length) merged.awemeControl = awemeControl;
+    if (Object.keys(download).length) merged.download = download;
+
+    for (const key of ["challenges", "textExtra", "contents"]) {
+      const arrays = exact.map((item) => item?.[key]).filter((value) => Array.isArray(value));
+      if (arrays.length) {
+        merged[key] = arrays.reduce(
+          (best, value) => (value.length >= best.length ? value : best),
+          [],
+        );
+      }
+    }
+    return merged;
+  }
+
+  function summarizeExactItem(item, pageUrl = "", config = DEFAULT_CONFIG) {
+    const media = normalizeMediaItem(item, pageUrl, config);
+    return {
+      usable: hasUsableMedia(media),
+      videoSourceCount: ensureArray(media?.video?.sources).length,
+      imageCount: ensureArray(media?.images).length,
+      hasAuthorName: Boolean(media?.author?.nickname || media?.author?.uniqueId),
+      hasAvatar: Boolean(media?.author?.avatarUrl),
+      selectedSourceType: media?.video?.primarySource?.sourceType || "",
+      selectedSourceIndex: media?.video?.primarySource?.sourceIndex ?? null,
+      selectedSourceWatermark: media?.video?.primarySource?.watermarkStatus || "unknown",
+    };
+  }
+
+  class ItemDataProvider {
+    constructor(doc, win) {
+      this.document = doc;
+      this.window = win;
+      this.cache = new Map();
+      this.lastTrace = null;
+    }
+
+    getCached(id) {
+      const key = String(id || "");
+      const entry = this.cache.get(key);
+      if (!entry) return null;
+      if (Date.now() - Number(entry.fetchedAt || 0) > ITEM_DETAIL_CACHE_TTL_MS) {
+        this.cache.delete(key);
+        return null;
+      }
+      this.cache.delete(key);
+      this.cache.set(key, entry);
+      return entry.item;
+    }
+
+    putCached(id, item) {
+      const key = String(id || "");
+      if (!key || !item) return;
+      this.cache.delete(key);
+      this.cache.set(key, { item, fetchedAt: Date.now() });
+      while (this.cache.size > ITEM_DETAIL_CACHE_LIMIT) {
+        const firstKey = this.cache.keys().next().value;
+        this.cache.delete(firstKey);
+      }
+    }
+
+    collectPageFragments(id) {
+      const fragments = [];
+      for (const data of collectPageDataCandidates(this.document, this.window)) {
+        fragments.push(...collectExactItemsInKnownData(data, id));
+      }
+      return fragments;
+    }
+
+    enrichAuthorIdentity(item, identity = {}) {
+      if (!item) return item;
+      const canonical = parseTikTokItemIdentityFromUrl(identity?.permalink || "");
+      const username = String(identity?.username || canonical?.username || "").replace(/^@/, "");
+      if (!username) return item;
+      const sourceAuthor = item.author || item.authorInfo || {};
+      return {
+        ...item,
+        author: {
+          ...sourceAuthor,
+          uniqueId:
+            sourceAuthor.uniqueId ||
+            sourceAuthor.unique_id ||
+            username,
+          nickname:
+            sourceAuthor.nickname ||
+            sourceAuthor.nickName ||
+            sourceAuthor.uniqueId ||
+            sourceAuthor.unique_id ||
+            username,
+        },
+      };
+    }
+
+    resolve(resolution = {}, config = DEFAULT_CONFIG) {
+      const identity = resolution.identity || resolution;
+      const id = String(identity?.id || "");
+      const localFragments = ensureArray(resolution.fragments);
+      const suppliedPageFragments = ensureArray(resolution.pageFragments);
+      const pageFragments = suppliedPageFragments.length
+        ? suppliedPageFragments
+        : id
+          ? this.collectPageFragments(id)
+          : [];
+      const cached = id ? this.getCached(id) : null;
+      const trace = {
+        capturedAt: new Date().toISOString(),
+        targetId: id,
+        permalink: identity?.permalink || "",
+        identityEvidence: identity?.evidence || "",
+        localFragmentCount: localFragments.length,
+        pageFragmentCount: pageFragments.length,
+        cacheHit: Boolean(cached),
+      };
+      const finish = (result) => {
+        this.lastTrace = {
+          ...trace,
+          result: result?.ok ? "success" : "failure",
+          source: result?.source || "",
+          errorCode: result?.code || "",
+          details: result?.details || null,
+        };
+        return result;
+      };
+
+      if (!id) return finish({ ok: false, code: "current-item-id-not-found" });
+      const merged = this.enrichAuthorIdentity(
+        mergeExactItemFragments(
+          [cached, ...localFragments, ...pageFragments].filter(Boolean),
+          id,
+        ),
+        identity,
+      );
+      trace.merged = summarizeExactItem(
+        merged,
+        identity?.permalink || this.window?.location?.href || "",
+        config,
+      );
+      if (!hasUsableRawMediaItem(
+        merged,
+        identity?.permalink || this.window?.location?.href || "",
+        config,
+      )) {
+        return finish({
+          ok: false,
+          code: merged ? "media-empty" : "detail-data-missing",
+          details: {
+            localFragmentCount: localFragments.length,
+            pageFragmentCount: pageFragments.length,
+          },
+        });
+      }
+
+      this.putCached(id, merged);
+      const source = pageFragments.length
+        ? "local-page-exact"
+        : localFragments.length
+          ? "local-exact"
+          : "exact-memory-cache";
+      return finish({ ok: true, source, item: merged });
+    }
+
+    getDebugSnapshot() {
+      return {
+        cacheSize: this.cache.size,
+        last: this.lastTrace ? JSON.parse(JSON.stringify(this.lastTrace)) : null,
+      };
+    }
+  }
+
+  class MenuLifecycle {
+    constructor(win, options = {}) {
+      this.window = win;
+      this.durationMs = Number(options.durationMs || 170);
+      this.onStateChange = options.onStateChange || null;
+      this.onClosed = options.onClosed || null;
+      this.stateElement = null;
+      this.menu = null;
+      this.timer = null;
+      this.animationHandler = null;
+    }
+
+    attach(stateElement, menu) {
+      this.stateElement = stateElement || null;
+      this.menu = menu || null;
+      return this;
+    }
+
+    get isOpen() {
+      return Boolean(this.stateElement?.classList?.contains?.("open"));
+    }
+
+    get isClosing() {
+      return Boolean(this.stateElement?.classList?.contains?.("closing"));
+    }
+
+    clearPending() {
+      if (this.timer) {
+        this.window?.clearTimeout?.(this.timer);
+        this.timer = null;
+      }
+      if (this.animationHandler && this.menu) {
+        this.menu.removeEventListener?.("animationend", this.animationHandler);
+      }
+      this.animationHandler = null;
+    }
+
+    open(onOpen = null) {
+      if (!this.stateElement || !this.menu || this.isOpen || this.isClosing) return false;
+      this.stateElement.classList.add("open");
+      this.onStateChange?.("open");
+      onOpen?.();
+      return true;
+    }
+
+    close(onBeforeClose = null) {
+      if (!this.stateElement || !this.menu || !this.isOpen || this.isClosing) return false;
+      onBeforeClose?.();
+      this.stateElement.classList.add("closing");
+      this.onStateChange?.("closing");
+      const finish = () => this.finish();
+      this.animationHandler = (event) => {
+        if (event.target !== this.menu) return;
+        if (event.animationName !== `${SCRIPT_PREFIX}-menu-slide-fade-out`) return;
+        finish();
+      };
+      this.menu.addEventListener?.("animationend", this.animationHandler);
+      this.timer = this.window?.setTimeout?.(finish, this.durationMs) || null;
+      return true;
+    }
+
+    finish() {
+      if (!this.stateElement) return;
+      this.clearPending();
+      this.stateElement.classList.remove("open", "closing");
+      this.onStateChange?.("closed");
+      this.onClosed?.();
+    }
+
+    closeImmediate() {
+      this.finish();
+    }
+  }
+
   class ConfigStore {
     constructor(storage) {
       this.storage = storage;
@@ -2480,8 +3403,9 @@
     }
 
     save(next) {
-      this.data = sanitizeConfig({ ...this.data, ...next });
-      this.storage?.setItem(CONFIG_KEY, JSON.stringify(this.data));
+      const data = sanitizeConfig({ ...this.data, ...next });
+      this.storage?.setItem(CONFIG_KEY, JSON.stringify(data));
+      this.data = data;
       return this.data;
     }
 
@@ -2491,10 +3415,9 @@
   }
 
   class TikTokMediaExtractor {
-    constructor(doc, win, runtimeCache = null) {
+    constructor(doc, win) {
       this.document = doc;
       this.window = win;
-      this.runtimeCache = runtimeCache;
     }
 
     getImageElementUrl(image = null) {
@@ -2540,209 +3463,6 @@
         result.push(image);
       }
       return result;
-    }
-
-    getRawImagePostItems(dataCandidates = []) {
-      const items = [];
-      for (const data of dataCandidates) {
-        for (const item of collectVideoItemsDeep(data)) {
-          if (getImagePostPayload(item)) items.push(item);
-        }
-      }
-      for (const entry of Array.from(this.runtimeCache?.items?.values?.() || [])) {
-        if (getImagePostPayload(entry?.item)) items.push(entry.item);
-      }
-      const byId = new Map();
-      for (const item of items) {
-        const id = getVideoItemId(item) || JSON.stringify(item).slice(0, 80);
-        if (!byId.has(id)) byId.set(id, item);
-      }
-      return [...byId.values()];
-    }
-
-    buildDomImagePostMedia(imageElements = [], pageUrl = "") {
-      const images = imageElements
-        .map((image, index) => {
-          const url = this.getImageElementUrl(image);
-          const rect = image.getBoundingClientRect?.();
-          return {
-            index: index + 1,
-            url,
-            fallbackUrls: [],
-            width: Number(image.naturalWidth || rect?.width || 0),
-            height: Number(image.naturalHeight || rect?.height || 0),
-            size: 0,
-          };
-        })
-        .filter((image) => image.url);
-      if (!images.length) return null;
-      const context = this.getMediaContextElement(imageElements[0]) || imageElements[0]?.parentElement || null;
-      const contextText = String(context?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
-      const authorFromUrl = getAuthorFromUrl(pageUrl);
-      const first = images[0];
-      return {
-        id: `photo_${toShortId(String(Date.now()))}`,
-        desc: contextText,
-        createTime: null,
-        pageUrl,
-        shareUrl: pageUrl,
-        groupId: `photo_${first.url.slice(-32)}`,
-        author: {
-          id: "",
-          uniqueId: authorFromUrl,
-          secUid: "",
-          nickname: authorFromUrl,
-          avatarUrl: "",
-          signature: "",
-          verification: "",
-          verified: false,
-          followerCount: undefined,
-          totalFavorited: undefined,
-          profileUrl: authorFromUrl ? `https://www.tiktok.com/@${authorFromUrl}` : "",
-        },
-        video: {
-          primaryUrl: "",
-          fallbackUrls: [],
-          primarySource: null,
-          sources: [],
-          width: 0,
-          height: 0,
-          duration: 0,
-          format: "mp4",
-          codec: "",
-          fps: 0,
-          quality: "",
-          size: 0,
-        },
-        cover: {
-          url: first.url,
-          dynamicUrl: "",
-          width: first.width,
-          height: first.height,
-        },
-        music: { id: "", title: "", authorName: "", coverUrl: "", duration: 0, url: "" },
-        isImagePost: true,
-        images,
-        hashtags: [],
-        stats: {},
-        permissions: {},
-        raw: {
-          source: "visible-photo-mode-dom-fallback",
-          imageUrls: images.map((image) => image.url),
-        },
-      };
-    }
-
-    getVisibleImagePostMedia(visibleMediaElement = null, config = {}, pageUrl = "", dataCandidates = []) {
-      if (!this.isLikelyPhotoModeElement(visibleMediaElement)) return null;
-      const imageElements = this.getVisiblePhotoModeImages(visibleMediaElement);
-      const imageUrls = unique(imageElements.map((image) => this.getImageElementUrl(image)).filter(Boolean));
-      if (!imageUrls.length) return null;
-
-      for (const item of this.getRawImagePostItems(dataCandidates)) {
-        const itemPageUrl = getItemPageUrl(item, pageUrl);
-        const media = normalizeMediaItem(item, itemPageUrl, config);
-        if (!media?.isImagePost || !ensureArray(media.images).length) continue;
-        if (urlsShareResource(imageUrls, getMediaResourceUrls(media))) return media;
-      }
-
-      return this.buildDomImagePostMedia(imageElements, pageUrl);
-    }
-
-    getCurrentMedia(config = {}, anchorElement = null, options = {}) {
-      const pageUrl = this.window?.location?.href || "";
-      const requireContext = Boolean(options.requireContext);
-      const anchorContext = this.getMediaContextElement(anchorElement);
-      const contextMediaElement = anchorContext ? this.getContextMediaElement(anchorContext) : null;
-      const contextVideo = anchorContext ? this.getContextVideoElement(anchorContext) : null;
-      const visibleMediaElement = contextMediaElement || this.getVisibleMediaElement();
-      const visibleVideo = contextVideo || this.getVisibleVideoElement();
-      const visibleMediaIsVideo = String(visibleMediaElement?.tagName || "").toLowerCase() === "video";
-      const matchVideoElement = visibleMediaIsVideo ? visibleMediaElement : contextVideo;
-      const visibleContext =
-        this.getMediaContextElement(visibleMediaElement) ||
-        this.getMediaContextElement(visibleVideo);
-      const contextUrls = anchorContext
-        ? this.getMediaUrlsFromScopes([anchorContext])
-        : this.getVisibleMediaContextUrls(visibleMediaElement || visibleVideo);
-      const contextText = unique([
-        anchorContext?.textContent || "",
-        visibleContext?.textContent || "",
-        visibleMediaElement?.parentElement?.textContent || "",
-        visibleVideo?.parentElement?.textContent || "",
-      ]).join(" ");
-      const allowPageFallback = !anchorContext && !requireContext;
-      const targetUrls = unique(
-        anchorContext || requireContext ? contextUrls : [...contextUrls, pageUrl],
-      ).filter(Boolean);
-      const dataCandidates = [
-        parsePageDataFromDocument(this.document),
-        ...getWindowDataCandidates(this.window),
-      ].filter(Boolean);
-
-      const visibleImagePostMedia = this.getVisibleImagePostMedia(
-        visibleMediaElement,
-        config,
-        pageUrl,
-        dataCandidates,
-      );
-      if (hasUsableMedia(visibleImagePostMedia)) return visibleImagePostMedia;
-
-      for (const targetUrl of targetUrls) {
-        if (!getVideoIdFromUrl(targetUrl)) continue;
-        for (const data of dataCandidates) {
-          const dataMedia = extractMediaFromPageData(data, targetUrl, config);
-          if (hasUsableMedia(dataMedia)) return dataMedia;
-        }
-        const cachedMedia = this.runtimeCache?.getMedia(targetUrl, config);
-        if (hasUsableMedia(cachedMedia)) return cachedMedia;
-      }
-
-      const cachedVisibleMedia = this.runtimeCache?.getMediaByVideoElement(
-        matchVideoElement,
-        contextText,
-        config,
-        pageUrl,
-      );
-      if (hasUsableMedia(cachedVisibleMedia)) return cachedVisibleMedia;
-
-      for (const data of dataCandidates) {
-        const items = collectVideoItemsDeep(data);
-        if (!items.length) continue;
-        const fuzzyDataMedia = findBestMediaMatch(items, matchVideoElement, contextText, config, pageUrl);
-        if (hasUsableMedia(fuzzyDataMedia)) return fuzzyDataMedia;
-      }
-
-      const currentPageId = getVideoIdFromUrl(pageUrl);
-      if (matchVideoElement && currentPageId && contextUrls.length === 0) {
-        for (const data of dataCandidates) {
-          const dataMedia = extractMediaFromPageData(data, pageUrl, config);
-          if (hasUsableMedia(dataMedia)) return dataMedia;
-        }
-
-        const cachedPageMedia = this.runtimeCache?.getMedia(pageUrl, config);
-        if (hasUsableMedia(cachedPageMedia)) return cachedPageMedia;
-      }
-
-      if (anchorContext) {
-        return extractMediaFromVideoElement(matchVideoElement, contextUrls[0] || "") || null;
-      }
-
-      if (requireContext) {
-        return extractMediaFromVideoElement(matchVideoElement, contextUrls[0] || "") || null;
-      }
-
-      if (allowPageFallback) {
-        for (const data of dataCandidates) {
-          const dataMedia = extractMediaFromPageData(data, pageUrl, config);
-          if (hasUsableMedia(dataMedia)) return dataMedia;
-        }
-
-        const cachedMedia = this.runtimeCache?.getMedia(pageUrl, config);
-        if (hasUsableMedia(cachedMedia)) return cachedMedia;
-      }
-
-      return extractMediaFromVideoElement(matchVideoElement, pageUrl);
     }
 
     getCurrentVideoElement(anchorElement = null) {
@@ -2898,10 +3618,6 @@
       addScope(mediaElement?.parentElement);
       return this.getMediaUrlsFromScopes(scopes);
     }
-
-    getVisibleVideoContextUrls(video = this.getVisibleVideoElement()) {
-      return this.getVisibleMediaContextUrls(video);
-    }
   }
 
   class Downloader {
@@ -3041,144 +3757,35 @@
     return element;
   }
 
-  function createDownloadSpinner(doc) {
-    const ns = "http://www.w3.org/2000/svg";
-    const wrapper = createElement(doc, "span", `${SCRIPT_PREFIX}-download-status-spinner`);
-    wrapper.setAttribute("aria-hidden", "true");
+  function createTuxIconButton(doc, label, onClick, kind = "close", className = "") {
+    const isSave = kind === "save";
+    const button = createElement(
+      doc,
+      "button",
+      `TUXButton TUXButton--capsule TUXButton--medium TUXButton--${isSave ? "primary" : "secondary"} ${SCRIPT_PREFIX}-icon-button ${SCRIPT_PREFIX}-${isSave ? "save" : "close"}-button${className ? ` ${className}` : ""}`,
+    );
+    button.type = "button";
+    button.setAttribute("aria-label", label);
+    button.title = label;
 
-    const svg = doc.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("focusable", "false");
-
-    const ring = doc.createElementNS(ns, "circle");
-    ring.setAttribute("class", `${SCRIPT_PREFIX}-spinner-ring`);
-    ring.setAttribute("cx", "12");
-    ring.setAttribute("cy", "12");
-    ring.setAttribute("r", "9");
-
-    const arrow = doc.createElementNS(ns, "path");
-    arrow.setAttribute("class", `${SCRIPT_PREFIX}-spinner-arrow`);
-    arrow.setAttribute("d", "M12 5.5v8.2m0 0 3.4-3.4M12 13.7l-3.4-3.4M7.4 18.4h9.2");
-
-    svg.append(ring, arrow);
-    wrapper.appendChild(svg);
-    return wrapper;
-  }
-
-  function calculatePanelPosition(options = {}) {
-    const buttonSize = Number(options.buttonSize || 44);
-    const gap = Number(options.gap || 10);
-    const margin = Number(options.margin || 8);
-    const viewportWidth = Number(options.viewportWidth || 0);
-    const viewportHeight = Number(options.viewportHeight || 0);
-    const anchor = options.anchorRect;
-    if (!anchor) {
-      return {
-        left: Math.max(margin, viewportWidth - buttonSize - 18),
-        top: Math.max(margin, viewportHeight - buttonSize - 80),
-      };
-    }
-    const anchorCenter = Number(anchor.left || 0) + Number(anchor.width || 0) / 2;
-    const left = Math.round(anchorCenter - buttonSize / 2);
-    const top = Math.round(Number(anchor.top || 0) + Number(anchor.height || 0) + gap);
-    return {
-      left: Math.min(Math.max(margin, left), Math.max(margin, viewportWidth - buttonSize - margin)),
-      top: Math.min(Math.max(margin, top), Math.max(margin, viewportHeight - buttonSize - margin)),
-    };
-  }
-
-  function calculateEmbeddedPanelPosition(options = {}) {
-    const buttonSize = Number(options.buttonSize || 44);
-    const gap = Number(options.gap || 8);
-    const navigationGapValue = Number(options.navigationGap);
-    const navigationGap = Number.isFinite(navigationGapValue)
-      ? navigationGapValue
-      : Math.max(gap, 16);
-    const margin = Number(options.margin || 8);
-    const viewportWidth = Number(options.viewportWidth || 0);
-    const viewportHeight = Number(options.viewportHeight || 0);
-    const anchor = options.anchorRect;
-    if (!anchor) {
-      return calculatePanelPosition({ buttonSize, gap, margin, viewportWidth, viewportHeight });
-    }
-    const maxLeft = Math.max(margin, viewportWidth - buttonSize - margin);
-    const maxTop = Math.max(margin, viewportHeight - buttonSize - margin);
-    if (options.navigationRect) {
-      const navigationEdges = getRectEdges(options.navigationRect);
-      const left = Math.min(
-        Math.max(margin, Math.round(navigationEdges.centerX - buttonSize / 2)),
-        maxLeft,
-      );
-      let top = Math.round(navigationEdges.top - buttonSize - navigationGap);
-      if (top < margin) {
-        const belowTop = Math.round(navigationEdges.bottom + navigationGap);
-        if (belowTop + buttonSize <= maxTop) {
-          top = belowTop;
-        }
-      }
-      return {
-        left,
-        top: Math.min(Math.max(margin, top), maxTop),
-      };
-    }
-
-    const edges = getRectEdges(anchor);
-    let left = Math.min(Math.max(margin, Math.round(edges.centerX - buttonSize / 2)), maxLeft);
-    const previousEdges = options.previousRect ? getRectEdges(options.previousRect) : null;
-    const previousGroupEdges = options.previousGroupRect
-      ? getRectEdges(options.previousGroupRect)
-      : previousEdges;
-    const nextEdges = options.nextRect ? getRectEdges(options.nextRect) : null;
-    let top = Math.round(edges.top - buttonSize - gap);
-    if (previousEdges && top < previousEdges.bottom + Math.min(gap, 4)) {
-      const betweenGap = edges.top - previousGroupEdges.bottom;
-      let placed = false;
-      if (betweenGap >= buttonSize) {
-        top = Math.round(previousGroupEdges.bottom + (betweenGap - buttonSize) / 2);
-        placed = true;
-      } else if (options.previousGroupRect) {
-        const abovePreviousTop = Math.round(previousGroupEdges.top - buttonSize - gap);
-        if (abovePreviousTop >= margin) {
-          left = Math.min(
-            Math.max(margin, Math.round(previousGroupEdges.centerX - buttonSize / 2)),
-            maxLeft,
-          );
-          top = abovePreviousTop;
-          placed = true;
-        }
-      }
-      if (!placed && nextEdges) {
-        const betweenGap = nextEdges.top - edges.bottom;
-        if (betweenGap >= buttonSize) {
-          top = Math.round(edges.bottom + (betweenGap - buttonSize) / 2);
-          placed = true;
-        }
-      }
-      if (!placed) {
-        const sideTop = Math.round(edges.centerY - buttonSize / 2);
-        const leftSlot = Math.round(edges.left - buttonSize - gap);
-        const rightSlot = Math.round(edges.right + gap);
-        if (leftSlot >= margin) {
-          left = leftSlot;
-          top = sideTop;
-        } else if (rightSlot <= maxLeft) {
-          left = rightSlot;
-          top = sideTop;
-        }
-      }
-    } else if (top < margin && nextEdges) {
-      const betweenGap = nextEdges.top - edges.bottom;
-      if (betweenGap >= buttonSize + gap * 2) {
-        top = Math.round(edges.bottom + (betweenGap - buttonSize) / 2);
-      }
-    }
-    if (top < margin) {
-      top = Math.round(edges.bottom + gap);
-    }
-    return {
-      left,
-      top: Math.min(Math.max(margin, top), maxTop),
-    };
+    const content = createElement(doc, "div", "TUXButton-content");
+    const iconContainer = createElement(doc, "div", "TUXButton-iconContainer");
+    const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("fill", "currentColor");
+    svg.setAttribute("viewBox", "0 0 48 48");
+    svg.setAttribute("width", "1em");
+    svg.setAttribute("height", "1em");
+    svg.setAttribute("aria-hidden", "true");
+    const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", isSave
+      ? "M40.3 14.7a1 1 0 0 1 0 1.42L20.42 36a2 2 0 0 1-2.84 0L7.7 26.12a1 1 0 0 1 0-1.42l1.42-1.4a1 1 0 0 1 1.42 0L19 31.76 37.46 13.3a1 1 0 0 1 1.42 0l1.42 1.4Z"
+      : "M38.7 12.12a1 1 0 0 0 0-1.41l-1.4-1.42a1 1 0 0 0-1.42 0L24 21.17 12.12 9.3a1 1 0 0 0-1.41 0l-1.42 1.42a1 1 0 0 0 0 1.41L21.17 24 9.3 35.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0L24 26.83 35.88 38.7a1 1 0 0 0 1.41 0l1.42-1.42a1 1 0 0 0 0-1.41L26.83 24 38.7 12.12Z");
+    svg.appendChild(path);
+    iconContainer.appendChild(svg);
+    content.appendChild(iconContainer);
+    button.appendChild(content);
+    if (typeof onClick === "function") button.addEventListener("click", onClick);
+    return button;
   }
 
   function calculatePanelMenuPlacement(options = {}) {
@@ -3262,6 +3869,9 @@
   const PROFILE_BROWSE_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
   const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
   const PROFILE_BROWSE_MEDIA_SELECTOR = '[data-e2e="browse-video"], video, img';
+  const CINEMA_MODE_ROOT_SELECTOR = '[role="dialog"][aria-label="Cinema mode"]';
+  const CINEMA_MORE_BUTTON_SELECTOR =
+    'button[data-testid="tux-web-button"][aria-haspopup="dialog"]';
 
   function isActionBarClassName(className = "") {
     const value = String(className || "");
@@ -3317,8 +3927,25 @@
     return dialogs[0] || null;
   }
 
-  function hasVisibleProfileBrowseDialog(doc = root?.document) {
-    return Boolean(getVisibleProfileBrowseDialog(doc));
+  function getCinemaModeRoot(doc = root?.document) {
+    return doc?.querySelector?.(CINEMA_MODE_ROOT_SELECTOR) || null;
+  }
+
+  function getVisibleCinemaMoreButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
+    const win = doc?.defaultView || root;
+    const viewportWidth = Number(win?.innerWidth || 0);
+    const viewportHeight = Number(win?.innerHeight || 0);
+    if (!cinema?.querySelectorAll || !viewportWidth || !viewportHeight) return null;
+    return Array.from(cinema.querySelectorAll(CINEMA_MORE_BUTTON_SELECTOR))
+      .map((button) => button.closest?.('[data-testid="tux-web-button-container"]') || button)
+      .find((anchor) => {
+        const rect = anchor.getBoundingClientRect?.();
+        return Boolean(
+          rect?.width > 0 &&
+          rect?.height > 0 &&
+          getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.5
+        );
+      }) || null;
   }
 
   function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
@@ -3330,7 +3957,7 @@
       return "recommend";
     }
     if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
-    if (hasVisibleProfileBrowseDialog(doc)) return "profile-dialog";
+    if (getVisibleProfileBrowseDialog(doc)) return "profile-dialog";
     if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
       return "detail";
     }
@@ -3356,33 +3983,6 @@
       height,
       centerX: Number(rect.centerX ?? left + width / 2),
       centerY: Number(rect.centerY ?? top + height / 2),
-    };
-  }
-
-  function getBoundingRect(rects = []) {
-    const usableRects = rects.filter(Boolean);
-    if (!usableRects.length) return null;
-    const box = usableRects.reduce(
-      (current, rect) => ({
-        left: Math.min(current.left, rect.left),
-        top: Math.min(current.top, rect.top),
-        right: Math.max(current.right, rect.right),
-        bottom: Math.max(current.bottom, rect.bottom),
-      }),
-      { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-    );
-    const width = box.right - box.left;
-    const height = box.bottom - box.top;
-    return {
-      element: usableRects[0].element || null,
-      left: box.left,
-      top: box.top,
-      right: box.right,
-      bottom: box.bottom,
-      width,
-      height,
-      centerX: box.left + width / 2,
-      centerY: box.top + height / 2,
     };
   }
 
@@ -3477,7 +4077,6 @@
     return best || getNativeActionControl(element);
   }
 
-
   function getOfficialActionButtonCandidate(element) {
     if (!element) return null;
     const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
@@ -3535,1816 +4134,1083 @@
     return Math.max(min, Math.min(max, number));
   }
 
-
-  function mergeClassNames(...values) {
-    const result = [];
-    const seen = new Set();
-    for (const value of values) {
-      for (const token of String(value || "").split(/\s+/).filter(Boolean)) {
-        if (seen.has(token)) continue;
-        seen.add(token);
-        result.push(token);
-      }
-    }
-    return result.join(" ");
-  }
-
-  const ACTION_BUTTON_VISUAL_SELECTOR =
-    '[data-testid*="icon-button-container" i],[class*="tux-button--capsule" i],[class*="tux-button-rFq4rS" i]';
-
-  function appendUniqueElement(elements, element) {
-    if (element && !elements.includes(element)) elements.push(element);
-  }
-
-  function getActionButtonVisualElement(element) {
-    if (!element) return null;
-    if (element.matches?.(ACTION_BUTTON_VISUAL_SELECTOR)) return element;
-    return (
-      element.querySelector?.(ACTION_BUTTON_VISUAL_SELECTOR) ||
-      element.closest?.(ACTION_BUTTON_VISUAL_SELECTOR) ||
-      null
-    );
-  }
-
-  function collectElementActionStyleCandidates(elements = []) {
-    const candidates = [];
-    for (const element of elements) {
-      if (!element) continue;
-      appendUniqueElement(candidates, element);
-      appendUniqueElement(candidates, getActionButtonVisualElement(element));
-      const control = getNativeActionControl(element);
-      appendUniqueElement(candidates, control);
-      appendUniqueElement(candidates, getActionButtonVisualElement(control));
-      appendUniqueElement(candidates, element.parentElement);
-      appendUniqueElement(candidates, control?.parentElement);
-    }
-    return candidates;
-  }
-
-  function getStyleValue(style, names = []) {
-    for (const name of names) {
-      const direct = style?.[name];
-      if (direct) return direct;
-      const cssValue = style?.getPropertyValue?.(name);
-      if (cssValue) return cssValue;
-    }
-    return "";
-  }
-
-  function getElementActionStyleSample(win, elements = []) {
-    const candidates = collectElementActionStyleCandidates(elements);
-
-    let fallbackSample = null;
-    for (const element of candidates) {
-      const style = getComputedStyleSafe(win, element);
-      if (!style) continue;
-      const parentStyle = getComputedStyleSafe(win, element.parentElement);
-      const rawBackground = getStyleValue(style, ["backgroundColor", "background-color"]);
-      const parentBackground = getStyleValue(parentStyle, ["backgroundColor", "background-color"]);
-      const backgroundColor = isTransparentColor(rawBackground) ? parentBackground : rawBackground;
-      const color =
-        getStyleValue(style, ["color"]) ||
-        getStyleValue(parentStyle, ["color"]);
-      const borderRadius =
-        getStyleValue(style, ["borderRadius", "border-radius"]) ||
-        getStyleValue(parentStyle, ["borderRadius", "border-radius"]);
-      const backdropFilter =
-        getStyleValue(style, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]) ||
-        getStyleValue(parentStyle, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]);
-      if (backgroundColor || color || borderRadius || backdropFilter) {
-        const sample = { backgroundColor, color, borderRadius, backdropFilter };
-        if (backgroundColor && !isTransparentColor(backgroundColor)) return sample;
-        if (!fallbackSample) fallbackSample = sample;
-      }
-    }
-    return fallbackSample;
-  }
-
-  function parseRgbColor(value = "") {
-    const match = String(value || "").match(/rgba?\(([^)]+)\)/i);
-    if (!match) return null;
-    const parts = match[1]
-      .split(",")
-      .map((part) => Number(String(part).trim()))
-      .filter((part) => Number.isFinite(part));
-    if (parts.length < 3) return null;
-    return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
-  }
-
-  function isLightColor(value = "") {
-    const color = parseRgbColor(value);
-    if (!color || color.a === 0) return false;
-    const luminance = (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b) / 255;
-    return luminance > 0.72;
-  }
-
-  function isTransparentColor(value = "") {
-    const color = parseRgbColor(value);
-    return !color || color.a === 0;
-  }
-
-  function getEmbeddedLauncherPalette(backgroundColor = "", color = "") {
-    if (isTransparentColor(backgroundColor)) {
-      const foreground = color || "rgba(255, 255, 255, 0.9)";
-      const lightForeground = isLightColor(foreground);
-      return {
-        background: lightForeground ? "hsla(0, 0%, 100%, 0.13)" : "rgba(22, 24, 35, 0.08)",
-        color: foreground,
-        hoverBackground: lightForeground ? "hsla(0, 0%, 100%, 0.19)" : "rgba(22, 24, 35, 0.12)",
-      };
-    }
-    const background = String(backgroundColor);
-    const light = isLightColor(background);
-    return {
-      background,
-      color: color || (light ? "rgb(22, 24, 35)" : "rgb(255, 255, 255)"),
-      hoverBackground: light ? "rgb(232, 232, 232)" : "rgb(47, 47, 47)",
-    };
-  }
-  function getPanelStyleSheet() {
+  function getPanelCoreStyleSheet() {
     return `
-        .${SCRIPT_PREFIX}-panel {
-          position: fixed;
-          right: 18px;
-          top: 25vh;
-          bottom: auto;
-          left: auto;
-          z-index: 2147483200;
-          width: 48px;
-          height: 48px;
-          font-family: Arial, sans-serif;
-          color-scheme: dark;
-        }
-        .${SCRIPT_PREFIX}-panel.light { color-scheme: light; }
-        .${SCRIPT_PREFIX}-panel.pending {
-          visibility: hidden;
-          pointer-events: none;
-        }
-        .${SCRIPT_PREFIX}-image-button {
-          /* Standalone element (not part of .panel/.menu) shown only while an image preview
-             is detected as open -- see refreshImageOverlayState(). JS chooses a corner that
-             does not overlap the preview image; if none exists, the button stays hidden. */
-          position: fixed;
-          right: 18px;
-          bottom: 80px;
-          z-index: 2147483200;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          border-radius: 999px;
-          padding: 11px 18px;
-          color: #fff;
-          background: rgba(37, 37, 37, 0.96);
-          font-family: Arial, sans-serif;
-          font-size: 13px;
-          font-weight: 600;
-          white-space: nowrap;
-          cursor: pointer;
-          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
-          transition: transform 0.12s ease, background 0.12s ease;
-        }
-        .${SCRIPT_PREFIX}-image-button:hover,
-        .${SCRIPT_PREFIX}-image-button:focus-visible {
-          background: #fe2c55;
-          transform: translateY(-1px);
-        }
-        .${SCRIPT_PREFIX}-image-button.light {
-          color: #111;
-          background: rgba(255, 255, 255, 0.96);
-          border-color: rgba(0, 0, 0, 0.12);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-        }
-        .${SCRIPT_PREFIX}-image-button.light:hover,
-        .${SCRIPT_PREFIX}-image-button.light:focus-visible {
-          background: #fe2c55;
-          color: #fff;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded {
-          position: relative;
-          left: auto !important;
-          right: auto !important;
-          top: auto !important;
-          bottom: auto !important;
-          z-index: 2147483200;
-          flex: 0 0 var(--${SCRIPT_PREFIX}-action-item-height, 78px);
-          width: var(--${SCRIPT_PREFIX}-action-item-width, var(--${SCRIPT_PREFIX}-action-size, 48px));
-          height: var(--${SCRIPT_PREFIX}-action-item-height, 78px);
-          margin: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          pointer-events: auto;
-          contain: layout style;
-          overflow: visible;
-          isolation: isolate;
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog {
-          position: fixed;
-          z-index: 2147483200;
-          width: var(--${SCRIPT_PREFIX}-action-size, 40px);
-          height: var(--${SCRIPT_PREFIX}-action-size, 40px);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          pointer-events: auto;
-          contain: layout style;
-          overflow: visible;
-          isolation: isolate;
-        }
-        .${SCRIPT_PREFIX}-launcher-shell {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
-          width: 48px;
-          height: 48px;
-          padding: 0;
-          color: rgba(255, 255, 255, 0.9);
-          box-sizing: border-box;
-        }
-        .${SCRIPT_PREFIX}-launcher-icon-wrapper {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 48px;
-          height: 48px;
-          color: inherit;
-          box-sizing: border-box;
-          line-height: 0;
-        }
-        .${SCRIPT_PREFIX}-launcher-container {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 48px;
-          height: 48px;
-          overflow: hidden;
-          border-radius: var(--tux-v2-radius-control-capsule, 9999px);
-          border: 0;
-          box-shadow: none;
-          box-sizing: border-box;
-          transition: background 0.12s ease, opacity 0.12s ease;
-        }
-        .${SCRIPT_PREFIX}-launcher {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 48px;
-          height: 48px;
-          border-radius: 0;
-          border: 0;
-          padding: 0;
-          color: inherit;
-          background: transparent;
-          box-sizing: border-box;
-          line-height: 0;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell {
-          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
-          height: var(--${SCRIPT_PREFIX}-action-item-height, 78px);
-          align-items: center;
-          justify-content: center;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-icon-wrapper,
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container,
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
-          flex: 0 0 auto;
-          width: var(--${SCRIPT_PREFIX}-action-size, 48px);
-          height: var(--${SCRIPT_PREFIX}-action-size, 48px);
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container {
-          border-radius: var(--${SCRIPT_PREFIX}-action-radius, var(--tux-v2-radius-control-capsule, 9999px));
-          border: 0;
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
-          background: var(--${SCRIPT_PREFIX}-action-bg, var(--ui-shape-neutral-4, hsla(0, 0%, 100%, 0.13)));
-          -webkit-backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
-          backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
-          box-shadow: none;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded.light .${SCRIPT_PREFIX}-launcher-container {
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
-          background: var(--${SCRIPT_PREFIX}-action-bg, var(--ui-shape-neutral-4, hsla(0, 0%, 100%, 0.13)));
-        }
-        .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin),
-        .${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
-          background: var(--ui-shape-neutral-3, hsla(0, 0%, 100%, 0.19));
-          color: var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9));
-          transform: none;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
-        .${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher-container {
-          color: var(--${SCRIPT_PREFIX}-action-color, var(--tux-colorTextPrimary, rgba(255, 255, 255, 0.9)));
-          background: var(--${SCRIPT_PREFIX}-action-hover-bg, var(--ui-shape-neutral-3, hsla(0, 0%, 100%, 0.19)));
-          transform: none;
-        }
-        .${SCRIPT_PREFIX}-launcher svg {
-          display: block;
-          width: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
-          height: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
-          pointer-events: none;
-          transform: translateY(var(--${SCRIPT_PREFIX}-action-icon-offset-y, -1px));
-          transform-origin: center;
-          overflow: visible;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          cursor: pointer;
-          touch-action: manipulation;
-          padding: var(--${SCRIPT_PREFIX}-action-button-padding, 0);
-          border-radius: var(--${SCRIPT_PREFIX}-action-button-radius, 0);
-          background: var(--${SCRIPT_PREFIX}-action-button-bg, transparent);
-          font: inherit;
-          line-height: 0 !important;
-          text-align: center;
-        }
-        .${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher svg {
-          flex: 0 0 auto;
-          width: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
-          height: var(--${SCRIPT_PREFIX}-action-icon-size, 24px);
-          margin: 0 auto;
-          transform: none;
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-icon-wrapper,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
-          flex: 0 0 auto;
-          width: var(--${SCRIPT_PREFIX}-action-size, 40px);
-          height: var(--${SCRIPT_PREFIX}-action-size, 40px);
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-icon-wrapper,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container,
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
-          border-radius: var(--${SCRIPT_PREFIX}-action-radius, 9999px);
-          color: var(--${SCRIPT_PREFIX}-action-color, rgb(246, 246, 246));
-          background: var(--${SCRIPT_PREFIX}-action-bg, transparent);
-          -webkit-backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
-          backdrop-filter: var(--${SCRIPT_PREFIX}-action-backdrop-filter, none);
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-container.${SCRIPT_PREFIX}-profile-official-skin {
-          position: static !important;
-          left: auto !important;
-          right: auto !important;
-          top: auto !important;
-          bottom: auto !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          width: var(--${SCRIPT_PREFIX}-action-size, 40px) !important;
-          height: var(--${SCRIPT_PREFIX}-action-size, 40px) !important;
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin),
-        .${SCRIPT_PREFIX}-panel.profile-dialog.open .${SCRIPT_PREFIX}-launcher-container:not(.${SCRIPT_PREFIX}-profile-official-skin) {
-          color: var(--${SCRIPT_PREFIX}-action-color, rgb(246, 246, 246));
-          background: var(--${SCRIPT_PREFIX}-action-hover-bg, rgba(255, 255, 255, 0.08));
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher {
-          cursor: pointer;
-          touch-action: manipulation;
-          padding: 0;
-          border-radius: 0;
-          background: transparent;
-          line-height: 0 !important;
-        }
-        .${SCRIPT_PREFIX}-panel.profile-dialog .${SCRIPT_PREFIX}-launcher svg {
-          flex: 0 0 auto;
-          width: var(--${SCRIPT_PREFIX}-action-icon-size, 22px);
-          height: var(--${SCRIPT_PREFIX}-action-icon-size, 22px);
-          margin: 0 auto;
-          transform: none;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-wrap {
-          display: inline-flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          flex: 0 0 auto;
-          box-sizing: border-box;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-button {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          width: 100% !important;
-          height: 100% !important;
-          padding: 0 !important;
-          line-height: 0 !important;
-          cursor: pointer;
-          color: inherit;
-          background: transparent !important;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-wrap:hover,
-        .${SCRIPT_PREFIX}-profile-bulk-wrap.${SCRIPT_PREFIX}-profile-bulk-open {
-          border-radius: 999px;
-          background: #3e3e3e !important;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-button:focus-visible {
-          outline: 2px solid rgba(255, 255, 255, 0.7);
-          outline-offset: 2px;
-          border-radius: 999px;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-button svg {
-          width: 1em;
-          height: 1em;
-          display: block;
-          pointer-events: none;
-        }
-        .${SCRIPT_PREFIX}-profile-bulk-menu {
-          width: 160px;
-        }
-        .${SCRIPT_PREFIX}-profile-select-box {
-          position: absolute;
-          right: 8px;
-          bottom: 8px;
-          z-index: 5;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: var(--${SCRIPT_PREFIX}-profile-checkbox-size, 26px);
-          height: var(--${SCRIPT_PREFIX}-profile-checkbox-size, 26px);
-          border: 2px solid rgba(255, 255, 255, 0.92);
-          border-radius: 999px;
-          background: rgba(22, 24, 35, 0.72);
-          box-shadow: none;
-          cursor: pointer;
-          box-sizing: border-box;
-          backdrop-filter: blur(8px);
-          padding: 0;
-          line-height: 0;
-          appearance: none;
-          -webkit-appearance: none;
-          transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
-        }
-        .${SCRIPT_PREFIX}-profile-select-box:hover {
-          transform: scale(1.04);
-          background: rgba(22, 24, 35, 0.86);
-        }
-        .${SCRIPT_PREFIX}-profile-select-box.selected {
-          border-color: #fe2c55;
-          background: #fe2c55;
-          box-shadow: none;
-        }
-        .${SCRIPT_PREFIX}-profile-select-box input {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          margin: 0;
-          padding: 0;
-          opacity: 0 !important;
-          cursor: pointer;
-          appearance: none !important;
-          -webkit-appearance: none !important;
-        }
-        .${SCRIPT_PREFIX}-profile-select-mark {
-          position: relative;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-        }
-        .${SCRIPT_PREFIX}-profile-select-box.selected .${SCRIPT_PREFIX}-profile-select-mark::after {
-          content: "";
-          position: absolute;
-          left: 30%;
-          top: 20%;
-          width: 34%;
-          height: 52%;
-          border: solid #fff;
-          border-width: 0 3px 3px 0;
-          transform: rotate(45deg);
-          box-sizing: border-box;
-        }
-        .${SCRIPT_PREFIX}-bulk-confirm-modal {
-          width: min(860px, calc(100vw - 42px));
-          max-height: min(720px, calc(100vh - 42px));
-        }
-        .${SCRIPT_PREFIX}-bulk-list {
-          display: grid;
-          gap: 10px;
-          max-height: min(520px, 58vh);
-          overflow: auto;
-          padding-right: 4px;
-        }
-        .${SCRIPT_PREFIX}-bulk-row {
-          display: grid;
-          grid-template-columns: 28px 72px minmax(0, 1fr) 72px;
-          gap: 12px;
-          align-items: center;
-          border: 1px solid rgba(127, 127, 127, 0.22);
-          border-radius: 12px;
-          padding: 10px;
-          background: rgba(127, 127, 127, 0.06);
-        }
-        .${SCRIPT_PREFIX}-bulk-row input {
-          width: 18px;
-          height: 18px;
-          accent-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-bulk-cover {
-          width: 72px;
-          height: 96px;
-          border-radius: 8px;
-          object-fit: cover;
-          background: #222;
-        }
-        .${SCRIPT_PREFIX}-bulk-desc {
-          min-width: 0;
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-          font-size: 13px;
-          line-height: 1.45;
-        }
-        .${SCRIPT_PREFIX}-bulk-type {
-          justify-self: end;
-          border-radius: 999px;
-          padding: 6px 10px;
-          font-size: 12px;
-          font-weight: 700;
-          background: rgba(254, 44, 85, 0.12);
-          color: #fe2c55;
-          white-space: nowrap;
-        }
-        .${SCRIPT_PREFIX}-bulk-footer {
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          align-items: center;
-          margin-top: 14px;
-          padding-top: 12px;
-          border-top: 1px solid rgba(127, 127, 127, 0.2);
-        }
-        .${SCRIPT_PREFIX}-advanced-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-        }
-        .${SCRIPT_PREFIX}-check-left label {
-          display: inline-flex;
-          align-items: center;
-          gap: 9px;
-          margin: 0;
-          cursor: pointer;
-          font-weight: 600;
-        }
-        .${SCRIPT_PREFIX}-check-left input {
-          width: 16px !important;
-          height: 16px;
-          margin: 0;
-          accent-color: #fe2c55;
-          order: -1;
-        }
-        .${SCRIPT_PREFIX}-profile-slider-field {
-          grid-column: 1 / -1;
-          display: grid;
-          gap: 10px;
-        }
-        .${SCRIPT_PREFIX}-profile-slider-head {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          min-width: 0;
-        }
-        .${SCRIPT_PREFIX}-profile-slider-head label {
-          margin: 0;
-          flex: 0 0 auto;
-        }
-        .${SCRIPT_PREFIX}-profile-slider-desc {
-          min-width: 0;
-          color: #777;
-          font-size: 12px;
-          line-height: 1.35;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-profile-slider-desc { color: #aaa; }
-        .${SCRIPT_PREFIX}-profile-slider-value {
-          margin-left: auto;
-          flex: 0 0 auto;
-          min-width: 48px;
-          text-align: right;
-          color: #fe2c55;
-          font-weight: 800;
-          font-variant-numeric: tabular-nums;
-        }
-        .${SCRIPT_PREFIX}-profile-slider-field input[type="range"] {
-          width: 100%;
-          accent-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-menu {
-          position: absolute;
-          z-index: 2147483601;
-          left: 50%;
-          bottom: 52px;
-          transform: none;
-          transform-origin: var(--${SCRIPT_PREFIX}-menu-origin, 50% 50%);
-          display: none;
-          visibility: hidden;
-          width: 160px;
-          overflow: hidden;
-          border-radius: 14px;
-          background:
-            radial-gradient(circle at var(--${SCRIPT_PREFIX}-menu-origin-x, 50%) var(--${SCRIPT_PREFIX}-menu-origin-y, 50%), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.00) 54px),
-            rgba(18, 18, 18, 0.96);
-          border: 1px solid rgba(255, 255, 255, 0.10);
-          box-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
-          opacity: 1;
-          color: #fff;
-          color-scheme: dark;
-          font-family: Arial, sans-serif;
-          box-sizing: border-box;
-          will-change: transform, opacity, filter;
-        }
-        .${SCRIPT_PREFIX}-menu.open,
-        .${SCRIPT_PREFIX}-menu.closing {
-          display: block;
-        }
-        .${SCRIPT_PREFIX}-menu.open[data-placement],
-        .${SCRIPT_PREFIX}-menu.closing[data-placement] {
-          visibility: visible;
-        }
-        .${SCRIPT_PREFIX}-menu.open:not(.closing)[data-placement] {
-          animation: ${SCRIPT_PREFIX}-menu-slide-fade-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        .${SCRIPT_PREFIX}-menu.closing[data-placement] {
-          pointer-events: none;
-          animation: ${SCRIPT_PREFIX}-menu-slide-fade-out 105ms cubic-bezier(0.4, 0, 1, 1) both;
-        }
-        .${SCRIPT_PREFIX}-menu[data-placement="right"] {
-          --${SCRIPT_PREFIX}-menu-origin: 0% 50%;
-          --${SCRIPT_PREFIX}-menu-origin-x: 0%;
-          --${SCRIPT_PREFIX}-menu-origin-y: 50%;
-          --${SCRIPT_PREFIX}-menu-start-x: -10px;
-          --${SCRIPT_PREFIX}-menu-start-y: 0px;
-        }
-        .${SCRIPT_PREFIX}-menu[data-placement="left"] {
-          --${SCRIPT_PREFIX}-menu-origin: 100% 50%;
-          --${SCRIPT_PREFIX}-menu-origin-x: 100%;
-          --${SCRIPT_PREFIX}-menu-origin-y: 50%;
-          --${SCRIPT_PREFIX}-menu-start-x: 10px;
-          --${SCRIPT_PREFIX}-menu-start-y: 0px;
-        }
-        .${SCRIPT_PREFIX}-menu[data-placement="top"] {
-          --${SCRIPT_PREFIX}-menu-origin: 50% 100%;
-          --${SCRIPT_PREFIX}-menu-origin-x: 50%;
-          --${SCRIPT_PREFIX}-menu-origin-y: 100%;
-          --${SCRIPT_PREFIX}-menu-start-x: 0px;
-          --${SCRIPT_PREFIX}-menu-start-y: 10px;
-        }
-        .${SCRIPT_PREFIX}-menu[data-placement="bottom"],
-        .${SCRIPT_PREFIX}-menu[data-placement="bottom-start"],
-        .${SCRIPT_PREFIX}-menu[data-placement="bottom-end"] {
-          --${SCRIPT_PREFIX}-menu-origin: 50% 0%;
-          --${SCRIPT_PREFIX}-menu-origin-x: 50%;
-          --${SCRIPT_PREFIX}-menu-origin-y: 0%;
-          --${SCRIPT_PREFIX}-menu-start-x: 0px;
-          --${SCRIPT_PREFIX}-menu-start-y: -10px;
-        }
-        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-menu,
-        .${SCRIPT_PREFIX}-menu.light {
-          color: #111;
-          color-scheme: light;
-          background: rgba(255, 255, 255, 0.98);
-          border-color: rgba(0, 0, 0, 0.08);
-          box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
-        }
-
-        .${SCRIPT_PREFIX}-button {
-          border: 0;
-          border-radius: 6px;
-          padding: 12px 14px;
-          color: #fff;
-          background: transparent;
-          cursor: pointer;
-          font-size: 13px;
-          text-align: left;
-          font-family: inherit;
-        }
-        .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button {
-          width: 100%;
-          border-radius: 0;
-          background: transparent;
-        }
-        .${SCRIPT_PREFIX}-panel.light .${SCRIPT_PREFIX}-button,
-        .${SCRIPT_PREFIX}-menu.light .${SCRIPT_PREFIX}-button { color: #111; }
-        .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button:hover,
-        .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button:focus-visible,
-        .${SCRIPT_PREFIX}-button:hover {
-          background: #fe2c55;
-          color: #fff;
-        }
-        .${SCRIPT_PREFIX}-button.secondary { background: transparent; }
-        .${SCRIPT_PREFIX}-button.secondary:hover,
-        .${SCRIPT_PREFIX}-button.secondary:focus-visible {
-          color: #fff;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-notification-stack {
-          position: fixed;
-          top: 76px;
-          right: 18px;
-          z-index: 2147483702;
-          width: min(372px, calc(100vw - 28px));
-          height: var(--${SCRIPT_PREFIX}-notification-stack-collapsed-height, 90px);
-          pointer-events: none;
-          perspective: 900px;
-          transition: height 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
-        .${SCRIPT_PREFIX}-notification-stack:hover {
-          height: var(--${SCRIPT_PREFIX}-notification-stack-expanded-height, var(--${SCRIPT_PREFIX}-notification-stack-collapsed-height, 92px));
-        }
-        .${SCRIPT_PREFIX}-notification-card {
-          position: absolute;
-          top: 0;
-          right: 0;
-          width: 100%;
-          display: grid;
-          grid-template-columns: 34px minmax(0, 1fr) 34px;
-          gap: 10px;
-          align-items: center;
-          padding: 14px 10px 14px 14px;
-          border-radius: 14px;
-          color: var(--tux-v2-color-ui-shape-text-1-on-primary, #fff);
-          background: rgba(18, 18, 18, 0.94);
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          box-shadow: 0 14px 42px rgba(0, 0, 0, 0.36);
-          -webkit-backdrop-filter: blur(18px);
-          backdrop-filter: blur(18px);
-          font: 13px/1.42 Arial, sans-serif;
-          pointer-events: auto;
-          overflow: hidden;
-          transform-origin: 50% 0;
-          transform: translate3d(0, var(--${SCRIPT_PREFIX}-stack-y, 0px), 0) scale(var(--${SCRIPT_PREFIX}-stack-scale, 1));
-          opacity: var(--${SCRIPT_PREFIX}-stack-opacity, 1);
-          transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 120ms ease, background 150ms ease, border-color 150ms ease;
-          animation: ${SCRIPT_PREFIX}-notification-card-in 170ms cubic-bezier(0.18, 0.89, 0.32, 1.12);
-          isolation: isolate;
-        }
-        .${SCRIPT_PREFIX}-notification-stack:hover .${SCRIPT_PREFIX}-notification-card {
-          transform: translate3d(0, var(--${SCRIPT_PREFIX}-stack-expanded-y, var(--${SCRIPT_PREFIX}-stack-y, 0px)), 0) scale(1);
-          opacity: 1;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light {
-          color: #111;
-          background: rgba(255, 255, 255, 0.96);
-          border-color: rgba(0, 0, 0, 0.08);
-          box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
-        }
-        .${SCRIPT_PREFIX}-notification-card::before {
-          content: none;
-        }
-        .${SCRIPT_PREFIX}-notification-card > * {
-          position: relative;
-          z-index: 3;
-        }
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image {
-          background: rgba(18, 18, 18, 0.94);
-          border-color: rgba(255, 255, 255, 0.18);
-        }
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image {
-          background: rgba(255, 255, 255, 0.96);
-          border-color: rgba(0, 0, 0, 0.10);
-        }
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy::after,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album::after,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          padding: 1px;
-          border-radius: inherit;
-          background: conic-gradient(
-            from var(--${SCRIPT_PREFIX}-border-angle, 0deg),
-            rgba(255, 255, 255, 0.10) 0deg,
-            rgba(255, 255, 255, 0.10) 205deg,
-            rgba(255, 255, 255, 0.86) 252deg,
-            rgba(255, 255, 255, 0.24) 296deg,
-            rgba(255, 255, 255, 0.10) 360deg
-          );
-          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          pointer-events: none;
-          z-index: 2;
-          animation: ${SCRIPT_PREFIX}-notification-border-orbit 900ms linear infinite;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy::after,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album::after,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image::after {
-          background: conic-gradient(
-            from var(--${SCRIPT_PREFIX}-border-angle, 0deg),
-            rgba(22, 24, 35, 0.08) 0deg,
-            rgba(22, 24, 35, 0.08) 205deg,
-            rgba(22, 24, 35, 0.42) 252deg,
-            rgba(22, 24, 35, 0.14) 296deg,
-            rgba(22, 24, 35, 0.08) 360deg
-          );
-        }
-        .${SCRIPT_PREFIX}-notification-icon,
-        .${SCRIPT_PREFIX}-download-status-icon {
-          width: 34px;
-          height: 34px;
-          border-radius: 999px;
-          display: grid;
-          place-items: center;
-          background: rgba(255, 255, 255, 0.10);
-          color: #fff;
-          font-weight: 700;
-          font-size: 17px;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-icon,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-icon {
-          background: rgba(22, 24, 35, 0.06);
-          color: #111;
-        }
-        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-icon,
-        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-download-status-icon {
-          background: rgba(254, 44, 85, 0.18);
-          color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-icon,
-        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-download-status-icon {
-          background: rgba(37, 244, 238, 0.14);
-          color: #25f4ee;
-        }
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy .${SCRIPT_PREFIX}-download-status-icon,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album .${SCRIPT_PREFIX}-download-status-icon,
-        .${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image .${SCRIPT_PREFIX}-download-status-icon {
-          background: rgba(255, 255, 255, 0.10);
-          color: #25f4ee;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.busy .${SCRIPT_PREFIX}-download-status-icon,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.album .${SCRIPT_PREFIX}-download-status-icon,
-        .${SCRIPT_PREFIX}-notification-card.light.${SCRIPT_PREFIX}-download-status.image .${SCRIPT_PREFIX}-download-status-icon {
-          background: rgba(22, 24, 35, 0.06);
-          color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-download-status-spinner {
-          width: 36px;
-          height: 36px;
-          display: inline-grid;
-          place-items: center;
-          color: currentColor;
-        }
-        .${SCRIPT_PREFIX}-download-status-spinner svg {
-          width: 36px;
-          height: 36px;
-          display: block;
-          animation: ${SCRIPT_PREFIX}-download-spin 720ms linear infinite;
-        }
-        .${SCRIPT_PREFIX}-download-status-spinner .${SCRIPT_PREFIX}-spinner-ring {
-          fill: none;
-          stroke: currentColor;
-          stroke-width: 1.9;
-          opacity: 0.28;
-        }
-        .${SCRIPT_PREFIX}-download-status-spinner .${SCRIPT_PREFIX}-spinner-arrow {
-          fill: none;
-          stroke: currentColor;
-          stroke-width: 2.1;
-          stroke-linecap: round;
-          stroke-linejoin: round;
-        }
-        .${SCRIPT_PREFIX}-notification-main,
-        .${SCRIPT_PREFIX}-download-status-main { min-width: 0; }
-        .${SCRIPT_PREFIX}-notification-head,
-        .${SCRIPT_PREFIX}-download-status-head {
-          display: flex;
-          align-items: baseline;
-          gap: 8px;
-          min-width: 0;
-        }
-        .${SCRIPT_PREFIX}-notification-title,
-        .${SCRIPT_PREFIX}-download-status-title {
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-weight: 700;
-          font-size: 14px;
-        }
-        .${SCRIPT_PREFIX}-notification-meta,
-        .${SCRIPT_PREFIX}-download-status-meta {
-          flex: none;
-          color: rgba(255, 255, 255, 0.74);
-          font-weight: 700;
-          font-size: 13px;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-meta,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-meta {
-          color: rgba(22, 24, 35, 0.56);
-        }
-        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-meta,
-        .${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-download-status-meta { color: #fe2c55; }
-        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-meta,
-        .${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-download-status-meta { color: #25f4ee; }
-        .${SCRIPT_PREFIX}-notification-detail,
-        .${SCRIPT_PREFIX}-download-status-detail {
-          margin-top: 4px;
-          color: rgba(255, 255, 255, 0.70);
-          font-size: 12px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-detail,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-detail {
-          color: rgba(22, 24, 35, 0.62);
-        }
-        .${SCRIPT_PREFIX}-notification-close,
-        .${SCRIPT_PREFIX}-download-status-close {
-          width: 34px;
-          height: 34px;
-          border: 0;
-          border-radius: 999px;
-          color: rgba(255, 255, 255, 0.72);
-          background: transparent;
-          cursor: pointer;
-          font-size: 22px;
-          line-height: 1;
-          padding: 0;
-          display: grid;
-          place-items: center;
-          align-self: center;
-        }
-        .${SCRIPT_PREFIX}-notification-close:hover,
-        .${SCRIPT_PREFIX}-notification-close:focus-visible,
-        .${SCRIPT_PREFIX}-download-status-close:hover,
-        .${SCRIPT_PREFIX}-download-status-close:focus-visible {
-          color: #fff;
-          background: rgba(255, 255, 255, 0.12);
-        }
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close {
-          color: rgba(22, 24, 35, 0.58);
-        }
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close:hover,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-notification-close:focus-visible,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close:hover,
-        .${SCRIPT_PREFIX}-notification-card.light .${SCRIPT_PREFIX}-download-status-close:focus-visible {
-          color: #111;
-          background: rgba(22, 24, 35, 0.06);
-        }
-        .${SCRIPT_PREFIX}-notification-card.fading {
-          opacity: 0;
-          pointer-events: none;
-          transform: translateY(-6px) scale(0.97);
-          transition: opacity 70ms ease, transform 70ms ease;
-        }
-        .${SCRIPT_PREFIX}-notification-card.attention {
-          animation: ${SCRIPT_PREFIX}-notification-card-shake 360ms ease-in-out,
-            ${SCRIPT_PREFIX}-notification-card-flash 1000ms ease-out;
-        }
-        .${SCRIPT_PREFIX}-notification-card.light.attention {
-          animation: ${SCRIPT_PREFIX}-notification-card-shake 360ms ease-in-out,
-            ${SCRIPT_PREFIX}-notification-card-flash-light 1000ms ease-out;
-        }
-        @property --${SCRIPT_PREFIX}-border-angle {
-          syntax: '<angle>';
-          inherits: false;
-          initial-value: 0deg;
-        }
-        @keyframes ${SCRIPT_PREFIX}-download-spin {
-          to { transform: rotate(360deg); }
-        }
-        @keyframes ${SCRIPT_PREFIX}-notification-border-orbit {
-          to { --${SCRIPT_PREFIX}-border-angle: 360deg; }
-        }
-        @keyframes ${SCRIPT_PREFIX}-menu-slide-fade-in {
-          0% {
-            opacity: 0;
-            filter: blur(5px);
-            transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0) scale(0.985);
-          }
-          100% {
-            opacity: 1;
-            filter: blur(0);
-            transform: translate3d(0, 0, 0) scale(1);
-          }
-        }
-        @keyframes ${SCRIPT_PREFIX}-menu-slide-fade-out {
-          0% {
-            opacity: 1;
-            filter: blur(0);
-            transform: translate3d(0, 0, 0) scale(1);
-          }
-          100% {
-            opacity: 0;
-            filter: blur(4px);
-            transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0) scale(0.985);
-          }
-        }
-        @keyframes ${SCRIPT_PREFIX}-notification-card-in {
-          from { opacity: 0; transform: translateX(22px) translateY(-10px) scale(0.96) rotateX(-6deg); }
-          to { opacity: 1; transform: translateX(0) translateY(0) scale(1) rotateX(0); }
-        }
-        @keyframes ${SCRIPT_PREFIX}-notification-card-shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-8px); }
-          40% { transform: translateX(7px); }
-          60% { transform: translateX(-5px); }
-          80% { transform: translateX(3px); }
-        }
-        @keyframes ${SCRIPT_PREFIX}-notification-card-flash {
-          0% { background: rgba(72, 72, 72, 0.98); border-color: rgba(255, 255, 255, 0.28); }
-          100% { background: rgba(18, 18, 18, 0.94); border-color: rgba(255, 255, 255, 0.12); }
-        }
-        @keyframes ${SCRIPT_PREFIX}-notification-card-flash-light {
-          0% { background: rgba(22, 24, 35, 0.10); border-color: rgba(22, 24, 35, 0.18); }
-          100% { background: rgba(255, 255, 255, 0.96); border-color: rgba(0, 0, 0, 0.08); }
-        }
-        .${SCRIPT_PREFIX}-modal-backdrop {
-          position: fixed;
-          inset: 0;
-          z-index: 2147483600;
-          background: rgba(0, 0, 0, 0.58);
-          display: grid;
-          place-items: center;
-          padding: 14px;
-        }
-        .${SCRIPT_PREFIX}-modal {
-          width: min(900px, calc(100vw - 28px));
-          max-height: min(760px, calc(100vh - 28px));
-          overflow: auto;
-          border-radius: 8px;
-          background: #fff;
-          color: #111;
-          font: 14px Arial, sans-serif;
-          box-shadow: 0 16px 60px rgba(0, 0, 0, 0.32);
-        }
-        .${SCRIPT_PREFIX}-modal.dark {
-          background: #171717;
-          color: #f6f6f6;
-        }
-        .${SCRIPT_PREFIX}-modal.dark header,
-        .${SCRIPT_PREFIX}-modal.dark td,
-        .${SCRIPT_PREFIX}-modal.dark th {
-          border-color: #2a2a2a;
-        }
-        .${SCRIPT_PREFIX}-modal header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 16px;
-          padding: 18px 22px;
-          border-bottom: 1px solid #eee;
-        }
-        .${SCRIPT_PREFIX}-modal main { padding: 18px 22px 22px; }
-        .${SCRIPT_PREFIX}-modal h2 {
-          margin: 0;
-          font-size: 20px;
-          line-height: 1.2;
-        }
-        .${SCRIPT_PREFIX}-modal .${SCRIPT_PREFIX}-subtitle {
-          margin: 5px 0 0;
-          color: #666;
-          font-size: 13px;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-subtitle { color: #a8a8a8; }
-        .${SCRIPT_PREFIX}-close {
-          flex: 0 0 auto;
-          border: 1px solid #ddd;
-          border-radius: 999px;
-          padding: 7px 13px;
-          color: inherit;
-          background: transparent;
-          cursor: pointer;
-          font: inherit;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-close { border-color: #343434; }
-        .${SCRIPT_PREFIX}-close:hover {
-          color: #fff;
-          background: #fe2c55;
-          border-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-settings-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 14px;
-        }
-        .${SCRIPT_PREFIX}-section {
-          display: grid;
-          gap: 12px;
-          margin-bottom: 18px;
-        }
-        .${SCRIPT_PREFIX}-section-title {
-          margin: 0;
-          color: #fe2c55;
-          font-size: 13px;
-          font-weight: 700;
-          text-transform: uppercase;
-        }
-        .${SCRIPT_PREFIX}-field {
-          position: relative;
-          min-width: 0;
-        }
-        .${SCRIPT_PREFIX}-field.full { grid-column: 1 / -1; }
-        .${SCRIPT_PREFIX}-settings-grid > .full { grid-column: 1 / -1; }
-        .${SCRIPT_PREFIX}-modal label {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          margin: 0 0 6px;
-          font-weight: 700;
-        }
-        .${SCRIPT_PREFIX}-modal input,
-        .${SCRIPT_PREFIX}-modal select,
-        .${SCRIPT_PREFIX}-modal textarea {
-          width: 100%;
-          box-sizing: border-box;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          padding: 9px 10px;
-          font: inherit;
-        }
-        .${SCRIPT_PREFIX}-modal.dark input,
-        .${SCRIPT_PREFIX}-modal.dark select,
-        .${SCRIPT_PREFIX}-modal.dark textarea {
-          color: #f6f6f6;
-          background: #242424;
-          border-color: #3a3a3a;
-        }
-        .${SCRIPT_PREFIX}-modal input[type="checkbox"] {
-          width: auto;
-          min-width: 18px;
-          height: 18px;
-          padding: 0;
-          accent-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-modal textarea {
-          min-height: 78px;
-          resize: vertical;
-        }
-        .${SCRIPT_PREFIX}-modal table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-top: 10px;
-          font-size: 12px;
-        }
-        .${SCRIPT_PREFIX}-modal td,
-        .${SCRIPT_PREFIX}-modal th {
-          border-bottom: 1px solid #eee;
-          padding: 6px;
-          text-align: left;
-          vertical-align: top;
-        }
-        .${SCRIPT_PREFIX}-detail-tabs {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 14px;
-          border-bottom: 1px solid #eee;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-detail-tabs { border-color: #2a2a2a; }
-        .${SCRIPT_PREFIX}-detail-tab {
-          border: 0;
-          border-bottom: 2px solid transparent;
-          padding: 9px 10px;
-          color: inherit;
-          background: transparent;
-          cursor: pointer;
-          font: inherit;
-        }
-        .${SCRIPT_PREFIX}-detail-tab.active {
-          color: #fe2c55;
-          border-bottom-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-detail-panel[hidden] { display: none !important; }
-        .${SCRIPT_PREFIX}-detail-section {
-          display: grid;
-          gap: 10px;
-          margin-bottom: 18px;
-        }
-        .${SCRIPT_PREFIX}-detail-section h3 {
-          margin: 0;
-          font-size: 14px;
-        }
-        .${SCRIPT_PREFIX}-detail-grid,
-        .${SCRIPT_PREFIX}-stats-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-          gap: 8px;
-        }
-        .${SCRIPT_PREFIX}-kv,
-        .${SCRIPT_PREFIX}-stat {
-          min-width: 0;
-          border: 1px solid #eee;
-          border-radius: 6px;
-          padding: 8px 10px;
-          background: #fafafa;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-kv,
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-stat {
-          border-color: #3e3e3e;
-          background: #1f1f1f;
-        }
-        .${SCRIPT_PREFIX}-kv small,
-        .${SCRIPT_PREFIX}-stat small {
-          display: block;
-          margin-bottom: 3px;
-          color: #777;
-          font-size: 11px;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-kv small,
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-stat small { color: #aaa; }
-        .${SCRIPT_PREFIX}-kv span,
-        .${SCRIPT_PREFIX}-stat strong {
-          display: block;
-          min-width: 0;
-          overflow-wrap: anywhere;
-        }
-        .${SCRIPT_PREFIX}-cover-preview {
-          max-width: 180px;
-          max-height: 240px;
-          border-radius: 6px;
-          object-fit: cover;
-          background: #111;
-        }
-        .${SCRIPT_PREFIX}-link {
-          color: #fe2c55;
-          overflow-wrap: anywhere;
-        }
-        .${SCRIPT_PREFIX}-json-pre {
-          max-height: 360px;
-          overflow: auto;
-          margin: 0;
-          border: 1px solid #eee;
-          border-radius: 6px;
-          padding: 10px;
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-          background: #f7f7f7;
-          font: 12px Consolas, "Courier New", monospace;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-json-pre {
-          border-color: #3e3e3e;
-          background: #101010;
-        }
-        .${SCRIPT_PREFIX}-details-modal {
-          position: relative;
-          width: min(1120px, calc(100vw - 28px));
-          overflow: hidden;
-          border-radius: 14px;
-          background: #fbfbfb;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark {
-          background: #111;
-          color: #f5f5f5;
-        }
-        .${SCRIPT_PREFIX}-details-modal main {
-          display: flex;
-          flex-direction: column;
-          padding: 0;
-          max-height: min(780px, calc(100vh - 28px));
-        }
-        .${SCRIPT_PREFIX}-details-close {
-          position: absolute;
-          top: 10px;
-          right: 10px;
-          z-index: 2;
-          width: 34px;
-          height: 34px;
-          border: 0;
-          border-radius: 999px;
-          color: inherit;
-          background: rgba(127, 127, 127, 0.12);
-          cursor: pointer;
-          font: 20px Arial, sans-serif;
-        }
-        .${SCRIPT_PREFIX}-details-close:hover {
-          color: #fff;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-launcher:focus,
-        .${SCRIPT_PREFIX}-details-close:focus,
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab:focus,
-        .${SCRIPT_PREFIX}-detail-pill:focus {
-          outline: none;
-        }
-        .${SCRIPT_PREFIX}-launcher:focus-visible,
-        .${SCRIPT_PREFIX}-details-close:focus-visible,
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab:focus-visible,
-        .${SCRIPT_PREFIX}-detail-pill:focus-visible {
-          outline: 2px solid rgba(254, 44, 85, 0.75);
-          outline-offset: 2px;
-        }
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tabs {
-          flex: 0 0 auto;
-          display: flex;
-          gap: 0;
-          margin: 0;
-          padding: 0 48px 0 12px;
-          overflow-x: auto;
-          border-bottom: 1px solid #dedede;
-          background: #f2f2f2;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-tabs {
-          border-color: #252525;
-          background: #141414;
-        }
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab {
-          min-width: 112px;
-          border: 0;
-          border-bottom: 3px solid transparent;
-          padding: 18px 20px 15px;
-          color: #555;
-          background: transparent;
-          font-size: 16px;
-          font-weight: 700;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-tab { color: #cfcfcf; }
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab.active {
-          color: #fe2c55;
-          border-bottom-color: #fe2c55;
-          background: rgba(254, 44, 85, 0.06);
-        }
-        .${SCRIPT_PREFIX}-detail-body {
-          flex: 1 1 auto;
-          overflow: auto;
-          padding: 22px 28px 28px;
-        }
-        .${SCRIPT_PREFIX}-detail-fieldset {
-          min-width: 0;
-          margin: 0 0 22px;
-          border: 1px solid #d8d8d8;
-          border-radius: 12px;
-          padding: 22px 24px;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-fieldset {
-          border-color: #333;
-          background: rgba(255, 255, 255, 0.015);
-        }
-        .${SCRIPT_PREFIX}-settings-modal.dark .${SCRIPT_PREFIX}-detail-fieldset {
-          border-color: #333;
-          background: rgba(255, 255, 255, 0.015);
-        }
-        .${SCRIPT_PREFIX}-detail-fieldset legend {
-          padding: 0 12px;
-          font-weight: 800;
-          font-size: 14px;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row,
-        .${SCRIPT_PREFIX}-detail-author-head {
-          display: flex;
-          gap: 22px;
-          align-items: center;
-          min-width: 0;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait {
-          flex-direction: row;
-          align-items: center;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square {
-          flex-direction: row;
-        }
-        .${SCRIPT_PREFIX}-detail-cover {
-          width: 180px;
-          height: 101px;
-          max-width: 34vw;
-          aspect-ratio: 16 / 9;
-          border-radius: 6px;
-          object-fit: cover;
-          background: #0f0f0f;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait .${SCRIPT_PREFIX}-detail-cover {
-          width: min(252px, 40vw);
-          height: min(448px, 71.1vw);
-          max-width: 100%;
-          aspect-ratio: 9 / 16;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait > div,
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square > div {
-          flex: 1 1 190px;
-          min-width: 170px;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square .${SCRIPT_PREFIX}-detail-cover {
-          width: 150px;
-          height: 150px;
-          aspect-ratio: 1;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape .${SCRIPT_PREFIX}-detail-cover {
-          width: min(420px, 100%);
-          height: auto;
-          max-width: 100%;
-        }
-        .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape > div {
-          width: min(420px, 100%);
-          min-width: 0;
-        }
-        .${SCRIPT_PREFIX}-detail-avatar {
-          width: 76px;
-          height: 76px;
-          border-radius: 50%;
-          object-fit: cover;
-          background: #2b2b2b;
-        }
-        .${SCRIPT_PREFIX}-detail-actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 9px;
-          align-items: center;
-          margin-top: 12px;
-        }
-        .${SCRIPT_PREFIX}-detail-pill {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 30px;
-          border: 1px solid #bdbdbd;
-          border-radius: 999px;
-          padding: 5px 14px;
-          color: inherit;
-          background: rgba(127, 127, 127, 0.08);
-          cursor: pointer;
-          text-decoration: none;
-          font: 13px Arial, sans-serif;
-          white-space: nowrap;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-pill {
-          border-color: #555;
-          background: rgba(255, 255, 255, 0.06);
-        }
-        .${SCRIPT_PREFIX}-detail-pill:hover {
-          color: #fff;
-          border-color: #fe2c55;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-detail-table-wrap {
-          overflow: auto;
-          border: 1px solid #dedede;
-          border-radius: 8px;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-table-wrap {
-          border-color: #2d2d2d;
-        }
-        .${SCRIPT_PREFIX}-detail-table {
-          margin: 0;
-          min-width: 780px;
-          border-collapse: collapse;
-          font-size: 13px;
-        }
-        .${SCRIPT_PREFIX}-detail-table th,
-        .${SCRIPT_PREFIX}-detail-table td {
-          border-right: 1px solid #e6e6e6;
-          border-bottom: 1px solid #e6e6e6;
-          padding: 12px;
-          vertical-align: middle;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-table th,
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-table td {
-          border-color: #2a2a2a;
-        }
-        .${SCRIPT_PREFIX}-detail-table th {
-          font-weight: 800;
-          background: rgba(127, 127, 127, 0.08);
-        }
-        .${SCRIPT_PREFIX}-detail-rows {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 0;
-          font-size: 14px;
-        }
-        .${SCRIPT_PREFIX}-detail-rows th,
-        .${SCRIPT_PREFIX}-detail-rows td {
-          border-bottom: 1px solid #e6e6e6;
-          padding: 10px 0;
-          vertical-align: top;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-rows th,
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-rows td {
-          border-color: #292929;
-        }
-        .${SCRIPT_PREFIX}-detail-rows th {
-          width: 150px;
-          padding-right: 18px;
-          color: #666;
-          text-align: left;
-          font-weight: 800;
-        }
-        .${SCRIPT_PREFIX}-details-modal.dark .${SCRIPT_PREFIX}-detail-rows th { color: #aaa; }
-        .${SCRIPT_PREFIX}-detail-value {
-          overflow-wrap: anywhere;
-          white-space: pre-wrap;
-        }
-        .${SCRIPT_PREFIX}-detail-json-actions {
-          display: flex;
-          gap: 10px;
-          margin-bottom: 10px;
-        }
-        .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-json-pre {
-          max-height: 560px;
-          border-color: #d8d8d8;
-        }
-        .${SCRIPT_PREFIX}-detail-audio {
-          width: 100%;
-          min-width: 0;
-          height: 54px;
-          margin: 0;
-        }
-        .${SCRIPT_PREFIX}-detail-music-section {
-          overflow: hidden;
-        }
-        .${SCRIPT_PREFIX}-detail-audio-row {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          min-width: 0;
-          width: 100%;
-          margin-bottom: 16px;
-        }
-        .${SCRIPT_PREFIX}-detail-music-cover {
-          flex: 0 0 54px;
-          width: 54px;
-          height: 54px;
-          border-radius: 6px;
-          object-fit: cover;
-          background: #202020;
-        }
-        .${SCRIPT_PREFIX}-detail-audio-row .${SCRIPT_PREFIX}-detail-audio {
-          flex: 1 1 auto;
-          width: auto;
-        }
-        .${SCRIPT_PREFIX}-detail-music-url {
-          display: -webkit-box;
-          max-height: 6.4em;
-          overflow: hidden;
-          white-space: normal;
-          overflow-wrap: anywhere;
-          word-break: break-word;
-          line-height: 1.6;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 4;
-        }
-        .${SCRIPT_PREFIX}-source-properties {
-          display: grid;
-          gap: 10px;
-          margin-bottom: 14px;
-        }
-        .${SCRIPT_PREFIX}-source-properties .${SCRIPT_PREFIX}-chip-list {
-          max-height: 112px;
-          overflow: auto;
-          align-content: flex-start;
-        }
-        .${SCRIPT_PREFIX}-detail-media-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          gap: 22px;
-          align-items: stretch;
-        }
-        .${SCRIPT_PREFIX}-detail-media-grid > .${SCRIPT_PREFIX}-detail-fieldset {
-          margin-bottom: 22px;
-        }
-        .${SCRIPT_PREFIX}-cover-resolution {
-          display: inline-block;
-          font-size: 22px;
-          line-height: 1.25;
-          white-space: nowrap;
-          overflow-wrap: normal;
-          word-break: keep-all;
-          letter-spacing: 0;
-        }
-        .${SCRIPT_PREFIX}-single-line-link {
-          display: block;
-          max-width: min(100%, 520px);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          overflow-wrap: normal;
-        }
-        .${SCRIPT_PREFIX}-settings-modal {
-          position: relative;
-          display: flex;
-          flex-direction: column;
-          width: min(860px, calc(100vw - 72px));
-          max-height: min(700px, calc(100vh - 72px));
-          overflow: hidden;
-          border-radius: 14px;
-          background: #fbfbfb;
-        }
-        .${SCRIPT_PREFIX}-settings-modal.dark {
-          background: #111;
-          color: #f5f5f5;
-        }
-        .${SCRIPT_PREFIX}-settings-modal main {
-          flex: 1 1 auto;
-          min-height: 0;
-          padding: 18px 22px 22px;
-          max-height: none;
-          overflow: auto;
-        }
-        .${SCRIPT_PREFIX}-settings-header {
-          position: sticky;
-          top: 0;
-          z-index: 2;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 16px 22px;
-          border-bottom: 1px solid #dedede;
-          background: #f2f2f2;
-        }
-        .${SCRIPT_PREFIX}-settings-modal.dark .${SCRIPT_PREFIX}-settings-header {
-          border-color: #252525;
-          background: #141414;
-        }
-        .${SCRIPT_PREFIX}-settings-header h2 {
-          margin: 0;
-          color: #fe2c55;
-          font-size: 20px;
-          font-weight: 800;
-        }
-        .${SCRIPT_PREFIX}-settings-header-actions {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
-        .${SCRIPT_PREFIX}-settings-header-actions .${SCRIPT_PREFIX}-button {
-          width: auto;
-          border-radius: 999px;
-          padding: 10px 20px;
-          text-align: center;
-        }
-        .${SCRIPT_PREFIX}-settings-header-actions .${SCRIPT_PREFIX}-button.primary {
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-settings-header-actions .${SCRIPT_PREFIX}-button.secondary {
-          color: inherit;
-          border: 1px solid rgba(127, 127, 127, 0.28);
-          background: rgba(127, 127, 127, 0.08);
-        }
-        .${SCRIPT_PREFIX}-settings-header-actions .${SCRIPT_PREFIX}-button.secondary:hover {
-          color: #fff;
-          border-color: #fe2c55;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-settings-fieldset .${SCRIPT_PREFIX}-settings-grid {
-          align-items: start;
-        }
-        .${SCRIPT_PREFIX}-settings-fieldset {
-          margin-bottom: 16px;
-          padding: 17px 20px 19px;
-        }
-        .${SCRIPT_PREFIX}-settings-note {
-          display: flex;
-          align-items: center;
-          min-height: 42px;
-          box-sizing: border-box;
-          border: 1px solid #e5e5e5;
-          border-radius: 8px;
-          padding: 10px 12px;
-          background: rgba(127, 127, 127, 0.06);
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-settings-note {
-          border-color: #3e3e3e;
-          background: rgba(255, 255, 255, 0.04);
-        }
-        .${SCRIPT_PREFIX}-filename-template-editor {
-          display: grid;
-          gap: 12px;
-        }
-        .${SCRIPT_PREFIX}-filename-preview {
-          min-height: 22px;
-          border-top: 1px solid #d8d8d8;
-          padding-top: 12px;
-          color: inherit;
-          font-weight: 700;
-          overflow-wrap: anywhere;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-filename-preview {
-          border-color: #3e3e3e;
-        }
-        .${SCRIPT_PREFIX}-frame-modal {
-          width: min(560px, calc(100vw - 28px));
-          overflow: hidden;
-        }
-        .${SCRIPT_PREFIX}-frame-preview {
-          width: 100%;
-          max-height: min(60vh, 520px);
-          border-radius: 8px;
-          object-fit: contain;
-          background: #111;
-        }
-        .${SCRIPT_PREFIX}-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-        .${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button {
-          width: auto;
-          min-width: auto;
-          border-radius: 6px;
-          background: #111;
-          text-align: center;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button {
-          background: #333;
-        }
-        .${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button.primary {
-          color: #fff;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button.danger {
-          color: #fe2c55;
-          border: 1px solid #fe2c55;
-          background: rgba(254, 44, 85, 0.08);
-        }
-        .${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button.danger:hover {
-          color: #fff;
-          background: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-chip-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          min-height: 42px;
-          align-items: center;
-        }
-        .${SCRIPT_PREFIX}-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          border: 1px solid #d8d8d8;
-          border-radius: 999px;
-          padding: 7px 10px;
-          color: #111;
-          background: #f7f7f7;
-          cursor: pointer;
-          font: 12px Arial, sans-serif;
-        }
-        .${SCRIPT_PREFIX}-chip.available {
-          cursor: pointer;
-          background: transparent;
-        }
-        .${SCRIPT_PREFIX}-chip.separator {
-          border-style: dashed;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-chip {
-          color: #f6f6f6;
-          background: #242424;
-          border-color: #3a3a3a;
-        }
-        .${SCRIPT_PREFIX}-chip small {
-          color: #777;
-          font-size: 11px;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-chip small { color: #aaa; }
-        .${SCRIPT_PREFIX}-check-chip {
-          display: inline-flex !important;
-          align-items: center;
-          gap: 7px;
-          margin: 0 !important;
-          border: 1px solid #d8d8d8;
-          border-radius: 999px;
-          padding: 7px 10px;
-          color: inherit;
-          background: rgba(127, 127, 127, 0.06);
-          cursor: pointer;
-          font: 12px Arial, sans-serif;
-        }
-        .${SCRIPT_PREFIX}-check-chip input {
-          width: 14px !important;
-          height: 14px;
-          margin: 0;
-          padding: 0;
-          accent-color: #fe2c55;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-check-chip {
-          border-color: #3a3a3a;
-          background: #242424;
-        }
-        .${SCRIPT_PREFIX}-readonly {
-          color: #666;
-          font-size: 13px;
-          line-height: 1.45;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-readonly { color: #aaa; }
-        .${SCRIPT_PREFIX}-actions {
-          justify-content: flex-end;
-          padding-top: 6px;
-          border-top: 1px solid #eee;
-        }
-        .${SCRIPT_PREFIX}-modal.dark .${SCRIPT_PREFIX}-actions { border-color: #2a2a2a; }
-        @media (max-width: 720px) {
-          .${SCRIPT_PREFIX}-settings-grid { grid-template-columns: 1fr; }
-          .${SCRIPT_PREFIX}-detail-media-grid { grid-template-columns: 1fr; }
-          .${SCRIPT_PREFIX}-modal header { padding: 16px; }
-          .${SCRIPT_PREFIX}-modal main { padding: 16px; }
-          .${SCRIPT_PREFIX}-settings-modal main { padding: 16px; }
-        }
+:where(.${SCRIPT_PREFIX}-panel, .${SCRIPT_PREFIX}-menu, .${SCRIPT_PREFIX}-modal, .${SCRIPT_PREFIX}-notification-card, .${SCRIPT_PREFIX}-image-button, .${SCRIPT_PREFIX}-profile-bulk-menu) {
+  font-family: var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+}
+.${SCRIPT_PREFIX}-panel {
+  position: fixed;
+  right: 18px;
+  top: 25vh;
+  bottom: auto;
+  left: auto;
+  width: 48px;
+  height: 48px;
+  color: var(--tux-colorTextPrimary);
+}
+.${SCRIPT_PREFIX}-panel.pending { visibility: hidden; pointer-events: none; }
+.${SCRIPT_PREFIX}-image-button {
+  position: fixed;
+  right: 18px;
+  bottom: 80px;
+  z-index: 2147483200;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 18px;
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-4);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background-color 0.15s ease;
+}
+.${SCRIPT_PREFIX}-image-button:hover { background: var(--ui-shape-neutral-3); }
+.${SCRIPT_PREFIX}-image-button:focus-visible { outline: 2px solid var(--tux-colorTextSecondary); outline-offset: 2px; }
+button.TUXButton.TUXButton--medium.${SCRIPT_PREFIX}-icon-button {
+  flex: 0 0 1.75rem;
+  width: 1.75rem;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-4);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.${SCRIPT_PREFIX}-icon-button .TUXButton-content,
+.${SCRIPT_PREFIX}-icon-button .TUXButton-iconContainer { display: flex; align-items: center; justify-content: center; }
+.${SCRIPT_PREFIX}-icon-button svg { display: block; width: 1em; height: 1em; pointer-events: none; }
+.${SCRIPT_PREFIX}-icon-button:hover { color: var(--tux-colorTextPrimary); background: var(--ui-shape-neutral-3); }
+button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button { color: #fff; background: #fe2c55; }
+button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover { color: #fff; background: #ff4b69; }
+.${SCRIPT_PREFIX}-icon-button:focus-visible { outline: 2px solid var(--tux-colorTextSecondary); outline-offset: 2px; }
+.${SCRIPT_PREFIX}-panel.embedded {
+  position: relative;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  margin: 0 0 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  contain: layout style;
+  overflow: visible;
+  isolation: isolate;
+}
+.${SCRIPT_PREFIX}-panel.floating {
+  position: fixed;
+  z-index: 3999;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  contain: layout style;
+  overflow: visible;
+  isolation: isolate;
+}
+.${SCRIPT_PREFIX}-launcher-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  color: var(--tux-colorTextPrimary);
+  box-sizing: border-box;
+}
+.${SCRIPT_PREFIX}-launcher-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: inherit;
+  box-sizing: border-box;
+  line-height: 0;
+}
+.${SCRIPT_PREFIX}-launcher-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: var(--tux-v2-radius-control-capsule, 9999px);
+  border: 0;
+  box-shadow: none;
+  box-sizing: border-box;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.${SCRIPT_PREFIX}-launcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  box-sizing: border-box;
+  line-height: 0;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-icon-wrapper,
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container,
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 100%;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-container {
+  border-radius: var(--tux-v2-radius-control-capsule, 9999px);
+  border: 0;
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-4);
+  box-shadow: none;
+}
+.${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
+.${SCRIPT_PREFIX}-panel.open .${SCRIPT_PREFIX}-launcher-container {
+  background: var(--ui-shape-neutral-3);
+  color: var(--tux-colorTextPrimary);
+  transform: none;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
+.${SCRIPT_PREFIX}-panel.embedded.open .${SCRIPT_PREFIX}-launcher-container {
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-3);
+  transform: none;
+}
+.${SCRIPT_PREFIX}-launcher svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+  transform: translateY(-1px);
+  transform-origin: center;
+  overflow: visible;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer;
+  touch-action: manipulation;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  line-height: 0 !important;
+  text-align: center;
+  color: var(--tux-colorTextPrimary) !important;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher svg [stroke="currentColor"] {
+  stroke: currentColor !important;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher svg [fill="currentColor"] {
+  fill: currentColor !important;
+}
+.${SCRIPT_PREFIX}-panel.embedded .${SCRIPT_PREFIX}-launcher svg {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0 auto;
+  transform: none;
+}
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher-shell,
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher-icon-wrapper,
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher-container,
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 100%;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher-container {
+  border-radius: var(--tux-v2-radius-control-capsule, 9999px);
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-4);
+}
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher-shell:hover .${SCRIPT_PREFIX}-launcher-container,
+.${SCRIPT_PREFIX}-panel.floating.open .${SCRIPT_PREFIX}-launcher-container {
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-3);
+}
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher {
+  cursor: pointer;
+  touch-action: manipulation;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: 0 !important;
+}
+.${SCRIPT_PREFIX}-panel.floating .${SCRIPT_PREFIX}-launcher svg {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin: 0 auto;
+  transform: none;
+}
+.${SCRIPT_PREFIX}-profile-bulk-wrap {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+.${SCRIPT_PREFIX}-profile-bulk-button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  cursor: pointer;
+  color: inherit;
+  background: transparent !important;
+}
+.${SCRIPT_PREFIX}-profile-bulk-wrap:hover, .${SCRIPT_PREFIX}-profile-bulk-wrap.${SCRIPT_PREFIX}-profile-bulk-open { border-radius: 999px; background: var(--ui-shape-neutral-3, rgba(127, 127, 127, 0.19)) !important; }
+.${SCRIPT_PREFIX}-profile-bulk-button:focus-visible { outline: 2px solid var(--tux-colorTextSecondary, rgba(127, 127, 127, 0.75)); outline-offset: 2px; border-radius: 999px; }
+.${SCRIPT_PREFIX}-profile-bulk-button svg {
+  width: 1em;
+  height: 1em;
+  display: block;
+  pointer-events: none;
+}
+.${SCRIPT_PREFIX}-profile-bulk-menu { width: 160px; }
+.${SCRIPT_PREFIX}-profile-select-box {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: rgba(22, 24, 35, 0.72);
+  box-shadow: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  backdrop-filter: blur(8px);
+  padding: 0;
+  line-height: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.${SCRIPT_PREFIX}-profile-select-box:hover { background: rgba(22, 24, 35, 0.86); }
+.${SCRIPT_PREFIX}-profile-select-box:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.9); outline-offset: 2px; }
+.${SCRIPT_PREFIX}-profile-select-box.selected { border-color: #fe2c55; background: #fe2c55; box-shadow: none; }
+.${SCRIPT_PREFIX}-profile-select-box.downloaded { border-color: #00a67d; background: #00a67d; }
+.${SCRIPT_PREFIX}-profile-select-mark {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.${SCRIPT_PREFIX}-profile-select-box.selected .${SCRIPT_PREFIX}-profile-select-mark::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 20%;
+  width: 34%;
+  height: 52%;
+  border: solid #fff;
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+}
+.${SCRIPT_PREFIX}-bulk-confirm-modal { width: min(860px, calc(100vw - 42px)); max-height: min(720px, calc(100vh - 42px)); }
+.${SCRIPT_PREFIX}-bulk-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(520px, 58vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+.${SCRIPT_PREFIX}-bulk-row {
+  display: grid;
+  grid-template-columns: 28px 72px minmax(0, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(127, 127, 127, 0.22);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(127, 127, 127, 0.06);
+}
+.${SCRIPT_PREFIX}-bulk-row input { width: 18px; height: 18px; accent-color: #fe2c55; }
+.${SCRIPT_PREFIX}-bulk-cover {
+  width: 72px;
+  height: 96px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #222;
+}
+.${SCRIPT_PREFIX}-bulk-desc {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.${SCRIPT_PREFIX}-bulk-meta { justify-self: end; display: grid; gap: 6px; justify-items: end; }
+.${SCRIPT_PREFIX}-bulk-type {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(254, 44, 85, 0.12);
+  color: #fe2c55;
+  white-space: nowrap;
+}
+.${SCRIPT_PREFIX}-bulk-type.downloaded { background: rgba(0, 166, 125, 0.12); color: #00a67d; }
+.${SCRIPT_PREFIX}-bulk-status { color: #fe2c55; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.${SCRIPT_PREFIX}-bulk-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(127, 127, 127, 0.2);
+}
+.${SCRIPT_PREFIX}-advanced-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.${SCRIPT_PREFIX}-check-left label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.${SCRIPT_PREFIX}-check-left input {
+  width: 16px !important;
+  height: 16px;
+  margin: 0;
+  accent-color: #fe2c55;
+  order: -1;
+}
+.${SCRIPT_PREFIX}-profile-slider-field { grid-column: 1 / -1; display: grid; gap: 10px; }
+.${SCRIPT_PREFIX}-profile-slider-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.${SCRIPT_PREFIX}-profile-slider-head label { margin: 0; flex: 0 0 auto; }
+.${SCRIPT_PREFIX}-profile-slider-desc {
+  min-width: 0;
+  color: var(--tux-colorTextSecondary);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.${SCRIPT_PREFIX}-profile-slider-value {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 48px;
+  text-align: right;
+  color: #fe2c55;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.${SCRIPT_PREFIX}-profile-slider-field input[type="range"] { width: 100%; accent-color: #fe2c55; }
+.${SCRIPT_PREFIX}-menu {
+  position: absolute;
+  z-index: 2147483601;
+  left: 50%;
+  bottom: 52px;
+  transform: none;
+  transform-origin: var(--${SCRIPT_PREFIX}-menu-origin, 50% 50%);
+  display: none;
+  visibility: hidden;
+  width: 208px;
+  overflow: hidden;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--tux-colorBGPrimary);
+  border: 0;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+  opacity: 1;
+  color: var(--tux-colorTextPrimary);
+  box-sizing: border-box;
+  will-change: transform, opacity, filter;
+}
+.${SCRIPT_PREFIX}-menu.open, .${SCRIPT_PREFIX}-menu.closing { display: block; }
+.${SCRIPT_PREFIX}-menu.open[data-placement], .${SCRIPT_PREFIX}-menu.closing[data-placement] { visibility: visible; }
+.${SCRIPT_PREFIX}-menu.open:not(.closing)[data-placement] { animation: ${SCRIPT_PREFIX}-menu-slide-fade-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.${SCRIPT_PREFIX}-menu.closing[data-placement] { pointer-events: none; animation: ${SCRIPT_PREFIX}-menu-slide-fade-out 105ms cubic-bezier(0.4, 0, 1, 1) both; }
+.${SCRIPT_PREFIX}-menu[data-placement="right"] {
+  --${SCRIPT_PREFIX}-menu-origin: 0% 50%;
+  --${SCRIPT_PREFIX}-menu-start-x: -10px;
+  --${SCRIPT_PREFIX}-menu-start-y: 0px;
+}
+.${SCRIPT_PREFIX}-menu[data-placement="left"] {
+  --${SCRIPT_PREFIX}-menu-origin: 100% 50%;
+  --${SCRIPT_PREFIX}-menu-start-x: 10px;
+  --${SCRIPT_PREFIX}-menu-start-y: 0px;
+}
+.${SCRIPT_PREFIX}-menu[data-placement="top"] {
+  --${SCRIPT_PREFIX}-menu-origin: 50% 100%;
+  --${SCRIPT_PREFIX}-menu-start-x: 0px;
+  --${SCRIPT_PREFIX}-menu-start-y: 10px;
+}
+.${SCRIPT_PREFIX}-menu[data-placement="bottom"],
+.${SCRIPT_PREFIX}-menu[data-placement="bottom-start"],
+.${SCRIPT_PREFIX}-menu[data-placement="bottom-end"] {
+  --${SCRIPT_PREFIX}-menu-origin: 50% 0%;
+  --${SCRIPT_PREFIX}-menu-start-x: 0px;
+  --${SCRIPT_PREFIX}-menu-start-y: -10px;
+}
+.${SCRIPT_PREFIX}-button {
+  border: 0;
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  color: var(--tux-colorTextPrimary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  font-family: inherit;
+}
+.${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button { width: 100%; min-height: 52px; border-radius: 8px; background: transparent; font-size: 16px; }
+.${SCRIPT_PREFIX}-button.secondary { background: transparent; }
+.${SCRIPT_PREFIX}-button:hover { background: var(--ui-shape-neutral-3); color: var(--tux-colorTextPrimary); }
+.${SCRIPT_PREFIX}-button:focus-visible { outline: 2px solid var(--tux-colorTextSecondary); outline-offset: 2px; }
     `;
+  }
+
+  function getNotificationStyleSheet() {
+    return `
+.${SCRIPT_PREFIX}-notification-stack {
+  position: fixed;
+  top: 76px;
+  right: 18px;
+  z-index: 2147483702;
+  width: min(372px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.${SCRIPT_PREFIX}-notification-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 10px 14px 14px;
+  border-radius: 16px;
+  color: var(--tux-colorTextPrimary);
+  background: var(--tux-colorBGPrimary);
+  border: 1px solid var(--ui-shape-neutral-4);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+  font: 14px/1.42 var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+  pointer-events: auto;
+  overflow: hidden;
+  transition: opacity 150ms ease, transform 150ms ease;
+  animation: ${SCRIPT_PREFIX}-notification-card-in 150ms ease-out;
+}
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy,
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album,
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image {
+  border-color: var(--ui-shape-neutral-3);
+}
+.${SCRIPT_PREFIX}-notification-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--ui-shape-neutral-4);
+  color: var(--tux-colorTextPrimary);
+  font-weight: 700;
+  font-size: 17px;
+}
+.${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-icon {
+  background: rgba(254, 44, 85, 0.18);
+  color: #fe2c55;
+}
+.${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-icon {
+  background: rgba(37, 244, 238, 0.14);
+  color: #25f4ee;
+}
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.busy .${SCRIPT_PREFIX}-notification-icon,
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.album .${SCRIPT_PREFIX}-notification-icon,
+.${SCRIPT_PREFIX}-notification-card.${SCRIPT_PREFIX}-download-status.image .${SCRIPT_PREFIX}-notification-icon {
+  background: var(--ui-shape-neutral-4);
+  color: #fe2c55;
+}
+.${SCRIPT_PREFIX}-notification-main { min-width: 0; }
+.${SCRIPT_PREFIX}-notification-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.${SCRIPT_PREFIX}-notification-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: 14px;
+}
+.${SCRIPT_PREFIX}-notification-meta {
+  flex: none;
+  color: var(--tux-colorTextSecondary);
+  font-weight: 700;
+  font-size: 13px;
+}
+.${SCRIPT_PREFIX}-notification-card.error .${SCRIPT_PREFIX}-notification-meta { color: #fe2c55; }
+.${SCRIPT_PREFIX}-notification-card.success .${SCRIPT_PREFIX}-notification-meta { color: #25f4ee; }
+.${SCRIPT_PREFIX}-notification-detail {
+  margin-top: 4px;
+  color: var(--tux-colorTextSecondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.${SCRIPT_PREFIX}-notification-close { align-self: center; }
+.${SCRIPT_PREFIX}-notification-card.fading { opacity: 0; transform: translateX(12px); pointer-events: none; }
+.${SCRIPT_PREFIX}-notification-card.attention { background: var(--ui-shape-neutral-4); }
+@keyframes ${SCRIPT_PREFIX}-menu-slide-fade-in {
+  from { opacity: 0; transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes ${SCRIPT_PREFIX}-menu-slide-fade-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(var(--${SCRIPT_PREFIX}-menu-start-x, 0px), var(--${SCRIPT_PREFIX}-menu-start-y, 0px), 0); }
+}
+@keyframes ${SCRIPT_PREFIX}-notification-card-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+    `;
+  }
+
+  function getModalStyleSheet() {
+    return `
+.${SCRIPT_PREFIX}-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  background: rgba(0, 0, 0, 0.58);
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+.${SCRIPT_PREFIX}-modal {
+  width: min(900px, calc(100vw - 28px));
+  max-height: min(760px, calc(100vh - 28px));
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--tux-colorBGPrimary);
+  color: var(--tux-colorTextPrimary);
+  font: 14px/1.5 var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+}
+.${SCRIPT_PREFIX}-modal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+}
+.${SCRIPT_PREFIX}-modal main { padding: 18px 22px 22px; }
+.${SCRIPT_PREFIX}-modal h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+.${SCRIPT_PREFIX}-modal .${SCRIPT_PREFIX}-subtitle { margin: 5px 0 0; color: var(--tux-colorTextSecondary); font-size: 13px; }
+.${SCRIPT_PREFIX}-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.${SCRIPT_PREFIX}-section { display: grid; gap: 12px; margin-bottom: 18px; }
+.${SCRIPT_PREFIX}-field { position: relative; min-width: 0; }
+.${SCRIPT_PREFIX}-field.full, .${SCRIPT_PREFIX}-settings-grid > .full { grid-column: 1 / -1; }
+.${SCRIPT_PREFIX}-modal label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+.${SCRIPT_PREFIX}-modal input,
+.${SCRIPT_PREFIX}-modal select,
+.${SCRIPT_PREFIX}-modal textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--tux-colorTextPrimary);
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-modal input[type="checkbox"] {
+  width: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: #fe2c55;
+}
+.${SCRIPT_PREFIX}-modal textarea { min-height: 78px; resize: vertical; }
+.${SCRIPT_PREFIX}-modal table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.${SCRIPT_PREFIX}-modal td,
+.${SCRIPT_PREFIX}-modal th {
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+  padding: 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.${SCRIPT_PREFIX}-detail-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+}
+.${SCRIPT_PREFIX}-detail-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 9px 10px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.${SCRIPT_PREFIX}-detail-tab.active { color: #fe2c55; border-bottom-color: #fe2c55; }
+.${SCRIPT_PREFIX}-detail-panel[hidden] { display: none !important; }
+.${SCRIPT_PREFIX}-kv,
+.${SCRIPT_PREFIX}-stat {
+  min-width: 0;
+  border: 1px solid var(--ui-shape-neutral-4);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--ui-shape-neutral-4);
+}
+.${SCRIPT_PREFIX}-kv small,
+.${SCRIPT_PREFIX}-stat small {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--tux-colorTextSecondary);
+  font-size: 11px;
+}
+.${SCRIPT_PREFIX}-kv span, .${SCRIPT_PREFIX}-stat strong { display: block; min-width: 0; overflow-wrap: anywhere; }
+.${SCRIPT_PREFIX}-link { color: #fe2c55; overflow-wrap: anywhere; }
+.${SCRIPT_PREFIX}-json-pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 6px;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--tux-colorBGSecondary);
+  font: 12px Consolas, "Courier New", monospace;
+}
+.${SCRIPT_PREFIX}-details-modal {
+  position: relative;
+  width: min(1120px, calc(100vw - 28px));
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--tux-colorBGPrimary);
+  color: var(--tux-colorTextPrimary);
+}
+.${SCRIPT_PREFIX}-details-modal main {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  max-height: min(780px, calc(100vh - 28px));
+}
+.${SCRIPT_PREFIX}-details-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+  background: var(--tux-colorBGSecondary);
+}
+button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
+  margin: 0 10px;
+}
+.${SCRIPT_PREFIX}-launcher:focus, .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab:focus, .${SCRIPT_PREFIX}-detail-pill:focus { outline: none; }
+.${SCRIPT_PREFIX}-launcher:focus-visible,
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab:focus-visible,
+.${SCRIPT_PREFIX}-detail-pill:focus-visible {
+  outline: 2px solid var(--tux-colorTextSecondary);
+  outline-offset: 2px;
+}
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 0;
+  margin: 0;
+  padding: 0 0 0 12px;
+  overflow-x: auto;
+}
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab {
+  min-width: 112px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 18px 20px 15px;
+  color: var(--tux-colorTextSecondary);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 700;
+}
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab.active { color: #fe2c55; border-bottom-color: #fe2c55; background: rgba(254, 44, 85, 0.06); }
+.${SCRIPT_PREFIX}-detail-body { flex: 1 1 auto; overflow: auto; padding: 22px 28px 28px; }
+.${SCRIPT_PREFIX}-detail-fieldset {
+  min-width: 0;
+  margin: 0 0 22px;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 12px;
+  padding: 22px 24px;
+  background: transparent;
+}
+.${SCRIPT_PREFIX}-detail-fieldset legend { padding: 0 12px; font-weight: 800; font-size: 14px; }
+.${SCRIPT_PREFIX}-detail-cover-row,
+.${SCRIPT_PREFIX}-detail-author-head {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  min-width: 0;
+}
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait { flex-direction: row; align-items: center; }
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape { flex-direction: column; align-items: flex-start; }
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square { flex-direction: row; }
+.${SCRIPT_PREFIX}-detail-cover {
+  width: 180px;
+  height: 101px;
+  max-width: 34vw;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait .${SCRIPT_PREFIX}-detail-cover {
+  width: min(252px, 40vw);
+  height: min(448px, 71.1vw);
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+}
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-portrait > div, .${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square > div { flex: 1 1 190px; min-width: 170px; }
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-square .${SCRIPT_PREFIX}-detail-cover { width: 150px; height: 150px; aspect-ratio: 1; }
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape .${SCRIPT_PREFIX}-detail-cover { width: min(420px, 100%); height: auto; max-width: 100%; }
+.${SCRIPT_PREFIX}-detail-cover-row.${SCRIPT_PREFIX}-cover-landscape > div { width: min(420px, 100%); min-width: 0; }
+.${SCRIPT_PREFIX}-detail-avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  margin-top: 12px;
+}
+.${SCRIPT_PREFIX}-detail-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 999px;
+  padding: 5px 14px;
+  color: inherit;
+  background: var(--ui-shape-neutral-4);
+  cursor: pointer;
+  text-decoration: none;
+  font: 13px var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+  white-space: nowrap;
+}
+.${SCRIPT_PREFIX}-detail-pill:hover { color: var(--tux-colorTextPrimary); border-color: var(--ui-shape-neutral-3); background: var(--ui-shape-neutral-3); }
+.${SCRIPT_PREFIX}-detail-table-wrap { overflow: auto; border: 1px solid var(--ui-shape-neutral-3); border-radius: 8px; }
+.${SCRIPT_PREFIX}-detail-table {
+  margin: 0;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.${SCRIPT_PREFIX}-detail-table th,
+.${SCRIPT_PREFIX}-detail-table td {
+  border-right: 1px solid var(--ui-shape-neutral-4);
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+  padding: 12px;
+  vertical-align: middle;
+}
+.${SCRIPT_PREFIX}-detail-table th { font-weight: 800; background: rgba(127, 127, 127, 0.08); }
+.${SCRIPT_PREFIX}-detail-rows {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 14px;
+}
+.${SCRIPT_PREFIX}-detail-rows th, .${SCRIPT_PREFIX}-detail-rows td { border-bottom: 1px solid var(--ui-shape-neutral-4); padding: 10px 0; vertical-align: top; }
+.${SCRIPT_PREFIX}-detail-rows th {
+  width: 150px;
+  padding-right: 18px;
+  color: var(--tux-colorTextSecondary);
+  text-align: left;
+  font-weight: 800;
+}
+.${SCRIPT_PREFIX}-detail-value { overflow-wrap: anywhere; white-space: pre-wrap; }
+.${SCRIPT_PREFIX}-detail-json-actions { display: flex; gap: 10px; margin-bottom: 10px; }
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-json-pre { max-height: 560px; border-color: var(--ui-shape-neutral-3); }
+.${SCRIPT_PREFIX}-detail-audio {
+  width: 100%;
+  min-width: 0;
+  height: 54px;
+  margin: 0;
+}
+.${SCRIPT_PREFIX}-detail-music-section { overflow: hidden; }
+.${SCRIPT_PREFIX}-detail-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  margin-bottom: 16px;
+}
+.${SCRIPT_PREFIX}-detail-music-cover {
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-detail-audio-row .${SCRIPT_PREFIX}-detail-audio { flex: 1 1 auto; width: auto; }
+.${SCRIPT_PREFIX}-detail-music-url {
+  display: -webkit-box;
+  max-height: 6.4em;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.${SCRIPT_PREFIX}-detail-media-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: stretch;
+}
+.${SCRIPT_PREFIX}-detail-media-grid > .${SCRIPT_PREFIX}-detail-fieldset { margin-bottom: 22px; }
+.${SCRIPT_PREFIX}-cover-resolution {
+  display: inline-block;
+  font-size: 22px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  letter-spacing: 0;
+}
+.${SCRIPT_PREFIX}-settings-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(860px, calc(100vw - 72px));
+  max-height: min(700px, calc(100vh - 72px));
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--tux-colorBGPrimary);
+  color: var(--tux-colorTextPrimary);
+}
+.${SCRIPT_PREFIX}-settings-modal main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 22px 22px;
+  max-height: none;
+  overflow: auto;
+}
+.${SCRIPT_PREFIX}-settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--ui-shape-neutral-4);
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-settings-header h2 {
+  margin: 0;
+  color: #fe2c55;
+  font-size: 20px;
+  font-weight: 800;
+}
+.${SCRIPT_PREFIX}-settings-header-actions { display: flex; gap: 10px; align-items: center; }
+.${SCRIPT_PREFIX}-settings-fieldset .${SCRIPT_PREFIX}-settings-grid { align-items: start; }
+.${SCRIPT_PREFIX}-settings-fieldset { margin-bottom: 16px; padding: 17px 20px 19px; }
+.${SCRIPT_PREFIX}-settings-note {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--ui-shape-neutral-4);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--ui-shape-neutral-4);
+}
+.${SCRIPT_PREFIX}-filename-template-editor { display: grid; gap: 12px; }
+.${SCRIPT_PREFIX}-filename-preview {
+  min-height: 22px;
+  border-top: 1px solid var(--ui-shape-neutral-3);
+  padding-top: 12px;
+  color: inherit;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.${SCRIPT_PREFIX}-frame-modal { width: min(560px, calc(100vw - 28px)); overflow: hidden; }
+.${SCRIPT_PREFIX}-frame-preview {
+  width: 100%;
+  max-height: min(60vh, 520px);
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--tux-colorBGSecondary);
+}
+.${SCRIPT_PREFIX}-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button {
+  width: auto;
+  min-width: auto;
+  border-radius: 6px;
+  background: var(--ui-shape-neutral-3);
+  text-align: center;
+}
+.${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button.danger { color: #fe2c55; border: 1px solid #fe2c55; background: rgba(254, 44, 85, 0.08); }
+.${SCRIPT_PREFIX}-row .${SCRIPT_PREFIX}-button.danger:hover { color: #fe2c55; background: var(--ui-shape-neutral-3); }
+.${SCRIPT_PREFIX}-button.TUXButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 96px;
+  min-height: 36px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  line-height: 24px;
+  text-align: center;
+}
+.${SCRIPT_PREFIX}-button.TUXButton .TUXButton-content { display: flex; align-items: center; justify-content: center; }
+.${SCRIPT_PREFIX}-button.TUXButton.primary { color: #fff; background: #fe2c55; }
+.${SCRIPT_PREFIX}-button.TUXButton.primary:hover:not(:disabled) { color: #fff; background: #ff4b69; }
+.${SCRIPT_PREFIX}-button.TUXButton.secondary { color: var(--tux-colorTextPrimary); background: var(--ui-shape-neutral-4); }
+.${SCRIPT_PREFIX}-button.TUXButton.secondary:hover:not(:disabled) { color: var(--tux-colorTextPrimary); background: var(--ui-shape-neutral-3); }
+.${SCRIPT_PREFIX}-button.TUXButton:disabled { cursor: not-allowed; opacity: 0.4; }
+.${SCRIPT_PREFIX}-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 42px;
+  align-items: center;
+}
+.${SCRIPT_PREFIX}-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--tux-colorTextPrimary);
+  background: var(--ui-shape-neutral-4);
+  cursor: pointer;
+  font: 12px var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+}
+.${SCRIPT_PREFIX}-chip.available { cursor: pointer; background: transparent; }
+.${SCRIPT_PREFIX}-chip.separator { border-style: dashed; }
+.${SCRIPT_PREFIX}-chip small { color: var(--tux-colorTextSecondary); font-size: 11px; }
+.${SCRIPT_PREFIX}-check-chip {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+  margin: 0 !important;
+  border: 1px solid var(--ui-shape-neutral-3);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: inherit;
+  background: var(--ui-shape-neutral-4);
+  cursor: pointer;
+  font: 12px var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
+}
+.${SCRIPT_PREFIX}-check-chip input {
+  width: 14px !important;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  accent-color: #fe2c55;
+}
+.${SCRIPT_PREFIX}-readonly { color: var(--tux-colorTextSecondary); font-size: 13px; line-height: 1.45; }
+.${SCRIPT_PREFIX}-actions { justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--ui-shape-neutral-4); }
+@media (max-width: 720px) {
+  .${SCRIPT_PREFIX}-settings-grid, .${SCRIPT_PREFIX}-detail-media-grid { grid-template-columns: 1fr; }
+  .${SCRIPT_PREFIX}-modal header { padding: 16px; border-bottom: 1px solid var(--ui-shape-neutral-4); }
+  .${SCRIPT_PREFIX}-modal main, .${SCRIPT_PREFIX}-settings-modal main { padding: 16px; }
+}
+    `;
+  }
+
+  function getPanelStyleSheet() {
+    return [
+      getPanelCoreStyleSheet(),
+      getNotificationStyleSheet(),
+      getModalStyleSheet(),
+    ].join("\n");
   }
   const CANDIDATE_IMAGE_OVERLAY_SELECTORS = [
     '[class*="ImagePreview"]',
@@ -5531,7 +5397,6 @@
     return context;
   }
 
-
   function hasSmallOverlayImageSize(rect) {
     return (
       rectArea(rect) >= IMAGE_OVERLAY_SMALL_MIN_AREA_PX &&
@@ -5658,227 +5523,7 @@
     getElementRect(element) {
       const rect = element?.getBoundingClientRect?.();
       if (!rect) return null;
-      return {
-        element,
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-        width: rect.width,
-        height: rect.height,
-        centerX: rect.left + rect.width / 2,
-        centerY: rect.top + rect.height / 2,
-      };
-    }
-
-    hasVisibleMediaElement() {
-      const rect = this.getElementRect(this.app.extractor?.getVisibleVideoElement?.());
-      if (!rect) return false;
-      const score = scoreMediaElementRect(
-        rect,
-        this.app.window.innerWidth || 0,
-        this.app.window.innerHeight || 0,
-      );
-      return Number.isFinite(score);
-    }
-
-    isVisibleAnchorRect(rect) {
-      const viewportWidth = this.app.window.innerWidth || 0;
-      const viewportHeight = this.app.window.innerHeight || 0;
-      if (!rect) return false;
-      if (rect.width < 20 || rect.width > 140 || rect.height < 40 || rect.height > 220) return false;
-      if (rect.left < viewportWidth * 0.42) return false;
-      if (rect.top < viewportHeight * 0.12 || rect.top > viewportHeight * 0.82) return false;
-      return true;
-    }
-
-    findNavigationHostRect() {
-      const hostSelectors = [
-        '[class*="DivFeedNavigationContainer"]',
-        '[class*="FeedNavigationContainer"]',
-        '[class*="enable-detail-page-refine"]',
-      ];
-      const hosts = Array.from(
-        this.app.document.querySelectorAll(hostSelectors.join(",")),
-      )
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-          if (!this.isVisibleAnchorRect(rect)) return false;
-          const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button']") || []);
-          return buttons.length >= 2;
-        })
-        .sort((left, right) => {
-          const leftClass = String(left.element.className || "");
-          const rightClass = String(right.element.className || "");
-          const leftScore = leftClass.includes("DivFeedNavigationContainer") ? 0 : 1;
-          const rightScore = rightClass.includes("DivFeedNavigationContainer") ? 0 : 1;
-          if (leftScore !== rightScore) return leftScore - rightScore;
-          return left.top - right.top;
-        });
-      if (hosts[0]) return hosts[0];
-
-      const controls = Array.from(
-        this.app.document.querySelectorAll('button,[role="button"]'),
-      )
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-          if (!rect) return false;
-          if (rect.width < 38 || rect.width > 92 || rect.height < 38 || rect.height > 92) return false;
-          if (!this.isVisibleAnchorRect(rect)) return false;
-          const text = `${rect.element.getAttribute?.("aria-label") || ""} ${rect.element.title || ""}`;
-          if (/(previous|next|up|down|上一个|下一个|上一|下一)/i.test(text)) return true;
-          const className = String(rect.element.parentElement?.className || "");
-          return /Navigation|FeedNavigation/i.test(className);
-        });
-
-      const hostScores = new Map();
-      for (const rect of controls) {
-        const host = rect.element.closest?.('[class*="FeedNavigationContainer"], [class*="NavigationContainer"], div');
-        if (!host || this.app.isOwnUiElement?.(host)) continue;
-        const hostRect = this.getElementRect(host);
-        if (!this.isVisibleAnchorRect(hostRect)) continue;
-        const current = hostScores.get(host) || { hostRect, count: 0 };
-        current.count += 1;
-        hostScores.set(host, current);
-      }
-      const pairedHost = Array.from(hostScores.values())
-        .filter((entry) => entry.count >= 2)
-        .sort((left, right) => left.hostRect.top - right.hostRect.top)[0];
-      if (pairedHost) return pairedHost.hostRect;
-
-      return null;
-    }
-
-    findStackedNavigationGroupContext(anchorRect) {
-      if (!anchorRect) return null;
-      const viewportWidth = this.app.window.innerWidth || 0;
-      const viewportHeight = this.app.window.innerHeight || 0;
-      const maxDistance = Math.max(140, Math.min(320, viewportHeight * 0.42));
-      const controls = Array.from(
-        this.app.document.querySelectorAll?.('button,[role="button"],a') || [],
-      )
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .filter((element) => element !== anchorRect.element)
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-          if (!rect) return false;
-          if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
-          if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
-          if (rect.bottom > anchorRect.top + 2) return false;
-          if (anchorRect.top - rect.bottom > maxDistance) return false;
-          if (Math.abs(rect.centerX - anchorRect.centerX) > 112) return false;
-          return true;
-        })
-        .sort((left, right) => left.top - right.top);
-      const columns = [];
-      for (const rect of controls) {
-        let column = columns.find((entry) => Math.abs(entry.centerX - rect.centerX) <= 42);
-        if (!column) {
-          column = { centerX: rect.centerX, rects: [] };
-          columns.push(column);
-        }
-        column.rects.push(rect);
-        column.centerX =
-          column.rects.reduce((total, item) => total + item.centerX, 0) / column.rects.length;
-      }
-
-      const candidates = [];
-      for (const column of columns) {
-        const sorted = column.rects.slice().sort((left, right) => left.top - right.top);
-        let run = [];
-        const flushRun = () => {
-          if (run.length < 2) {
-            run = [];
-            return;
-          }
-          const groupRect = getBoundingRect(run);
-          if (!groupRect || groupRect.width > 128 || groupRect.height < 64 || groupRect.height > 180) {
-            run = [];
-            return;
-          }
-          const buttonRect = run.slice().sort((left, right) => right.bottom - left.bottom)[0];
-          const verticalDistance = Math.max(0, anchorRect.top - groupRect.bottom);
-          const centerDistance = Math.abs(groupRect.centerX - anchorRect.centerX);
-          candidates.push({
-            rect: groupRect,
-            buttonRect,
-            score: verticalDistance * 2 + centerDistance,
-          });
-          run = [];
-        };
-
-        for (const rect of sorted) {
-          if (!run.length) {
-            run = [rect];
-            continue;
-          }
-          const previous = run[run.length - 1];
-          const gap = Math.max(0, rect.top - previous.bottom);
-          const maxGap = Math.max(12, Math.min(36, previous.height * 0.75));
-          if (gap <= maxGap) {
-            run.push(rect);
-          } else {
-            flushRun();
-            run = [rect];
-          }
-        }
-        flushRun();
-      }
-
-      return candidates.sort((left, right) => left.score - right.score)[0] || null;
-    }
-
-    findNavigationContext(anchorRect = null) {
-      const navigationRect = this.findNavigationHostRect();
-      if (navigationRect) {
-        const viewportWidth = this.app.window.innerWidth || 0;
-        const viewportHeight = this.app.window.innerHeight || 0;
-        const buttonRect = Array.from(
-          navigationRect.element.querySelectorAll?.("button,[role='button']") || [],
-        )
-          .map((element) => this.getElementRect(element))
-          .filter((rect) => {
-            if (!rect) return false;
-            if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
-            return getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.55;
-          })
-          .sort((left, right) => right.bottom - left.bottom)[0] || null;
-        return { rect: navigationRect, buttonRect };
-      }
-
-      if (anchorRect) return this.findStackedNavigationGroupContext(anchorRect);
-
-      const fallbackAnchorRect = this.findNavigationAnchorRect();
-      return fallbackAnchorRect ? { rect: fallbackAnchorRect, buttonRect: fallbackAnchorRect } : null;
-    }
-
-    findNavigationAnchorRect() {
-      const controls = Array.from(
-        this.app.document.querySelectorAll('button,[role="button"]'),
-      )
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-          if (!rect) return false;
-          if (rect.width < 38 || rect.width > 92 || rect.height < 38 || rect.height > 92) return false;
-          if (!this.isVisibleAnchorRect(rect)) return false;
-          return true;
-        });
-
-      let best = null;
-      for (const rect of controls) {
-        const paired = controls.some((other) => {
-          if (other === rect) return false;
-          const sameColumn = Math.abs(other.centerX - rect.centerX) < 34;
-          const verticalGap = Math.abs(other.centerY - rect.centerY);
-          return sameColumn && verticalGap >= 42 && verticalGap <= 110;
-        });
-        if (!paired) continue;
-        if (!best || rect.centerY > best.centerY) best = rect;
-      }
-      return best;
+      return { element, ...getRectEdges(rect) };
     }
 
     isVisibleActionBarRect(rect) {
@@ -5948,149 +5593,6 @@
       return null;
     }
 
-    isActionControlCandidate(rect, videoRect) {
-      if (!rect || !videoRect) return false;
-      const viewportWidth = this.app.window.innerWidth || 0;
-      const viewportHeight = this.app.window.innerHeight || 0;
-      if (rect.width < 32 || rect.width > 96 || rect.height < 32 || rect.height > 112) return false;
-      if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
-      if (rect.centerX < videoRect.right - 20) return false;
-      const maxDistance = Math.max(120, Math.min(260, viewportWidth * 0.28));
-      if (rect.left > videoRect.right + maxDistance) return false;
-      if (rect.bottom < videoRect.top + 20 || rect.top > videoRect.bottom - 20) return false;
-      const text = [
-        rect.element?.className,
-        rect.element?.getAttribute?.("aria-label"),
-        rect.element?.getAttribute?.("data-e2e"),
-        rect.element?.title,
-        rect.element?.textContent,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      if (/(previous|next|up|down|scroll|navigate|上一|下一|上一个|下一个|向上|向下)/i.test(text)) {
-        return false;
-      }
-      return true;
-    }
-
-    findPreviousActionControlContext(anchorRect) {
-      if (!anchorRect) return null;
-      const viewportWidth = this.app.window.innerWidth || 0;
-      const viewportHeight = this.app.window.innerHeight || 0;
-      const maxDistance = Math.max(120, Math.min(220, viewportWidth * 0.28));
-      const rects = Array.from(this.app.document.querySelectorAll?.('button,[role="button"],a') || [])
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .filter((element) => element !== anchorRect.element)
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-          if (!rect) return false;
-          if (rect.width < 24 || rect.width > 96 || rect.height < 24 || rect.height > 112) return false;
-          if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
-          if (Math.abs(rect.centerX - anchorRect.centerX) > 48) return false;
-          if (rect.bottom > anchorRect.top + 2) return false;
-          if (anchorRect.top - rect.bottom > maxDistance) return false;
-          return true;
-        })
-        .sort((left, right) => left.top - right.top);
-      const previousRect = rects.slice().sort((left, right) => right.bottom - left.bottom)[0] || null;
-      if (!previousRect) return null;
-
-      const groupGap = Math.max(12, Math.min(36, previousRect.height * 0.75));
-      const groupRects = [previousRect];
-      let groupTop = previousRect.top;
-      const aboveNearestFirst = rects
-        .filter((rect) => rect !== previousRect && rect.bottom <= groupTop + 2)
-        .sort((left, right) => right.bottom - left.bottom);
-      for (const rect of aboveNearestFirst) {
-        const gap = Math.max(0, groupTop - rect.bottom);
-        if (gap > groupGap) break;
-        groupRects.push(rect);
-        groupTop = Math.min(groupTop, rect.top);
-      }
-
-      return { rect: previousRect, groupRect: getBoundingRect(groupRects) };
-    }
-
-    findActionControlColumnContext() {
-      const videoRect = this.getElementRect(this.app.extractor?.getVisibleMediaElement?.());
-      if (!videoRect) return null;
-      const controls = Array.from(
-        this.app.document.querySelectorAll?.('button,[role="button"],a') || [],
-      )
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => this.isActionControlCandidate(rect, videoRect));
-
-      const groups = [];
-      for (const rect of controls) {
-        let group = groups.find((entry) => Math.abs(entry.centerX - rect.centerX) <= 36);
-        if (!group) {
-          group = { centerX: rect.centerX, rects: [] };
-          groups.push(group);
-        }
-        group.rects.push(rect);
-        group.centerX =
-          group.rects.reduce((total, item) => total + item.centerX, 0) / group.rects.length;
-      }
-
-      const candidates = groups
-        .map((group) => {
-          const rects = group.rects
-            .slice()
-            .sort((left, right) => left.top - right.top);
-          const hasAvatar = rects.some((rect) => isAvatarActionChild(rect.element));
-          const hostRect = rects.reduce(
-            (box, rect) => ({
-              left: Math.min(box.left, rect.left),
-              top: Math.min(box.top, rect.top),
-              right: Math.max(box.right, rect.right),
-              bottom: Math.max(box.bottom, rect.bottom),
-              width: 0,
-              height: 0,
-              centerX: 0,
-              centerY: 0,
-            }),
-            { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-          );
-          hostRect.width = hostRect.right - hostRect.left;
-          hostRect.height = hostRect.bottom - hostRect.top;
-          hostRect.centerX = hostRect.left + hostRect.width / 2;
-          hostRect.centerY = hostRect.top + hostRect.height / 2;
-          const distanceFromVideo = Math.max(0, hostRect.left - videoRect.right);
-          const score = rects.length * 40 + (hasAvatar ? 18 : 0) - distanceFromVideo * 0.18;
-          return { rects, hostRect, score };
-        })
-        .filter((group) => group.rects.length >= 2)
-        .sort((left, right) => right.score - left.score);
-
-      const best = candidates[0];
-      if (!best) return null;
-      const avatarIndex = best.rects.findIndex((rect) => isAvatarActionChild(rect.element));
-      const anchorIndex = avatarIndex >= 0 ? avatarIndex : 0;
-      const anchorRect = best.rects[anchorIndex];
-      const navigationContext = this.findNavigationContext(anchorRect);
-      const previousRects = best.rects
-        .slice(0, anchorIndex)
-        .filter((rect) => Math.abs(rect.centerX - anchorRect.centerX) <= 48);
-      const previousRect = previousRects.slice().reverse()[0] || null;
-      const previousGroupRect = getBoundingRect(previousRects);
-      const nextRect =
-        best.rects.slice(anchorIndex + 1).find((rect) => Math.abs(rect.centerX - anchorRect.centerX) <= 48) ||
-        null;
-      return {
-        host: null,
-        hostRect: best.hostRect,
-        anchor: anchorRect.element,
-        anchorRect,
-        previousRect,
-        previousGroupRect,
-        navigationRect: navigationContext?.rect || null,
-        navigationButtonRect: navigationContext?.buttonRect || null,
-        nextRect,
-        fallback: true,
-      };
-    }
-
     getNativeActionChildren(host) {
       return Array.from(host?.children || []).filter((child) => !this.app.isOwnUiElement?.(child));
     }
@@ -6099,132 +5601,7 @@
       const nativeChildren = this.getNativeActionChildren(host);
       return nativeChildren[0] || null;
     }
-
-    findActionBarPositionContext() {
-      const host = this.resolveCurrentActionBarHost();
-      if (!host) {
-        return this.findActionControlColumnContext();
-      }
-      const hostRect = this.getElementRect(host);
-      const nativeChildren = this.getNativeActionChildren(host);
-      let anchorIndex = nativeChildren.findIndex((child) => isAvatarActionChild(child));
-      if (anchorIndex < 0) anchorIndex = 0;
-      const anchor = nativeChildren[anchorIndex] || host;
-      const anchorRect = this.getElementRect(anchor) || hostRect;
-      const navigationContext = this.findNavigationContext(anchorRect);
-      const previousContext = this.findPreviousActionControlContext(anchorRect);
-      const previousRect = previousContext?.rect || null;
-      const previousGroupRect = previousContext?.groupRect || null;
-      let nextRect = null;
-      for (const child of nativeChildren.slice(anchorIndex + 1)) {
-        if (!child || child === this.app.panel || isAvatarActionChild(child)) continue;
-        const rect = this.getElementRect(child);
-        if (!rect || rect.width < 24 || rect.height < 24) continue;
-        if (anchorRect && Math.abs(rect.centerX - anchorRect.centerX) > 48) continue;
-        nextRect = rect;
-        break;
-      }
-      return {
-        host,
-        hostRect,
-        anchor,
-        anchorRect,
-        previousRect,
-        previousGroupRect,
-        navigationRect: navigationContext?.rect || null,
-        navigationButtonRect: navigationContext?.buttonRect || null,
-        nextRect,
-      };
-    }
-
-    findActionBarAnchorRect() {
-      return this.findActionBarPositionContext().anchorRect;
-    }
-
-    getCurrentActionAnchor() {
-      const context = this.findActionBarPositionContext();
-      if (context?.host) return context.host;
-      if (context?.anchor) return context.anchor;
-      return this.resolveCurrentActionBarHost();
-    }
   }
-
-
-
-  class RecommendPlacementAdapter {
-    constructor(app) {
-      this.app = app;
-    }
-
-    mount() {
-      const host = this.app.findActionBarHost();
-      if (host && this.app.mountPanelInActionBar(host)) return true;
-      this.app.hidePanelForInactivePlacement();
-      return false;
-    }
-
-    refresh() {
-      return this.mount();
-    }
-
-    unmount() {
-      this.app.hidePanelForInactivePlacement();
-    }
-  }
-
-  class ProfileBrowseDialogAdapter {
-    constructor(app) {
-      this.app = app;
-    }
-
-    findDialog() {
-      return getVisibleProfileBrowseDialog(this.app.document);
-    }
-
-    findEllipsis(dialog = null) {
-      const button = dialog?.querySelector?.(PROFILE_BROWSE_ELLIPSIS_SELECTOR) || null;
-      if (!button) return null;
-      const rect = button.getBoundingClientRect?.();
-      const viewportWidth = this.app.window.innerWidth || 0;
-      const viewportHeight = this.app.window.innerHeight || 0;
-      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
-      if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.5) return null;
-      return button;
-    }
-
-    getPositionSignature() {
-      const dialog = this.findDialog();
-      const ellipsis = this.findEllipsis(dialog);
-      const rect = ellipsis?.getBoundingClientRect?.();
-      if (!dialog || !ellipsis || !rect) return "no-profile-dialog";
-      return [
-        Math.round(rect.left),
-        Math.round(rect.top),
-        Math.round(rect.width),
-        Math.round(rect.height),
-        this.app.window.location?.href || "",
-      ].join(",");
-    }
-
-    mount() {
-      const dialog = this.findDialog();
-      const ellipsis = this.findEllipsis(dialog);
-      if (dialog && ellipsis && this.app.mountPanelNearProfileBrowseEllipsis(dialog, ellipsis)) {
-        return true;
-      }
-      this.app.hidePanelForInactivePlacement();
-      return false;
-    }
-
-    refresh() {
-      return this.mount();
-    }
-
-    unmount() {
-      this.app.hidePanelForInactivePlacement();
-    }
-  }
-
 
   class ProfilePageBulkAdapter {
     constructor(app) {
@@ -6235,10 +5612,17 @@
       this.selectionMode = false;
       this.scanFrame = null;
       this.scanInterval = null;
-      this.scrollHandler = () => this.scheduleScan();
       this.mutationObserver = null;
+      this.mutationRoot = null;
       this.outsideHandler = null;
-      this.menuCloseTimer = null;
+      this.lastScanStats = null;
+      this.menuLifecycle = new MenuLifecycle(app.window, {
+        onClosed: () => {
+          this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+          this.clearMenuPosition();
+          this.unbindOutsideClose();
+        },
+      });
     }
 
     get document() {
@@ -6285,20 +5669,18 @@
       return this.document.querySelector('[data-e2e="user-more"]');
     }
 
-    mount() {
+    mount(userMore = this.findUserMoreButton()) {
       if (!this.isProfilePage()) {
         this.unmount();
         return false;
       }
       this.syncProfileContext();
-      const userMore = this.findUserMoreButton();
       if (userMore) {
         this.ensureButton(userMore);
       } else {
         this.unmountButtonOnly();
       }
-      if (!this.selectionMode) this.enterSelectionMode();
-      else this.scheduleRecoveryScan();
+      this.enterSelectionMode();
       this.updateMenuLabels();
       return Boolean(userMore);
     }
@@ -6370,7 +5752,6 @@
         this.buttonWrapper = createElement(this.document, "div", "");
         this.button = createElement(this.document, "button", "");
         this.button.type = "button";
-        this.button.dataset.tthelperProfileBulk = "1";
         this.button.setAttribute("aria-label", this.app.t("bulk_download"));
         this.button.innerHTML = `
           <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
@@ -6394,9 +5775,16 @@
 
     ensureMenu() {
       if (this.menu) return this.menu;
-      const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu ${SCRIPT_PREFIX}-profile-bulk-menu ${this.app.getTheme()}`);
+      const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu ${SCRIPT_PREFIX}-profile-bulk-menu`);
       menu.addEventListener("pointerdown", (event) => event.stopPropagation());
-      menu.addEventListener("click", (event) => event.stopPropagation());
+      menu.addEventListener("click", (event) => {
+        if (menu.classList.contains("closing")) {
+          event.preventDefault();
+          event.stopImmediatePropagation?.();
+          return;
+        }
+        event.stopPropagation();
+      });
       menu.addEventListener("mouseleave", () => this.toggleMenu(false));
 
       this.downloadSelectedButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button`, "");
@@ -6420,57 +5808,39 @@
       menu.append(this.downloadSelectedButton, this.cancelSelectionButton, this.settingsButton);
       this.document.body.appendChild(menu);
       this.menu = menu;
+      this.menuLifecycle.attach(menu, menu);
       return menu;
     }
 
     toggleMenu(force = null) {
       const menu = this.ensureMenu();
-      const isOpen = menu.classList.contains("open");
-      const isClosing = menu.classList.contains("closing");
-      const shouldOpen = force === null ? !isOpen || isClosing : Boolean(force);
-
-      if (this.menuCloseTimer) {
-        this.window.clearTimeout?.(this.menuCloseTimer);
-        this.menuCloseTimer = null;
-      }
-
+      this.menuLifecycle.attach(menu, menu);
+      const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
       if (shouldOpen) {
-        this.enterSelectionMode();
-        this.updateMenuLabels();
-        menu.classList.remove("closing");
-        menu.classList.add("open");
-        this.buttonWrapper?.classList?.add?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
-        this.positionMenu();
-        this.bindOutsideClose();
+        this.menuLifecycle.open(() => {
+          this.enterSelectionMode();
+          this.updateMenuLabels();
+          this.buttonWrapper?.classList?.add?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+          this.positionMenu();
+          this.bindOutsideClose();
+        });
         return;
       }
-
-      if (!isOpen && !isClosing) return;
-      menu.classList.add("open", "closing");
-      this.positionMenu();
-      this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
-      this.menuCloseTimer = this.window.setTimeout?.(() => {
-        this.menuCloseTimer = null;
-        menu.classList.remove("open", "closing");
-        this.clearMenuPosition();
-        this.unbindOutsideClose();
-      }, 170) || null;
+      this.menuLifecycle.close(() => {
+        this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+      });
     }
 
     closeMenu(immediate = false) {
       if (!this.menu) return;
-      if (!immediate) {
-        this.toggleMenu(false);
-        return;
+      this.menuLifecycle.attach(this.menu, this.menu);
+      if (immediate) {
+        this.menuLifecycle.closeImmediate();
+      } else {
+        this.menuLifecycle.close(() => {
+          this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+        });
       }
-      if (this.menuCloseTimer) {
-        this.window.clearTimeout?.(this.menuCloseTimer);
-        this.menuCloseTimer = null;
-      }
-      this.menu.classList.remove("open", "closing");
-      this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
-      this.clearMenuPosition();
-      this.unbindOutsideClose();
     }
 
     clearMenuPosition() {
@@ -6486,6 +5856,7 @@
     bindOutsideClose() {
       if (this.outsideHandler) return;
       this.outsideHandler = (event) => {
+        if (this.menu?.classList?.contains?.("closing")) return;
         if (this.menu?.contains?.(event.target) || this.buttonWrapper?.contains?.(event.target)) return;
         this.closeMenu();
       };
@@ -6500,6 +5871,7 @@
 
     positionMenu() {
       const menu = this.ensureMenu();
+      if (menu.classList.contains("closing")) return;
       this.clearMenuPosition();
       const rect = this.buttonWrapper?.getBoundingClientRect?.();
       if (!rect) return;
@@ -6512,8 +5884,6 @@
         viewportWidth: this.window.innerWidth || 0,
         viewportHeight: this.window.innerHeight || 0,
       });
-      menu.classList.toggle("light", this.app.getTheme() === "light");
-      menu.classList.toggle("dark", this.app.getTheme() === "dark");
       menu.style.position = "fixed";
       menu.style.left = `${Math.round(placement.left)}px`;
       menu.style.top = `${Math.round(placement.top)}px`;
@@ -6523,15 +5893,11 @@
       menu.dataset.placement = placement.placement;
     }
 
-    formatBulkItemCount(count) {
-      return String(count);
-    }
-
     updateMenuLabels() {
       const count = this.selectedItems.size;
       if (this.button) this.button.setAttribute("aria-label", this.app.t("bulk_download"));
       if (this.downloadSelectedButton) {
-        this.downloadSelectedButton.textContent = `${this.app.t("bulk_download_selected")}（${this.formatBulkItemCount(count)}）`;
+        this.downloadSelectedButton.textContent = `${this.app.t("bulk_download_selected")}（${count}）`;
         this.downloadSelectedButton.disabled = false;
       }
       if (this.cancelSelectionButton) {
@@ -6542,21 +5908,60 @@
     }
 
     enterSelectionMode() {
-      if (!this.selectionMode) {
-        this.selectionMode = true;
-        this.ensureSelectionScanner();
-      }
+      this.selectionMode = true;
+      this.ensureSelectionScanner();
       this.scheduleScan();
     }
 
+    findMutationRoot() {
+      return (
+        this.document.querySelector?.('[data-e2e="user-post-item-list"]') ||
+        this.document.querySelector?.('[class*="DivVideoFeed"]') ||
+        this.document.querySelector?.('[class*="DivPostListContainer"]') ||
+        this.document.querySelector?.('a[href*="/video/"],a[href*="/photo/"]')?.parentElement?.parentElement ||
+        this.document.body ||
+        null
+      );
+    }
+
     ensureSelectionScanner() {
-      if (!this.scanInterval && typeof this.window.setInterval === "function") {
-        this.scanInterval = this.window.setInterval(() => this.scheduleScan(), 800);
+      const mutationRoot = this.findMutationRoot();
+      if (this.mutationRoot !== mutationRoot) {
+        this.mutationObserver?.disconnect?.();
+        this.mutationObserver = null;
+        this.mutationRoot = null;
       }
-      this.document.addEventListener?.("scroll", this.scrollHandler, true);
-      if (!this.mutationObserver && typeof this.window.MutationObserver === "function" && this.document.body) {
-        this.mutationObserver = new this.window.MutationObserver(() => this.scheduleScan());
-        this.mutationObserver.observe(this.document.body, { childList: true, subtree: true });
+      if (!this.scanInterval && typeof this.window.setInterval === "function") {
+        this.scanInterval = this.window.setInterval(() => {
+          this.ensureSelectionScanner();
+          this.scheduleScan();
+        }, 5000);
+      }
+      if (
+        !this.mutationObserver &&
+        typeof this.window.MutationObserver === "function" &&
+        mutationRoot
+      ) {
+        const observerRoot = mutationRoot.parentElement || mutationRoot;
+        this.mutationRoot = mutationRoot;
+        this.mutationObserver = new this.window.MutationObserver((records) => {
+          if (
+            records.some((record) =>
+              Array.from(record.addedNodes || []).some(
+                (node) => !node?.closest?.(`.${SCRIPT_PREFIX}-panel`),
+              ) || Array.from(record.removedNodes || []).some(
+                (node) => node?.matches?.(`.${SCRIPT_PREFIX}-profile-select-box`),
+              ),
+            )
+          ) {
+            this.ensureSelectionScanner();
+            this.scheduleScan();
+          }
+        });
+        this.mutationObserver.observe(observerRoot, {
+          childList: true,
+          subtree: true,
+        });
       }
     }
 
@@ -6566,7 +5971,6 @@
         box.classList.remove("selected");
         box.setAttribute("aria-checked", "false");
       });
-      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-card-selected`).forEach((node) => node.classList.remove(`${SCRIPT_PREFIX}-profile-card-selected`));
       this.updateMenuLabels();
       this.scheduleScan();
     }
@@ -6582,23 +5986,13 @@
         this.window.cancelAnimationFrame?.(this.scanFrame);
         this.scanFrame = null;
       }
-      this.document.removeEventListener?.("scroll", this.scrollHandler, true);
       this.mutationObserver?.disconnect?.();
       this.mutationObserver = null;
+      this.mutationRoot = null;
       this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((node) => node.remove());
       this.document.querySelectorAll(`[data-tthelper-select-ready]`).forEach((node) => {
-        delete node.dataset.tthelperSelectReady;
         node.removeAttribute("data-tthelper-select-ready");
       });
-      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-card-selected`).forEach((node) => node.classList.remove(`${SCRIPT_PREFIX}-profile-card-selected`));
-    }
-
-    scheduleRecoveryScan() {
-      this.scheduleScan();
-      const delays = [0, 120, 350, 800, 1400];
-      for (const delay of delays) {
-        this.window.setTimeout?.(() => this.scheduleScan(), delay);
-      }
     }
 
     scheduleScan() {
@@ -6616,36 +6010,124 @@
 
     scanVisibleCards() {
       if (!this.selectionMode || !this.isProfilePage()) return;
+      const startedAt = Date.now();
       const config = this.app.configStore.get();
-      const size = `${Math.round(clampNumber(Number(config.profile_bulk_checkbox_size), 18, 40, 26))}px`;
-      const anchors = Array.from(this.document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]'));
+      const size = `${Math.round(
+        clampNumber(
+          Number(config.profile_bulk_checkbox_size),
+          18,
+          40,
+          26,
+        ),
+      )}px`;
+      const scanRoot = this.findMutationRoot() || this.document;
+      const anchors = Array.from(
+        scanRoot.querySelectorAll?.(
+          'a[href*="/video/"], a[href*="/photo/"]',
+        ) || [],
+      );
+      let skippedReady = 0;
+      let attached = 0;
+      let invalid = 0;
       for (const anchor of anchors) {
-        const item = this.extractItemFromAnchor(anchor);
-        if (!item?.id || !item.card) continue;
+        const href = anchor?.href || anchor?.getAttribute?.("href") || "";
+        const id = getVideoIdFromUrl(href);
+        if (!id) {
+          invalid += 1;
+          continue;
+        }
+        const card =
+          anchor.closest?.('[data-e2e="user-post-item"]') ||
+          anchor.closest?.("div") ||
+          anchor;
+        if (!card) {
+          invalid += 1;
+          continue;
+        }
+        const signature = `${id}|${size}`;
+        const existingBox = card.querySelector?.(
+          `.${SCRIPT_PREFIX}-profile-select-box[data-tthelper-item-id="${id}"]`,
+        );
+        if (card.dataset.tthelperSelectReady === signature && existingBox) {
+          skippedReady += 1;
+          continue;
+        }
+        const item = this.extractItemFromAnchor(anchor, { href, id, card });
+        if (!item?.id || !item.card) {
+          invalid += 1;
+          continue;
+        }
         this.attachCheckbox(item, size);
+        attached += 1;
       }
+      this.lastScanStats = {
+        capturedAt: new Date().toISOString(),
+        anchorCount: anchors.length,
+        attached,
+        skippedReady,
+        invalid,
+        durationMs: Date.now() - startedAt,
+      };
       this.updateMenuLabels();
     }
 
-    extractItemFromAnchor(anchor) {
-      const href = anchor?.href || anchor?.getAttribute?.("href") || "";
-      const id = getVideoIdFromUrl(href);
+    extractItemFromAnchor(anchor, resolved = {}) {
+      const href =
+        resolved.href ||
+        anchor?.href ||
+        anchor?.getAttribute?.("href") ||
+        "";
+      const id = resolved.id || getVideoIdFromUrl(href);
       if (!id) return null;
-      const card = anchor.closest?.('[data-e2e="user-post-item"]') || anchor.closest?.('div') || anchor;
-      const img = card.querySelector?.("img") || anchor.querySelector?.("img") || null;
-      const coverUrl = img?.currentSrc || img?.src || img?.getAttribute?.("src") || "";
-      const desc = String(img?.alt || card?.textContent || anchor?.textContent || "")
+      const card =
+        resolved.card ||
+        anchor?.closest?.('[data-e2e="user-post-item"]') ||
+        anchor?.closest?.("div") ||
+        anchor;
+      if (!card) return null;
+      let absoluteUrl = "";
+      try {
+        absoluteUrl = new URL(href, this.window.location.href).href;
+      } catch (_err) {
+        return null;
+      }
+      const img = card.querySelector?.("img") || anchor?.querySelector?.("img") || null;
+      const coverUrl =
+        img?.currentSrc || img?.src || img?.getAttribute?.("src") || "";
+      const desc = String(
+        img?.alt || card?.textContent || anchor?.textContent || "",
+      )
         .replace(/\s+/g, " ")
         .trim();
       return {
         id,
-        href: new URL(href, this.window.location.href).href,
-        pageUrl: new URL(href, this.window.location.href).href,
+        href: absoluteUrl,
+        pageUrl: absoluteUrl,
         coverUrl,
         desc,
         type: "unknown",
         card,
       };
+    }
+
+    updateCheckboxState(box, itemId, size = "") {
+      const checked = this.selectedItems.has(itemId);
+      const downloaded = this.selectedItems.get(itemId)?.bulkDownloadResult?.status === "success";
+      box.dataset.tthelperItemId = itemId;
+      if (size) {
+        box.style.width = size;
+        box.style.height = size;
+      }
+      box.classList.toggle("selected", checked);
+      box.classList.toggle("downloaded", downloaded);
+      box.setAttribute("aria-checked", checked ? "true" : "false");
+      box.setAttribute("aria-label", downloaded ? this.app.t("download_completed") : this.app.t("bulk_download_selected"));
+    }
+
+    refreshCheckboxStates() {
+      this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((box) => {
+        this.updateCheckboxState(box, box.dataset.tthelperItemId);
+      });
     }
 
     attachCheckbox(item, size) {
@@ -6658,11 +6140,7 @@
       }
 
       const setBoxState = (box) => {
-        const checked = this.selectedItems.has(item.id);
-        box.dataset.tthelperItemId = item.id;
-        box.style.setProperty(`--${SCRIPT_PREFIX}-profile-checkbox-size`, size);
-        box.classList.toggle("selected", checked);
-        box.setAttribute("aria-checked", checked ? "true" : "false");
+        this.updateCheckboxState(box, item.id, size);
       };
 
       const currentPosition = getComputedStyleSafe(this.window, card)?.position || "";
@@ -6681,8 +6159,21 @@
         const toggleSelected = () => {
           const nextChecked = !this.selectedItems.has(item.id);
           if (nextChecked) {
-            const fresh = this.extractItemFromAnchor(card.querySelector?.('a[href*="/video/"], a[href*="/photo/"]') || null) || item;
-            this.selectedItems.set(item.id, { ...item, ...fresh, card: null });
+            const cardAnchor = card.querySelector?.('a[href*="/video/"], a[href*="/photo/"]') || null;
+            const fresh = this.extractItemFromAnchor(cardAnchor) || item;
+            const reactFragments = collectLocalReactItems([
+              { element: card, source: "profile-card" },
+              { element: cardAnchor, source: "profile-card-link" },
+            ]).entries
+              .filter((entry) => entry.id === item.id)
+              .map((entry) => entry.item);
+            const exactItem = mergeExactItemFragments(reactFragments, item.id);
+            this.selectedItems.set(item.id, {
+              ...item,
+              ...fresh,
+              exactItem,
+              card: null,
+            });
           } else {
             this.selectedItems.delete(item.id);
           }
@@ -6699,65 +6190,71 @@
           event.stopPropagation();
           toggleSelected();
         });
-        box.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          event.stopPropagation();
-          toggleSelected();
-        });
         const mark = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-select-mark`);
         box.appendChild(mark);
         card.appendChild(box);
       }
 
-      card.dataset.tthelperSelectReady = item.id;
+      card.dataset.tthelperSelectReady = `${item.id}|${size}`;
       setBoxState(box);
     }
 
-    tryResolveMedia(item) {
-      const config = this.app.configStore.get();
-      const candidates = [
-        parsePageDataFromDocument(this.document),
-        ...getWindowDataCandidates(this.window),
-      ].filter(Boolean);
-      for (const data of candidates) {
-        const media = extractMediaFromPageData(data, item.pageUrl || item.href, config);
-        if (hasUsableMedia(media)) return media;
-      }
-      const cached = this.app.runtimeCache?.getMedia?.(item.pageUrl || item.href, config);
-      if (hasUsableMedia(cached)) return cached;
-      return null;
+    getItemTypeLabel(item) {
+      const identity = parseTikTokItemIdentityFromUrl(
+        item?.pageUrl || item?.href || "",
+      );
+      if (identity?.type === "photo") return this.app.t("bulk_type_album");
+      if (identity?.type === "video") return this.app.t("bulk_type_video");
+      return this.app.t("bulk_type_unknown");
     }
 
-    getItemTypeLabel(item) {
-      const media = this.tryResolveMedia(item);
-      if (media?.isImagePost || ensureArray(media?.images).length) return this.app.t("bulk_type_album");
-      if (media?.video?.primaryUrl) return this.app.t("bulk_type_video");
-      return this.app.t("bulk_type_unknown");
+    getDebugSnapshot() {
+      return {
+        profileKey: this.getProfileKey(),
+        selectionMode: this.selectionMode,
+        selectedCount: this.selectedItems.size,
+        selectedIds: Array.from(this.selectedItems.keys()).slice(0, 50),
+        checkboxCount: this.document.querySelectorAll(
+          `.${SCRIPT_PREFIX}-profile-select-box`,
+        ).length,
+        readyCardCount: this.document.querySelectorAll(
+          "[data-tthelper-select-ready]",
+        ).length,
+        hasButton: Boolean(this.button?.isConnected),
+        menuOpen: Boolean(this.menu?.classList?.contains("open")),
+        mutationObserverActive: Boolean(this.mutationObserver),
+        mutationRootTag: this.mutationRoot?.tagName || "",
+        scanIntervalActive: Boolean(this.scanInterval),
+        lastScan: this.lastScanStats,
+      };
     }
 
     openConfirmModal() {
       const items = Array.from(this.selectedItems.values());
       if (!items.length) {
-        this.app.toast(this.app.t("bulk_no_selection"));
+        this.app.notifications.toast(this.app.t("bulk_no_selection"));
         return;
       }
       const modal = this.app.createModal(this.app.t("bulk_confirm_title"), "", { closeOnBackdrop: false });
       modal.classList.add(`${SCRIPT_PREFIX}-bulk-confirm-modal`);
       const main = modal.querySelector("main");
-      const selected = new Set(items.map((item) => item.id));
+      const selected = new Set(
+        items
+          .filter((item) => item.bulkDownloadResult?.status !== "success")
+          .map((item) => item.id),
+      );
       const list = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-list`);
       const footer = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-footer`);
       const countLabel = createElement(this.document, "div", `${SCRIPT_PREFIX}-readonly`);
       const actions = createElement(this.document, "div", `${SCRIPT_PREFIX}-row`);
-      const close = this.app.actionButton(this.app.t("cancel"), () => modal.parentElement?.remove?.(), "secondary");
+      const close = this.app.actionButton(this.app.t("cancel"), () => modal.close?.(), "secondary");
       const start = this.app.actionButton(this.app.t("bulk_start_download"), () => {
         const finalItems = items.filter((item) => selected.has(item.id));
-        modal.parentElement?.remove?.();
+        modal.close?.();
         this.app.downloadProfileBulkItems(finalItems);
       }, "primary");
       const updateCount = () => {
-        countLabel.textContent = `${this.app.t("bulk_selected_count")} ${this.formatBulkItemCount(selected.size)}`;
+        countLabel.textContent = `${this.app.t("bulk_selected_count")} ${selected.size}`;
         start.disabled = selected.size <= 0;
       };
 
@@ -6765,7 +6262,7 @@
         const row = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-row`);
         const checkbox = createElement(this.document, "input");
         checkbox.type = "checkbox";
-        checkbox.checked = true;
+        checkbox.checked = selected.has(item.id);
         checkbox.addEventListener("change", () => {
           if (checkbox.checked) selected.add(item.id);
           else selected.delete(item.id);
@@ -6776,7 +6273,29 @@
         if (item.coverUrl) cover.src = item.coverUrl;
         const desc = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-desc`, item.desc || item.pageUrl || item.id);
         const type = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-type`, this.getItemTypeLabel(item));
-        row.append(checkbox, cover, desc, type);
+        const meta = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-meta`);
+        meta.append(type);
+        const result = item.bulkDownloadResult;
+        if (result?.status === "success") {
+          meta.append(createElement(
+            this.document,
+            "div",
+            `${SCRIPT_PREFIX}-bulk-type downloaded`,
+            this.app.t("download_completed"),
+          ));
+        }
+        if (result?.status === "failed" || result?.status === "partial") {
+          const progress = result.status === "partial"
+            ? ` ${result.successfulAssetCount}/${result.totalAssetCount}`
+            : "";
+          meta.append(createElement(
+            this.document,
+            "div",
+            `${SCRIPT_PREFIX}-bulk-status`,
+            `${this.app.t("download_failed")}${progress}`,
+          ));
+        }
+        row.append(checkbox, cover, desc, meta);
         list.appendChild(row);
       }
       actions.append(close, start);
@@ -6786,17 +6305,349 @@
     }
   }
 
+  class NotificationCenter {
+    constructor(app) {
+      this.app = app;
+      this.notificationStackEl = null;
+      this.notificationId = 0;
+      this.downloadStatusEl = null;
+      this.downloadStatusHideTimer = null;
+    }
+
+    get document() {
+      return this.app.document;
+    }
+
+    get window() {
+      return this.app.window;
+    }
+
+    t(key) {
+      return this.app.t(key);
+    }
+
+    getNotificationStackElement() {
+      if (this.notificationStackEl?.isConnected) return this.notificationStackEl;
+      const stack = createElement(this.document, "div", `${SCRIPT_PREFIX}-notification-stack`);
+      this.document.body.appendChild(stack);
+      this.notificationStackEl = stack;
+      return stack;
+    }
+
+    removeNotificationCard(card, { immediate = false } = {}) {
+      if (!card || card.dataset.notificationRemoving === "1") return;
+      card.dataset.notificationRemoving = "1";
+      const remove = () => {
+        card.remove();
+      };
+      if (immediate) {
+        remove();
+        return;
+      }
+      card.classList.add("fading");
+      this.window.setTimeout?.(remove, 75);
+    }
+
+    createNotificationCard({ type = "info", title = "", detail = "", meta = "", iconText = "i", download = false, onClose = null } = {}) {
+      const stack = this.getNotificationStackElement();
+      const card = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-card${download ? ` ${SCRIPT_PREFIX}-download-status` : ""}`,
+      );
+      card.classList.add(type);
+      card.dataset.notificationId = String(++this.notificationId);
+
+      const icon = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-icon`,
+      );
+      const main = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-main`,
+      );
+      const head = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-head`,
+      );
+      const titleEl = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-title`,
+        title,
+      );
+      const metaEl = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-meta`,
+        meta,
+      );
+      const detailEl = createElement(
+        this.document,
+        "div",
+        `${SCRIPT_PREFIX}-notification-detail`,
+        detail,
+      );
+      const close = createTuxIconButton(
+        this.document,
+        this.t("close"),
+        () => {
+          if (typeof onClose === "function") onClose(card);
+          else this.removeNotificationCard(card);
+        },
+        "close",
+        `${SCRIPT_PREFIX}-notification-close`,
+      );
+
+      icon.textContent = iconText || "i";
+
+      head.append(titleEl, metaEl);
+      main.append(head, detailEl);
+      card.append(icon, main, close);
+      stack.prepend(card);
+
+      return { card, icon, titleEl, metaEl, detailEl };
+    }
+
+    getDownloadStatusElement() {
+      if (this.downloadStatusEl?.isConnected) {
+        const stack = this.getNotificationStackElement();
+        if (this.downloadStatusEl.parentElement !== stack) {
+          stack.prepend(this.downloadStatusEl);
+        }
+        return this.downloadStatusEl;
+      }
+
+      const refs = this.createNotificationCard({
+        type: "busy",
+        title: "",
+        detail: "",
+        iconText: "↓",
+        download: true,
+        onClose: (card) => {
+          this.app.requestDownloadCancel?.();
+          this.stopDownloadTitleDots();
+          this.removeNotificationCard(card);
+          if (this.downloadStatusEl === card) this.downloadStatusEl = null;
+        },
+      });
+      this.downloadStatusEl = refs.card;
+      this.downloadStatusIconEl = refs.icon;
+      this.downloadStatusTitleEl = refs.titleEl;
+      this.downloadStatusMetaEl = refs.metaEl;
+      this.downloadStatusDetailEl = refs.detailEl;
+
+      return this.downloadStatusEl;
+    }
+
+    stripAnimatedDotsTitle(title = "") {
+      return String(title || "").replace(/[.。…]+$/g, "").trim();
+    }
+
+    stopDownloadTitleDots() {
+      if (this.downloadStatusDotsTimer) {
+        this.window.clearInterval?.(this.downloadStatusDotsTimer);
+        this.downloadStatusDotsTimer = null;
+      }
+      this.downloadStatusDotsBaseTitle = "";
+      this.downloadStatusDotsIndex = 0;
+    }
+
+    startDownloadTitleDots(title = "") {
+      this.stopDownloadTitleDots();
+      this.downloadStatusDotsBaseTitle = this.stripAnimatedDotsTitle(title);
+      this.downloadStatusDotsIndex = 0;
+      const render = () => {
+        if (!this.downloadStatusTitleEl) return;
+        const count = (this.downloadStatusDotsIndex % 3) + 1;
+        this.downloadStatusTitleEl.textContent = `${this.downloadStatusDotsBaseTitle}${".".repeat(count)}`;
+        this.downloadStatusDotsIndex += 1;
+      };
+      render();
+      this.downloadStatusDotsTimer = this.window.setInterval?.(render, 320);
+    }
+
+    setDownloadStatus({ type = "busy", title = "", detail = "", meta = "", autoHideMs = 0 } = {}) {
+      if (this.downloadStatusHideTimer) {
+        this.window.clearTimeout?.(this.downloadStatusHideTimer);
+        this.downloadStatusHideTimer = null;
+      }
+
+      const card = this.getDownloadStatusElement();
+      card.className = `${SCRIPT_PREFIX}-notification-card ${SCRIPT_PREFIX}-download-status ${type}`;
+
+      const isActiveDownload = ["busy", "album", "image"].includes(type);
+      if (this.downloadStatusTitleEl) {
+        if (isActiveDownload) this.startDownloadTitleDots(title || "");
+        else {
+          this.stopDownloadTitleDots();
+          this.downloadStatusTitleEl.textContent = title || "";
+        }
+      }
+      if (this.downloadStatusMetaEl) this.downloadStatusMetaEl.textContent = meta || "";
+      if (this.downloadStatusDetailEl) this.downloadStatusDetailEl.textContent = detail || "";
+      if (this.downloadStatusIconEl) {
+        this.downloadStatusIconEl.textContent = "";
+        if (type === "success") {
+          this.downloadStatusIconEl.textContent = "✓";
+        } else if (type === "error") {
+          this.downloadStatusIconEl.textContent = "!";
+        } else if (type === "album") {
+          this.downloadStatusIconEl.textContent = "▦";
+        } else if (type === "image") {
+          this.downloadStatusIconEl.textContent = "◧";
+        } else {
+          this.downloadStatusIconEl.textContent = "↓";
+        }
+      }
+
+      if (autoHideMs > 0) this.hideDownloadStatus(autoHideMs);
+      return card;
+    }
+
+    hideDownloadStatus(delay = 0, immediate = false) {
+      const remove = () => {
+        const card = this.downloadStatusEl;
+        if (!card) return;
+        this.stopDownloadTitleDots();
+        this.removeNotificationCard(card, { immediate });
+        if (this.downloadStatusEl === card) this.downloadStatusEl = null;
+      };
+
+      if (this.downloadStatusHideTimer) {
+        this.window.clearTimeout?.(this.downloadStatusHideTimer);
+        this.downloadStatusHideTimer = null;
+      }
+
+      if (immediate || delay <= 0) {
+        remove();
+        return;
+      }
+
+      this.downloadStatusHideTimer = this.window.setTimeout?.(remove, delay);
+    }
+
+    nudgeDownloadStatus(message = this.t("download_already_running")) {
+      const card = this.getDownloadStatusElement();
+      card.classList.remove("attention");
+      void card.offsetWidth;
+      card.classList.add("attention");
+
+      const detailEl = this.downloadStatusDetailEl;
+      const previousDetail = detailEl?.textContent || "";
+      if (detailEl && message) {
+        detailEl.textContent = message;
+      }
+
+      this.window.setTimeout?.(() => card.classList.remove("attention"), 1050);
+      this.window.clearTimeout?.(this.downloadStatusRepeatHintTimer);
+      this.downloadStatusRepeatHintTimer = this.window.setTimeout?.(() => {
+        if (detailEl?.isConnected && detailEl.textContent === message) {
+          detailEl.textContent = previousDetail;
+        }
+      }, 1600);
+    }
+
+    showDownloadPreparing(detail = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("download_preparing"),
+        detail,
+      });
+    }
+
+    showVideoPreparing(filename = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("preparing_video_download"),
+        detail: filename,
+      });
+    }
+
+    showVideoDownloading(filename = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("downloading_video"),
+        detail: filename,
+      });
+    }
+
+    showAlbumProgress(index, total, filename = "") {
+      this.setDownloadStatus({
+        type: "album",
+        title: `${index}/${total} ${this.t("downloading_album")}`,
+        detail: filename,
+        meta: "",
+      });
+    }
+
+    showImageDownloading(filename = "") {
+      this.setDownloadStatus({
+        type: "image",
+        title: this.t("downloading_image"),
+        detail: filename,
+      });
+    }
+
+    showMusicDownloading(filename = "") {
+      this.setDownloadStatus({
+        type: "busy",
+        title: this.t("downloading_music"),
+        detail: filename,
+      });
+    }
+
+    showDownloadSuccess(filename = "") {
+      this.setDownloadStatus({
+        type: "success",
+        title: this.t("download_completed"),
+        detail: filename,
+        autoHideMs: 3000,
+      });
+    }
+
+    showDownloadError(message = "") {
+      this.setDownloadStatus({
+        type: "error",
+        title: this.t("download_failed"),
+        detail: message,
+      });
+    }
+
+    toast(message, options = {}) {
+      const refs = this.createNotificationCard({
+        type: options.type || "info",
+        title: String(message || ""),
+        detail: options.detail || "",
+        meta: options.meta || "",
+        iconText: options.iconText || "i",
+        download: false,
+      });
+      const autoHideMs = Number(options.autoHideMs ?? 3200);
+      if (!options.persist && autoHideMs > 0) {
+        this.window.setTimeout?.(() => this.removeNotificationCard(refs.card), autoHideMs);
+      }
+      return refs.card;
+    }
+  }
+
   class TikTokDlApp {
-    constructor(win, runtimeCache = null) {
+    constructor(win) {
       this.window = win;
       this.document = win.document;
       this.configStore = new ConfigStore(win.localStorage);
-      this.runtimeCache = runtimeCache;
-      this.extractor = new TikTokMediaExtractor(this.document, win, runtimeCache);
+      this.extractor = new TikTokMediaExtractor(this.document, win);
+      this.currentItemResolver = new CurrentItemResolver(
+        this.document,
+        win,
+        this.extractor,
+      );
+      this.itemDataProvider = new ItemDataProvider(this.document, win);
       this.actionBarLocator = new ActionBarLocator(this);
       this.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
-      this.recommendPlacementAdapter = new RecommendPlacementAdapter(this);
-      this.profileBrowseDialogAdapter = new ProfileBrowseDialogAdapter(this);
       this.profilePageBulkAdapter = new ProfilePageBulkAdapter(this);
       this.downloader = new Downloader(win, gmXmlHttpRequest, gmDownload);
       this.panel = null;
@@ -6804,7 +6655,6 @@
       this.launcher = null;
       this.currentMedia = null;
       this.currentActionBarHost = null;
-      this.currentActionBarContext = null;
       this.currentPlacementMode = "inactive";
       this.lastHref = "";
       this.positionObserver = null;
@@ -6813,22 +6663,27 @@
       this.routeChangeCleanup = null;
       this.routeChangeFrame = null;
       this.lastPanelPositionSignature = "";
+      this.lastPanelPositionCheckAt = 0;
+      this.pendingPanelPositionCheck = null;
       this.outsideMenuBound = false;
-      this.menuCloseTimer = null;
       this.openImageOverlay = null;
-      this.isCurrentLiveItem = false;
       this.isDownloading = false;
+      this.downloadCancelRequested = false;
+      this.lastProfileBulkRun = null;
+      this.lastProfileBulkResolve = null;
+      this.lastExtractionTrace = null;
       this.isCapturingFrame = false;
-      this.lastToastAnchorRect = null;
-      this.lastToastAnchorAt = 0;
-      this.downloadStatusEl = null;
-      this.downloadStatusHideTimer = null;
-      this.notificationStackEl = null;
-      this.notificationId = 0;
+      this.notifications = new NotificationCenter(this);
+      this.menuLifecycle = new MenuLifecycle(win, {
+        onStateChange: () => this.applyPanelState(),
+        onClosed: () => {
+          this.clearPanelMenuPosition();
+          this.mountPanel();
+        },
+      });
       this.imageDownloadButton = null;
       this.imageOverlayWatcherBound = false;
       this.lastImageOpenGestureAt = 0;
-      this.appStartTime = Date.now();
       this.tampermonkeyMenuRegistered = false;
     }
 
@@ -6836,7 +6691,6 @@
       this.injectStyles();
       this.renderPanel();
       this.registerTampermonkeyMenu();
-      this.refreshMedia();
       this.bindHotkey();
       this.watchRouteChanges();
       this.watchPanelPosition();
@@ -6861,6 +6715,7 @@
     }
 
     renderPanel() {
+      this.menuLifecycle?.clearPending?.();
       if (this.menu) this.menu.remove();
       if (this.panel) this.panel.remove();
       const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
@@ -6898,109 +6753,66 @@
 
       const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
       menu.addEventListener("pointerdown", (event) => event.stopPropagation());
-      menu.addEventListener("click", (event) => event.stopPropagation());
+      menu.addEventListener("click", (event) => {
+        if (this.panel?.classList.contains("closing")) {
+          event.preventDefault();
+          event.stopImmediatePropagation?.();
+          return;
+        }
+        event.stopPropagation();
+      });
       menu.addEventListener("mouseleave", () => this.toggleMenu(false));
-      const downloadButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button`,
-        this.t("download"),
-      );
-      downloadButton.addEventListener("click", () => {
-        this.captureToastAnchor(downloadButton);
-        this.toggleMenu(false);
-        this.downloadVideo(downloadButton);
+
+      const makeMenuButton = (label, className, onClick) => {
+        const button = createElement(this.document, "button", className, label);
+        button.addEventListener("click", (event) => {
+          if (this.panel?.classList.contains("closing")) {
+            event.preventDefault();
+            return;
+          }
+          onClick(event);
+        });
+        return button;
+      };
+      const secondaryButtonClass = `${SCRIPT_PREFIX}-button secondary`;
+
+      const downloadButton = makeMenuButton(this.t("download"), `${SCRIPT_PREFIX}-button`, () => {
+        this.runMenuAction(() => this.downloadVideo());
       });
 
-      const frameButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("frame_capture"),
-      );
-      frameButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openFrameCapture();
+      const frameButton = makeMenuButton(this.t("frame_capture"), secondaryButtonClass, () => {
+        this.runMenuAction(() => this.openFrameCapture());
       });
 
-      const detailsButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("details"),
-      );
-      detailsButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openDetails();
+      const detailsButton = makeMenuButton(this.t("details"), secondaryButtonClass, () => {
+        this.runMenuAction(() => this.openDetails());
       });
 
-      const settingsButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("settings"),
-      );
-      settingsButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.openSettings();
+      const settingsButton = makeMenuButton(this.t("settings"), secondaryButtonClass, () => {
+        this.runMenuAction(() => this.openSettings());
       });
 
-      const debugInfoButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        this.t("debug_info"),
-      );
-      debugInfoButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.copyDebugInfo("full");
+      const debugInfoButton = makeMenuButton(this.t("debug_info"), secondaryButtonClass, () => {
+        this.runMenuAction(() => this.copyDebugInfo());
       });
 
-      const testNoticeButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        "测试通知",
-      );
-      testNoticeButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.toast("测试普通通知", {
+      const testNoticeButton = makeMenuButton("测试通知", secondaryButtonClass, () => {
+        this.runMenuAction(() => this.notifications.toast("测试普通通知", {
           detail: "普通通知会自动关闭，点击 × 可提前关闭。",
           iconText: "i",
-        });
+        }));
       });
 
-      const testBusyButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        "测试下载中",
-      );
-      testBusyButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.showVideoPreparing("demo-video.mp4");
+      const testBusyButton = makeMenuButton("测试下载中", secondaryButtonClass, () => {
+        this.runMenuAction(() => this.notifications.showVideoPreparing("demo-video.mp4"));
       });
 
-      const testAlbumButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        "测试图集进度",
-      );
-      testAlbumButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.showAlbumProgress(2, 5, "demo-image-02.jpg");
+      const testAlbumButton = makeMenuButton("测试图集进度", secondaryButtonClass, () => {
+        this.runMenuAction(() => this.notifications.showAlbumProgress(2, 5, "demo-image-02.jpg"));
       });
 
-      const testErrorButton = createElement(
-        this.document,
-        "button",
-        `${SCRIPT_PREFIX}-button secondary`,
-        "测试失败",
-      );
-      testErrorButton.addEventListener("click", () => {
-        this.toggleMenu(false);
-        this.showDownloadError("这是一个测试错误，点击 × 关闭。");
+      const testErrorButton = makeMenuButton("测试失败", secondaryButtonClass, () => {
+        this.runMenuAction(() => this.notifications.showDownloadError("这是一个测试错误，点击 × 关闭。"));
       });
 
       const menuItems = [
@@ -7019,6 +6831,7 @@
       this.document.body.appendChild(menu);
       this.panel = panel;
       this.menu = menu;
+      this.menuLifecycle.attach(panel, menu);
       this.launcher = launcher;
       this.downloadButtonEl = downloadButton;
       this.frameButtonEl = frameButton;
@@ -7054,7 +6867,6 @@
       const button = this.ensureImageDownloadButton();
       button.textContent = this.t("download_image");
       button.removeAttribute?.("title");
-      button.classList.toggle("light", this.getTheme() === "light");
       for (const property of ["left", "right", "top", "bottom"]) {
         button.style[property] = "auto";
       }
@@ -7135,26 +6947,18 @@
       return getMessage(key, this.configStore.get(), this.window.navigator);
     }
 
-    getTheme() {
-      return resolveTheme(
-        this.configStore.get(),
-        this.window.matchMedia?.("(prefers-color-scheme: dark)"),
-      );
-    }
-
     applyPanelState() {
       if (!this.panel) return;
+      const config = this.configStore.get();
       const isOpen = this.panel.classList.contains("open");
       const isPending = this.panel.classList.contains("pending");
       const isClosing = this.panel.classList.contains("closing");
       const isEmbedded = this.panel.classList.contains("embedded");
-      const isProfileDialog = this.panel.classList.contains("profile-dialog");
-      const config = this.configStore.get();
+      const isFloating = this.panel.classList.contains("floating");
       const nextClassName = [
         `${SCRIPT_PREFIX}-panel`,
-        this.getTheme(),
         isEmbedded ? "embedded" : "",
-        isProfileDialog ? "profile-dialog" : "",
+        isFloating ? "floating" : "",
         isOpen ? "open" : "",
         isPending ? "pending" : "",
         isClosing ? "closing" : "",
@@ -7167,7 +6971,6 @@
       if (this.menu) {
         const nextMenuClassName = [
           `${SCRIPT_PREFIX}-menu`,
-          this.getTheme(),
           isOpen ? "open" : "",
           isClosing ? "closing" : "",
         ]
@@ -7181,7 +6984,9 @@
         this.launcher.setAttribute("aria-label", this.t("menu"));
         this.launcher.removeAttribute?.("title");
       }
-      const hideMediaActionsForLive = Boolean(this.isCurrentLiveItem);
+      const hideMediaActionsForLive = Boolean(
+        isOpen && this.isCurrentLiveContext(this.getCurrentActionAnchor())
+      );
       if (this.downloadButtonEl) {
         this.downloadButtonEl.textContent = this.t("download");
         this.downloadButtonEl.hidden = hideMediaActionsForLive;
@@ -7210,36 +7015,43 @@
     }
 
     toggleMenu(force = null) {
-      if (!this.panel) return;
-      const isOpen = this.panel.classList.contains("open");
-      const isClosing = this.panel.classList.contains("closing");
-      const shouldOpen = force === null ? !isOpen || isClosing : Boolean(force);
-
-      if (this.menuCloseTimer) {
-        this.window.clearTimeout?.(this.menuCloseTimer);
-        this.menuCloseTimer = null;
-      }
-
+      if (!this.panel || !this.menu) return;
+      this.menuLifecycle.attach(this.panel, this.menu);
+      const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
       if (shouldOpen) {
-        this.panel.classList.remove("closing");
-        this.panel.classList.add("open");
-        this.refreshMedia();
-        this.applyPanelState();
-        this.updatePanelMenuPosition();
+        this.currentMedia = null;
+        this.menuLifecycle.open(() => {
+          this.updatePanelMenuPosition();
+        });
         return;
       }
+      this.menuLifecycle.close();
+    }
 
-      if (!isOpen && !isClosing) return;
-      this.panel.classList.add("open", "closing");
-      this.applyPanelState();
-      this.updatePanelMenuPosition();
-      this.menuCloseTimer = this.window.setTimeout?.(() => {
-        this.menuCloseTimer = null;
-        this.panel?.classList.remove("open", "closing");
-        this.applyPanelState();
-        this.mountPanel();
-        this.updatePanelMenuPosition();
-      }, 170) || null;
+    closeMenu(immediate = false) {
+      if (!this.panel || !this.menu) return;
+      this.menuLifecycle.attach(this.panel, this.menu);
+      if (immediate) this.menuLifecycle.closeImmediate();
+      else this.menuLifecycle.close();
+    }
+
+    runMenuAction(action) {
+      this.closeMenu(true);
+      const run = () => {
+        try {
+          const result = action?.();
+          result?.catch?.((err) => {
+            this.notifications?.toast?.(err?.message || String(err), { type: "error" });
+          });
+        } catch (err) {
+          this.notifications?.toast?.(err?.message || String(err), { type: "error" });
+        }
+      };
+      if (typeof this.window.requestAnimationFrame === "function") {
+        this.window.requestAnimationFrame(run);
+      } else {
+        this.window.setTimeout?.(run, 0);
+      }
     }
 
     clearPanelMenuPosition() {
@@ -7254,6 +7066,7 @@
 
     updatePanelMenuPosition() {
       if (!this.panel || !this.menu) return;
+      if (this.panel.classList.contains("closing")) return;
       this.clearPanelMenuPosition();
       if (!this.panel.classList.contains("open")) return;
       const panelRect = this.panel.getBoundingClientRect?.();
@@ -7276,15 +7089,17 @@
       this.menu.dataset.placement = placement.placement;
     }
 
-
     bindMenuOutsideClose() {
       if (this.outsideMenuBound) return;
       this.outsideMenuBound = true;
       this.document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") this.toggleMenu(false);
+        if (event.key !== "Escape") return;
+        if (this.panel?.classList.contains("closing")) return;
+        this.toggleMenu(false);
       });
       this.document.addEventListener("pointerdown", (event) => {
         if (!this.panel?.classList.contains("open")) return;
+        if (this.panel.classList.contains("closing")) return;
         const target = event.target;
         if (this.menu?.contains?.(target) || this.launcher?.contains?.(target)) return;
         this.toggleMenu(false);
@@ -7303,101 +7118,8 @@
       );
     }
 
-    getElementRect(element) {
-      return this.actionBarLocator.getElementRect(element);
-    }
-
-    hasVisibleMediaElement() {
-      return this.actionBarLocator.hasVisibleMediaElement();
-    }
-
-    isVisibleAnchorRect(rect) {
-      return this.actionBarLocator.isVisibleAnchorRect(rect);
-    }
-
-    findNavigationHostRect() {
-      return this.actionBarLocator.findNavigationHostRect();
-    }
-
-    findNavigationAnchorRect() {
-      return this.actionBarLocator.findNavigationAnchorRect();
-    }
-
-    isVisibleActionBarRect(rect) {
-      return this.actionBarLocator.isVisibleActionBarRect(rect);
-    }
-
-    findActionBarHost() {
-      return this.actionBarLocator.findActionBarHost();
-    }
-
-    resolveCurrentActionBarHost() {
-      return this.actionBarLocator.resolveCurrentActionBarHost();
-    }
-
-    isActionControlCandidate(rect, videoRect) {
-      return this.actionBarLocator.isActionControlCandidate(rect, videoRect);
-    }
-
-    findActionControlColumnContext() {
-      return this.actionBarLocator.findActionControlColumnContext();
-    }
-
-    getNativeActionChildren(host) {
-      return this.actionBarLocator.getNativeActionChildren(host);
-    }
-
-    getActionBarInsertionReference(host) {
-      return this.actionBarLocator.getActionBarInsertionReference(host);
-    }
-
-    findActionBarPositionContext() {
-      return this.actionBarLocator.findActionBarPositionContext();
-    }
-
-    findActionBarAnchorRect() {
-      return this.actionBarLocator.findActionBarAnchorRect();
-    }
-
-    applyEmbeddedThemeVariables(resolveComputedColors) {
-      const theme = this.getTheme();
-      if (theme === "light") {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "rgb(241, 241, 241)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgb(22, 24, 35)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "rgb(232, 232, 232)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
-        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
-        return;
-      }
-      if (theme === "dark") {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, "hsla(0, 0%, 100%, 0.13)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, "rgba(255, 255, 255, 0.9)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, "hsla(0, 0%, 100%, 0.19)");
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
-        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
-        return;
-      }
-      if (typeof this.window.getComputedStyle !== "function") return;
-      const computed = resolveComputedColors?.();
-      if (!computed) return;
-      const palette = getEmbeddedLauncherPalette(computed.backgroundColor, computed.color);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, palette.background);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, palette.color);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, palette.hoverBackground);
-      if (computed.borderRadius) {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, computed.borderRadius);
-      } else {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, "50%");
-      }
-      if (computed.backdropFilter && computed.backdropFilter !== "none") {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`, computed.backdropFilter);
-      } else {
-        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
-      }
-    }
-
     getEmbeddedNativeButtonSample(host) {
-      const nativeChildren = this.getNativeActionChildren(host);
+      const nativeChildren = this.actionBarLocator.getNativeActionChildren(host);
       const sampleChildren = [
         ...nativeChildren.filter((child) => !isAvatarActionChild(child)),
         ...nativeChildren,
@@ -7436,7 +7158,6 @@
             action,
             visual,
             control: button || visual,
-            styleElement: button || visual || action,
             childRect: actionRect,
             actionRect,
             controlRect: visualRect,
@@ -7462,149 +7183,61 @@
         const score = 140 + officialBonus + buttonBonus - squarePenalty * 5 - sizePenalty - oversizedPenalty;
         if (score > bestScore) {
           bestScore = score;
-          best = { child, action: child, visual: control, control, styleElement: control, childRect, actionRect: childRect, controlRect, visualRect: controlRect };
+          best = { child, action: child, visual: control, control, childRect, actionRect: childRect, controlRect, visualRect: controlRect };
         }
       }
       return best;
     }
 
-    applyOfficialEmbeddedButtonClass(nativeControl = null) {
-      if (!this.launcher) return;
-      const baseClass = `${SCRIPT_PREFIX}-launcher`;
-      if (!nativeControl) {
-        this.launcher.className = baseClass;
-        return;
-      }
-      const nativeClassName = String(nativeControl.className || "");
-      const nextClassName = mergeClassNames(nativeClassName, baseClass, `${SCRIPT_PREFIX}-official-launcher`);
-      if (this.launcher.className !== nextClassName) {
-        this.launcher.className = nextClassName;
-      }
-    }
-
-    applyProfileDialogOfficialSkin(nativeControl = null) {
-      const container = this.panel?.querySelector?.(`.${SCRIPT_PREFIX}-launcher-container`) || null;
-      if (!container) return;
-      const baseClass = `${SCRIPT_PREFIX}-launcher-container`;
-      if (!nativeControl) {
-        if (container.className !== baseClass) container.className = baseClass;
-        return;
-      }
-      const nativeClassName = String(nativeControl.className || "");
-      const nextClassName = mergeClassNames(baseClass, `${SCRIPT_PREFIX}-profile-official-skin`, nativeClassName);
-      if (container.className !== nextClassName) {
-        container.className = nextClassName;
-      }
-    }
-
     syncEmbeddedButtonMetrics(host) {
       if (!this.panel || !host) return;
       const sample = this.getEmbeddedNativeButtonSample(host);
-      const nativeChild = sample?.child || null;
       const nativeControl = sample?.control || null;
-      const styleElement = sample?.styleElement || nativeControl || nativeChild;
       const controlRect = sample?.controlRect || nativeControl?.getBoundingClientRect?.();
-      const childRect = sample?.childRect || nativeChild?.getBoundingClientRect?.();
-
       const rawControlSize = controlRect ? Math.max(controlRect.width, controlRect.height) : 48;
       const controlSize = Math.round(clampNumber(rawControlSize, 28, 64, 48));
-      const itemWidth = childRect
-        ? Math.round(clampNumber(childRect.width || controlSize, controlSize, 88, controlSize))
-        : controlSize;
-      const itemHeight = childRect
-        ? Math.round(clampNumber(childRect.height || controlSize * 1.625, controlSize, 104, Math.round(controlSize * 1.625)))
-        : Math.round(controlSize * 1.625);
       const iconSize = Math.round(clampNumber(controlSize * 0.62, 18, 28, Math.round(controlSize * 0.55)));
 
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${controlSize}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-item-width`, `${itemWidth}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-item-height`, `${itemHeight}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-size`, `${iconSize}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`, "0px");
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-gap`, "0px");
-      this.applyProfileDialogOfficialSkin(null);
-      this.applyOfficialEmbeddedButtonClass(nativeControl);
-
-      const nativeStyle = getComputedStyleSafe(this.window, styleElement);
-      if (nativeStyle) {
-        const buttonPadding = getStyleValue(nativeStyle, ["padding"]);
-        const buttonRadius = getStyleValue(nativeStyle, ["borderRadius", "border-radius"]);
-        const buttonBackground = getStyleValue(nativeStyle, ["backgroundColor", "background-color"]);
-        if (buttonPadding) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-padding`, buttonPadding);
-        if (buttonRadius) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-radius`, buttonRadius);
-        if (buttonBackground) this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-bg`, buttonBackground);
+      this.panel.style.width = `${controlSize}px`;
+      this.panel.style.height = `${controlSize}px`;
+      this.panel.style.flexBasis = `${controlSize}px`;
+      const icon = this.launcher?.querySelector?.("svg");
+      if (icon) {
+        icon.style.width = `${iconSize}px`;
+        icon.style.height = `${iconSize}px`;
       }
-      this.applyEmbeddedThemeVariables(() => {
-        if (!styleElement) return null;
-        return getElementActionStyleSample(this.window, [styleElement, nativeControl, nativeChild]);
-      });
+      this.launcher.className = `${SCRIPT_PREFIX}-launcher`;
     }
 
     clearEmbeddedButtonMetrics() {
       if (!this.panel) return;
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-size`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-icon-size`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-item-width`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-item-height`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-gap`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-padding`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-radius`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-button-bg`);
-      this.applyOfficialEmbeddedButtonClass(null);
-      this.applyProfileDialogOfficialSkin(null);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-bg`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-color`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-hover-bg`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-radius`);
-      this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
+      this.panel.style.removeProperty("width");
+      this.panel.style.removeProperty("height");
+      this.panel.style.removeProperty("flex-basis");
+      const icon = this.launcher?.querySelector?.("svg");
+      icon?.style?.removeProperty?.("width");
+      icon?.style?.removeProperty?.("height");
+      if (this.launcher) this.launcher.className = `${SCRIPT_PREFIX}-launcher`;
     }
 
-    applyProfileDialogButtonTheme(anchorElement = null) {
-      if (!this.panel) return;
-      const anchorStyle = getComputedStyleSafe(this.window, anchorElement);
-      const anchorBg = getStyleValue(anchorStyle, ["backgroundColor", "background-color"]);
-      const anchorColor = getStyleValue(anchorStyle, ["color"]);
-      const anchorRadius = getStyleValue(anchorStyle, ["borderRadius", "border-radius"]);
-      const anchorBackdropFilter = getStyleValue(anchorStyle, ["backdropFilter", "-webkit-backdrop-filter"]);
-      const bg = anchorBg && anchorBg !== "transparent" && !/^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)$/i.test(anchorBg)
-        ? anchorBg
-        : "rgba(84, 84, 84, 0.5)";
-      const color = anchorColor || "rgb(255, 255, 255)";
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-bg`, bg);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-color`, color);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-hover-bg`, bg);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-radius`, anchorRadius || "100px");
-      if (anchorBackdropFilter && anchorBackdropFilter !== "none") {
-        this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`, anchorBackdropFilter);
-      } else {
-        this.panel.style.removeProperty(`--${SCRIPT_PREFIX}-action-backdrop-filter`);
-      }
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-bg`, "transparent");
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-radius`, "0px");
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-button-padding`, "0px");
-    }
-
-    syncProfileDialogButtonMetrics(anchorElement) {
+    syncFloatingButtonMetrics(anchorElement) {
       if (!this.panel || !anchorElement) return;
       const rect = anchorElement.getBoundingClientRect?.();
       const rawSize = rect ? Math.max(rect.width, rect.height) : 40;
       const controlSize = Math.round(clampNumber(rawSize, 32, 56, 40));
       const iconSize = Math.round(clampNumber(controlSize * 0.56, 18, 28, 22));
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-size`, `${controlSize}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-size`, `${iconSize}px`);
-      this.panel.style.setProperty(`--${SCRIPT_PREFIX}-action-icon-offset-y`, "0px");
-      this.applyOfficialEmbeddedButtonClass(null);
-      this.applyProfileDialogButtonTheme(anchorElement);
-      this.applyProfileDialogOfficialSkin(anchorElement);
+      this.panel.style.width = `${controlSize}px`;
+      this.panel.style.height = `${controlSize}px`;
+      const icon = this.launcher?.querySelector?.("svg");
+      if (icon) {
+        icon.style.width = `${iconSize}px`;
+        icon.style.height = `${iconSize}px`;
+      }
+      if (this.launcher) this.launcher.className = `${SCRIPT_PREFIX}-launcher`;
     }
 
     getCurrentPageType() {
       return getTikTokPageType(this.window.location, this.document);
-    }
-
-    shouldEmbedPanelInActionBar(pageType = this.getCurrentPageType()) {
-      return pageType === "recommend";
     }
 
     clearPanelFixedPosition() {
@@ -7619,14 +7252,13 @@
       if (this.menu && this.menu.parentElement !== this.document.body) {
         this.document.body.appendChild(this.menu);
       }
-      const reference = this.getActionBarInsertionReference(host);
+      const reference = this.actionBarLocator.getActionBarInsertionReference(host);
       if (this.panel.parentElement !== host || this.panel.nextSibling !== reference) {
         host.insertBefore(this.panel, reference || host.firstChild);
       }
       this.currentPlacementMode = "recommend";
       this.currentActionBarHost = host;
-      this.currentActionBarContext = this.findActionBarPositionContext();
-      this.panel.classList.remove("pending", "profile-dialog");
+      this.panel.classList.remove("pending", "floating");
       this.panel.classList.add("embedded");
       this.clearPanelFixedPosition();
       this.syncEmbeddedButtonMetrics(host);
@@ -7634,15 +7266,15 @@
       return true;
     }
 
-    mountPanelNearProfileBrowseEllipsis(dialog, ellipsis) {
-      if (!this.panel || !dialog || !ellipsis) return false;
+    mountPanelLeftOfButton(anchor, placementMode) {
+      if (!this.panel || !anchor) return false;
       if (this.panel.parentElement !== this.document.body) {
         this.document.body.appendChild(this.panel);
       }
       if (this.menu && this.menu.parentElement !== this.document.body) {
         this.document.body.appendChild(this.menu);
       }
-      const rect = ellipsis.getBoundingClientRect?.();
+      const rect = anchor.getBoundingClientRect?.();
       if (!rect || rect.width <= 0 || rect.height <= 0) return false;
       const size = Math.round(clampNumber(Math.max(rect.width, rect.height), 32, 56, 40));
       const margin = 8;
@@ -7655,16 +7287,15 @@
         : Math.min(Math.max(fallbackLeft, margin), Math.max(margin, viewportWidth - size - margin));
       const top = clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top);
 
-      this.currentPlacementMode = "profile-dialog";
+      this.currentPlacementMode = placementMode;
       this.currentActionBarHost = null;
-      this.currentActionBarContext = { anchor: dialog, anchorRect: this.getElementRect(ellipsis), host: null };
       this.panel.classList.remove("pending", "embedded");
-      this.panel.classList.add("profile-dialog");
+      this.panel.classList.add("floating");
       this.panel.style.left = `${Math.round(left)}px`;
       this.panel.style.top = `${Math.round(top)}px`;
       this.panel.style.right = "auto";
       this.panel.style.bottom = "auto";
-      this.syncProfileDialogButtonMetrics(ellipsis);
+      this.syncFloatingButtonMetrics(anchor);
       this.updatePanelMenuPosition();
       return true;
     }
@@ -7679,62 +7310,132 @@
       }
       this.currentPlacementMode = "inactive";
       this.currentActionBarHost = null;
-      this.currentActionBarContext = null;
       this.clearEmbeddedButtonMetrics();
       this.panel.classList.add("pending");
-      this.panel.classList.remove("embedded", "profile-dialog", "open", "closing");
+      this.panel.classList.remove("embedded", "floating", "open", "closing");
       this.clearPanelMenuPosition();
+    }
+
+    resolvePanelPlacement() {
+      const cinemaRoot = getCinemaModeRoot(this.document);
+      if (cinemaRoot) {
+        const anchor = getVisibleCinemaMoreButton(this.document, cinemaRoot);
+        const rect = this.actionBarLocator.getElementRect(anchor);
+        return {
+          surface: "cinema",
+          mode: !this.openImageOverlay && anchor ? "cinema" : "inactive",
+          anchor,
+          signature: rect
+            ? [
+              "cinema",
+              Math.round(rect.left),
+              Math.round(rect.top),
+              Math.round(rect.width),
+              Math.round(rect.height),
+            ].join(":")
+            : "cinema:no-anchor",
+        };
+      }
+
+      const pageType = this.getCurrentPageType();
+      if (pageType === "profile-dialog") {
+        const dialog = getVisibleProfileBrowseDialog(this.document);
+        const anchor = dialog?.querySelector?.(PROFILE_BROWSE_ELLIPSIS_SELECTOR) || null;
+        const rect = this.actionBarLocator.getElementRect(anchor);
+        return {
+          surface: pageType,
+          mode: anchor ? pageType : "inactive",
+          anchor,
+          signature: rect
+            ? [
+              Math.round(rect.left),
+              Math.round(rect.top),
+              Math.round(rect.width),
+              Math.round(rect.height),
+            ].join(",")
+            : "no-profile-dialog",
+        };
+      }
+      if (pageType === "profile") {
+        const userMore = this.profilePageBulkAdapter?.findUserMoreButton?.()
+          || this.document.querySelector?.('[data-e2e="user-more"]');
+        const rect = this.actionBarLocator.getElementRect(userMore);
+        const parent = userMore?.parentElement?.parentElement || userMore?.parentElement || null;
+        return {
+          surface: pageType,
+          mode: pageType,
+          anchor: userMore,
+          signature: rect
+            ? `profile-more:${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${parent?.children?.length || 0}`
+            : "profile-no-user-more",
+        };
+      }
+      if (pageType !== "recommend" || this.openImageOverlay) {
+        return { surface: pageType, mode: "inactive", signature: "" };
+      }
+
+      const host = this.actionBarLocator.findActionBarHost();
+      const rect = this.actionBarLocator.getElementRect(host);
+      const childCount = this.actionBarLocator.getNativeActionChildren(host).length;
+      return {
+        surface: pageType,
+        mode: host ? "recommend" : "inactive",
+        host,
+        signature: rect
+          ? `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${childCount}`
+          : "no-action-bar",
+      };
     }
 
     mountPanel() {
       if (!this.panel) return;
 
-      const pageType = this.getCurrentPageType();
-
-      if (pageType === "profile-dialog") {
+      const placement = this.resolvePanelPlacement();
+      if (placement.surface === "cinema") {
         this.profilePageBulkAdapter?.suspend?.();
-        this.profileBrowseDialogAdapter?.mount?.();
+        if (
+          placement.mode === "cinema" &&
+          this.mountPanelLeftOfButton(placement.anchor, "cinema")
+        ) return;
+        this.hidePanelForInactivePlacement();
         return;
       }
 
-      if (pageType === "profile") {
-        this.recommendPlacementAdapter?.unmount?.();
-        this.profileBrowseDialogAdapter?.unmount?.();
+      if (placement.surface === "profile-dialog") {
+        this.profilePageBulkAdapter?.suspend?.();
+        if (
+          placement.mode === "profile-dialog" &&
+          this.mountPanelLeftOfButton(placement.anchor, "profile-dialog")
+        ) return;
         this.hidePanelForInactivePlacement();
-        this.profilePageBulkAdapter?.mount?.();
+        return;
+      }
+
+      if (placement.surface === "profile") {
+        this.hidePanelForInactivePlacement();
+        this.profilePageBulkAdapter?.mount?.(placement.anchor);
         return;
       }
 
       this.profilePageBulkAdapter?.unmount?.();
 
-      if (!this.shouldEmbedPanelInActionBar(pageType)) {
-        this.recommendPlacementAdapter?.unmount?.();
-        this.profileBrowseDialogAdapter?.unmount?.();
-        return;
-      }
-
-      if (this.openImageOverlay) {
+      if (placement.mode !== "recommend") {
         this.hidePanelForInactivePlacement();
         return;
       }
 
-      this.recommendPlacementAdapter?.mount?.();
-    }
-
-    updatePanelPosition(_actionContext = null) {
-      if (!this.panel) return;
-      this.mountPanel();
+      if (!this.mountPanelInActionBar(placement.host)) this.hidePanelForInactivePlacement();
     }
 
     getCurrentActionAnchor() {
-      if (this.currentPlacementMode === "profile-dialog") return null;
-      return this.actionBarLocator.getCurrentActionAnchor();
+      return this.currentPlacementMode === "recommend"
+        ? this.actionBarLocator.resolveCurrentActionBarHost()
+        : null;
     }
 
     getCurrentLiveContextText(anchorElement = null) {
       const visibleMedia = this.extractor?.getVisibleMediaElement?.() || null;
       const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
-      const actionContext = this.currentActionBarContext || null;
       const context =
         this.extractor?.getMediaContextElement?.(anchorElement) ||
         this.extractor?.getMediaContextElement?.(visibleMedia) ||
@@ -7743,8 +7444,6 @@
       const actionText = unique([
         anchorElement?.textContent || "",
         this.currentActionBarHost?.textContent || "",
-        actionContext?.anchor?.textContent || "",
-        actionContext?.host?.textContent || "",
       ]).join(" ");
       const contextText = unique([
         context?.textContent || "",
@@ -7760,22 +7459,59 @@
       return isLikelyLiveContextText(actionText, contextText);
     }
 
-    refreshMedia() {
-      this.mountPanel();
-      const anchor = this.getCurrentActionAnchor();
-      this.isCurrentLiveItem = this.isCurrentLiveContext(anchor);
-      if (this.isCurrentLiveItem) {
-        this.currentMedia = null;
-        return null;
-      }
-      const requireContext =
-        this.panel?.classList.contains("embedded") && this.currentPlacementMode !== "profile-dialog";
-      this.currentMedia = this.extractor.getCurrentMedia(
-        this.configStore.get(),
-        anchor,
-        { requireContext },
+    captureMediaContext(anchorElement = null) {
+      const anchor =
+        anchorElement?.isConnected === false
+          ? this.getCurrentActionAnchor()
+          : anchorElement || this.getCurrentActionAnchor();
+      const anchorContext = this.extractor.getMediaContextElement(anchor);
+      const contextMediaElement = anchorContext
+        ? this.extractor.getContextMediaElement(anchorContext)
+        : this.extractor.getVisibleMediaElement();
+      const contextVideo = anchorContext
+        ? this.extractor.getContextVideoElement(anchorContext)
+        : this.extractor.getVisibleVideoElement();
+      const mediaElement = contextMediaElement || contextVideo;
+      const contextUrls = anchorContext
+        ? this.extractor.getMediaUrlsFromScopes([anchorContext])
+        : this.extractor.getVisibleMediaContextUrls(mediaElement);
+      const tag = String(mediaElement?.tagName || "").toLowerCase();
+      const resourceUrls =
+        tag === "video"
+          ? getVideoElementResourceUrls(mediaElement)
+          : tag === "img"
+            ? unique([
+                this.extractor.getImageElementUrl(mediaElement),
+                ...this.extractor
+                  .getVisiblePhotoModeImages(mediaElement)
+                  .map((image) => this.extractor.getImageElementUrl(image)),
+              ])
+            : [];
+      const pageUrl = this.window.location?.href || "";
+      const itemIds = unique(
+        [...contextUrls, pageUrl]
+          .map((url) => getVideoIdFromUrl(url))
+          .filter(Boolean),
       );
-      return this.currentMedia;
+      const contextText = compactMatchText(
+        unique([
+          anchorContext?.textContent || "",
+          mediaElement?.parentElement?.textContent || "",
+          contextVideo?.parentElement?.textContent || "",
+        ]).join(" "),
+      ).slice(0, 180);
+      return {
+        capturedAt: new Date().toISOString(),
+        pageType: this.getCurrentPageType(),
+        pageUrl,
+        primaryItemId: itemIds[0] || "",
+        itemIds,
+        contextUrls: contextUrls.slice(0, 12),
+        resourceUrls: resourceUrls.slice(0, 12),
+        contextText,
+        mediaTag: tag,
+        anchorFound: Boolean(anchor),
+      };
     }
 
     wait(ms) {
@@ -7785,34 +7521,172 @@
       });
     }
 
+    waitForIdentityVersionChange(initialVersion, anchorElement, timeoutMs = IDENTITY_VERSION_WAIT_MS) {
+      const currentVersion = () =>
+        this.currentItemResolver.getDomVersion({ anchorElement });
+      if (currentVersion() !== initialVersion) return Promise.resolve(true);
+      const MutationObserverCtor = this.window?.MutationObserver;
+      if (typeof MutationObserverCtor !== "function") return Promise.resolve(false);
+
+      const context =
+        this.extractor.getMediaContextElement(anchorElement) ||
+        anchorElement?.parentElement ||
+        this.document.body;
+      const rootElement = context?.parentElement || context || this.document.body;
+      if (!rootElement) return Promise.resolve(false);
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let timer = null;
+        const finish = (changed) => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          if (timer) this.window.clearTimeout?.(timer);
+          resolve(Boolean(changed));
+        };
+        const observer = new MutationObserverCtor(() => {
+          if (currentVersion() !== initialVersion) finish(true);
+        });
+        observer.observe(rootElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["href", "id", "src", "class"],
+        });
+        timer = this.window.setTimeout?.(() => finish(false), timeoutMs) || null;
+      });
+    }
+
     async waitForCurrentMedia(options = {}) {
-      const isColdStart =
-        options.attempts === undefined &&
-        options.intervalMs === undefined &&
-        Date.now() - (this.appStartTime || 0) < MEDIA_READY_COLD_START_WINDOW_MS;
-      const attempts = Math.max(
-        1,
-        Number(
-          options.attempts ||
-            (isColdStart ? MEDIA_READY_COLD_START_ATTEMPTS : MEDIA_READY_ATTEMPTS),
-        ),
-      );
-      const intervalMs = Math.max(
-        0,
-        Number(
-          options.intervalMs ??
-            (isColdStart ? MEDIA_READY_COLD_START_INTERVAL_MS : MEDIA_READY_INTERVAL_MS),
-        ),
-      );
-      let media = null;
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        media = this.refreshMedia();
-        if (hasUsableMedia(media)) return media;
-        if (attempt < attempts - 1 && intervalMs > 0) {
-          await this.wait(intervalMs);
+      const initialAnchor =
+        options.anchorElement !== undefined
+          ? options.anchorElement
+          : this.getCurrentActionAnchor();
+      const trace = {
+        startedAt: new Date().toISOString(),
+        identityAttempts: [],
+        finalResult: "failure",
+      };
+
+      const resolveIdentity = (anchor) => {
+        const result = this.currentItemResolver.resolve({
+          anchorElement: anchor,
+          pageType: this.getCurrentPageType(),
+          isLive: this.isCurrentLiveContext(anchor),
+        });
+        trace.identityAttempts.push({
+          ok: Boolean(result?.ok),
+          code: result?.code || "",
+          identity: result?.identity || null,
+          fragmentCount: ensureArray(result?.fragments).length,
+          version: result?.version || "",
+          resolver: this.currentItemResolver.getDebugSnapshot(),
+        });
+        return result;
+      };
+
+      let identityResult = resolveIdentity(initialAnchor);
+      if (
+        !identityResult?.ok &&
+        [
+          "current-item-context-not-ready",
+          "current-item-id-not-found",
+          "current-item-author-not-found",
+        ].includes(identityResult?.code)
+      ) {
+        const changed = await this.waitForIdentityVersionChange(
+          identityResult.version || "",
+          initialAnchor,
+        );
+        trace.versionChanged = changed;
+        if (changed) {
+          const retryAnchor = initialAnchor?.isConnected
+            ? initialAnchor
+            : this.getCurrentActionAnchor();
+          identityResult = resolveIdentity(retryAnchor);
         }
       }
+
+      if (!identityResult?.ok) {
+        this.currentMedia = null;
+        trace.completedAt = new Date().toISOString();
+        trace.finalResult = identityResult?.code || "current-item-id-not-found";
+        this.lastExtractionTrace = trace;
+        return null;
+      }
+
+      const dataResult = this.itemDataProvider.resolve(
+        identityResult,
+        this.configStore.get(),
+      );
+      trace.identity = { ...identityResult.identity };
+      trace.data = {
+        ok: Boolean(dataResult?.ok),
+        source: dataResult?.source || "",
+        code: dataResult?.code || "",
+        details: dataResult?.details || null,
+      };
+      if (!dataResult?.ok) {
+        this.currentMedia = null;
+        trace.completedAt = new Date().toISOString();
+        trace.finalResult = dataResult?.code || "detail-data-missing";
+        this.lastExtractionTrace = trace;
+        return null;
+      }
+
+      const media = normalizeMediaItem(
+        dataResult.item,
+        identityResult.identity.permalink || this.window.location?.href || "",
+        this.configStore.get(),
+      );
+      if (
+        !hasUsableMedia(media) ||
+        String(media.id || "") !== String(identityResult.identity.id)
+      ) {
+        this.currentMedia = null;
+        trace.completedAt = new Date().toISOString();
+        trace.finalResult = hasUsableMedia(media)
+          ? "detail-id-mismatch"
+          : "media-empty";
+        trace.returnedMediaId = media?.id || "";
+        this.lastExtractionTrace = trace;
+        return null;
+      }
+
+      media.extraction = {
+        source: dataResult.source,
+        exactId: true,
+        identityEvidence: identityResult.identity.evidence,
+        selectedSourceType: media.video?.primarySource?.sourceType || "",
+        selectedSourceIndex: media.video?.primarySource?.sourceIndex ?? null,
+        selectedSourceWatermark: media.video?.primarySource?.watermarkStatus || "unknown",
+        selectedSourceGearName: media.video?.primarySource?.gearName || "",
+        selectedSourceQualityType: media.video?.primarySource?.qualityType || "",
+      };
+      this.currentMedia = media;
+      trace.completedAt = new Date().toISOString();
+      trace.finalResult = "success";
+      trace.mediaId = media.id;
+      trace.mediaSource = dataResult.source;
+      this.lastExtractionTrace = trace;
       return media;
+    }
+
+    getLastMediaErrorMessage() {
+      const code = String(this.lastExtractionTrace?.finalResult || "");
+      const messageKey = {
+        "current-item-id-not-found": "current_item_not_found",
+        "current-item-context-not-ready": "current_item_not_found",
+        "current-item-author-not-found": "current_item_author_not_found",
+        "current-item-author-ambiguous": "current_item_author_ambiguous",
+        "current-item-ambiguous": "current_item_ambiguous",
+        "canonical-permalink-missing": "current_item_not_found",
+        "detail-data-missing": "detail_data_missing",
+        "detail-id-mismatch": "detail_id_mismatch",
+        "media-empty": "detail_data_missing",
+      }[code];
+      return messageKey ? this.t(messageKey) : this.t("no_media");
     }
 
     getFilename(media, suffix = "mp4") {
@@ -7835,18 +7709,7 @@
     }
 
     getFilenamePreviewMedia() {
-      const anchor = this.getCurrentActionAnchor();
-      const media =
-        this.currentMedia ||
-        this.extractor.getCurrentMedia(
-          this.configStore.get(),
-          anchor,
-          {
-            requireContext:
-              this.panel?.classList.contains("embedded") && this.currentPlacementMode !== "profile-dialog",
-          },
-        ) ||
-        {};
+      const media = this.currentMedia || {};
       const fallbackAuthor = getAuthorFromUrl(this.window.location?.href || "") || "creator";
       const hashtags = ensureArray(media.hashtags).filter(Boolean);
       return {
@@ -7887,93 +7750,6 @@
       };
     }
 
-    summarizeComputedStyleForDebug(element = null) {
-      if (!element) return null;
-      const style = getComputedStyleSafe(this.window, element);
-      if (!style) return null;
-      const svg = element.querySelector?.("svg") || null;
-      const svgStyle = getComputedStyleSafe(this.window, svg);
-      const path = element.querySelector?.("svg path") || null;
-      const pathStyle = getComputedStyleSafe(this.window, path);
-      return {
-        element: this.summarizeElementForDebug(element),
-        style: {
-          display: getStyleValue(style, ["display"]),
-          position: getStyleValue(style, ["position"]),
-          backgroundColor: getStyleValue(style, ["backgroundColor", "background-color"]),
-          color: getStyleValue(style, ["color"]),
-          opacity: getStyleValue(style, ["opacity"]),
-          border: getStyleValue(style, ["border"]),
-          borderRadius: getStyleValue(style, ["borderRadius", "border-radius"]),
-          boxShadow: getStyleValue(style, ["boxShadow", "box-shadow"]),
-          filter: getStyleValue(style, ["filter"]),
-          backdropFilter: getStyleValue(style, ["backdropFilter", "backdrop-filter", "webkitBackdropFilter", "-webkit-backdrop-filter"]),
-          mixBlendMode: getStyleValue(style, ["mixBlendMode", "mix-blend-mode"]),
-          padding: getStyleValue(style, ["padding"]),
-          margin: getStyleValue(style, ["margin"]),
-          width: getStyleValue(style, ["width"]),
-          height: getStyleValue(style, ["height"]),
-        },
-        cssVars: {
-          "--ui-shape-neutral-3": style.getPropertyValue?.("--ui-shape-neutral-3") || "",
-          "--ui-shape-neutral-4": style.getPropertyValue?.("--ui-shape-neutral-4") || "",
-          "--tux-colorBGInput": style.getPropertyValue?.("--tux-colorBGInput") || "",
-          "--tux-colorTextPrimary": style.getPropertyValue?.("--tux-colorTextPrimary") || "",
-          "--tux-colorBGSecondary": style.getPropertyValue?.("--tux-colorBGSecondary") || "",
-        },
-        svg: svg ? {
-          className: String(svg.className || ""),
-          width: svg.getAttribute?.("width") || "",
-          height: svg.getAttribute?.("height") || "",
-          fillAttr: svg.getAttribute?.("fill") || "",
-          strokeAttr: svg.getAttribute?.("stroke") || "",
-          computed: svgStyle ? {
-            color: getStyleValue(svgStyle, ["color"]),
-            fill: getStyleValue(svgStyle, ["fill"]),
-            stroke: getStyleValue(svgStyle, ["stroke"]),
-            opacity: getStyleValue(svgStyle, ["opacity"]),
-          } : null,
-        } : null,
-        path: path ? {
-          fillAttr: path.getAttribute?.("fill") || "",
-          strokeAttr: path.getAttribute?.("stroke") || "",
-          computed: pathStyle ? {
-            color: getStyleValue(pathStyle, ["color"]),
-            fill: getStyleValue(pathStyle, ["fill"]),
-            stroke: getStyleValue(pathStyle, ["stroke"]),
-            opacity: getStyleValue(pathStyle, ["opacity"]),
-          } : null,
-        } : null,
-      };
-    }
-
-    collectActionStyleDebugSamples(host = null) {
-      const rootElement = host || this.document;
-      const selectors = `${RECOMMEND_ACTION_METRIC_SELECTOR}, button[class*="tux-button__element"]`;
-      const seen = new Set();
-      return Array.from(rootElement?.querySelectorAll?.(selectors) || [])
-        .filter((element) => {
-          if (!element || seen.has(element)) return false;
-          seen.add(element);
-          const rect = element.getBoundingClientRect?.();
-          return rect && rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= (this.window.innerHeight || 0);
-        })
-        .slice(0, 12)
-        .map((element) => this.summarizeComputedStyleForDebug(element));
-    }
-
-    summarizeLocatorRectForDebug(rect = null) {
-      if (!rect) return null;
-      const plain = toPlainRect(rect);
-      if (!plain) return null;
-      return {
-        ...plain,
-        centerX: Number.isFinite(Number(rect.centerX)) ? Number(rect.centerX) : plain.left + plain.width / 2,
-        centerY: Number.isFinite(Number(rect.centerY)) ? Number(rect.centerY) : plain.top + plain.height / 2,
-        element: this.summarizeElementForDebug(rect.element),
-      };
-    }
-
     stringifyDebugInfo(data) {
       const seen = new WeakSet();
       const ElementCtor = this.window?.Element;
@@ -8011,12 +7787,62 @@
         desc: String(media.desc || "").slice(0, 240),
         firstImageUrl: ensureArray(media.images)[0]?.url || "",
         videoQuality: media.video?.quality || "",
+        selectedVideoSource: media.video?.primarySource
+          ? {
+              sourceType: media.video.primarySource.sourceType || "",
+              sourceIndex: media.video.primarySource.sourceIndex ?? null,
+              gearName: media.video.primarySource.gearName || "",
+              qualityType: media.video.primarySource.qualityType || "",
+              url: media.video.primarySource.url || "",
+            }
+          : null,
+        extraction: media.extraction ? { ...media.extraction } : null,
       };
     }
 
-    collectFullDebugInfo() {
+    summarizeVideoPlaybackForDebug(video = null) {
+      if (!video) return null;
+      const mediaError = video.error || null;
+      const errorNames = {
+        1: "MEDIA_ERR_ABORTED",
+        2: "MEDIA_ERR_NETWORK",
+        3: "MEDIA_ERR_DECODE",
+        4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
+      };
+      const canPlayType = typeof video.canPlayType === "function"
+        ? (value) => video.canPlayType(value) || ""
+        : () => "";
       return {
-        version: "debug-full-v3",
+        currentSrc: video.currentSrc || "",
+        src: video.src || video.getAttribute?.("src") || "",
+        poster: video.poster || video.getAttribute?.("poster") || "",
+        readyState: Number(video.readyState || 0),
+        networkState: Number(video.networkState || 0),
+        paused: Boolean(video.paused),
+        ended: Boolean(video.ended),
+        currentTime: Number.isFinite(Number(video.currentTime)) ? Number(video.currentTime) : null,
+        duration: Number.isFinite(Number(video.duration)) ? Number(video.duration) : null,
+        videoWidth: Number(video.videoWidth || 0),
+        videoHeight: Number(video.videoHeight || 0),
+        error: mediaError
+          ? {
+              code: Number(mediaError.code || 0),
+              name: errorNames[Number(mediaError.code || 0)] || "MEDIA_ERR_UNKNOWN",
+              message: mediaError.message || "",
+            }
+          : null,
+        codecSupport: {
+          hvc1: canPlayType('video/mp4; codecs="hvc1"'),
+          hev1: canPlayType('video/mp4; codecs="hev1"'),
+          avc1: canPlayType('video/mp4; codecs="avc1.42E01E"'),
+        },
+      };
+    }
+
+    collectDebugInfo() {
+      const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
+      return {
+        version: "debug-full-v19",
         capturedAt: new Date().toISOString(),
         url: this.window.location?.href || "",
         pageType: this.getCurrentPageType(),
@@ -8031,137 +7857,115 @@
           open: Boolean(this.panel?.classList.contains("open")),
           pending: Boolean(this.panel?.classList.contains("pending")),
           embedded: Boolean(this.panel?.classList.contains("embedded")),
-          profileDialog: Boolean(this.panel?.classList.contains("profile-dialog")),
+          floating: Boolean(this.panel?.classList.contains("floating")),
           rect: this.summarizeElementForDebug(this.panel)?.rect || null,
         },
         selectedMedia: this.summarizeMediaForDebug(this.currentMedia),
         actionAnchor: this.summarizeElementForDebug(this.getCurrentActionAnchor()),
+        mediaContext: this.captureMediaContext(this.getCurrentActionAnchor()),
+        videoPlayback: this.summarizeVideoPlaybackForDebug(visibleVideo),
+        extraction: this.lastExtractionTrace,
+        identityResolver: this.currentItemResolver?.getDebugSnapshot?.() || null,
+        itemDataProvider: this.itemDataProvider?.getDebugSnapshot?.() || null,
         profileBulk: this.profilePageBulkAdapter?.getDebugSnapshot?.() || null,
+        profileBulkRun: this.lastProfileBulkRun,
+        profileBulkResolve: this.lastProfileBulkResolve,
       };
     }
 
-    collectDebugInfo() {
-      return this.collectFullDebugInfo();
-    }
-
-    copyTextToClipboard(value = "", successMessage = "") {
-      const text = String(value || "");
-      if (!text) return;
-      try {
-        const result = this.window.navigator.clipboard?.writeText(text);
-        if (result?.catch) result.catch(() => {});
-        this.toast(successMessage || this.t("copied"));
-      } catch (_err) {
-        this.toast(text);
-      }
-    }
-
-    copyDebugInfo(kind = "media") {
+    copyDebugInfo() {
       let json = "";
       try {
-        json = this.stringifyDebugInfo(this.collectDebugInfo(kind));
+        json = this.stringifyDebugInfo(this.collectDebugInfo());
         const writeText = this.window.navigator.clipboard?.writeText;
         if (typeof writeText !== "function") {
-          this.toast(json);
+          this.notifications.toast(json);
           return;
         }
         const result = writeText.call(this.window.navigator.clipboard, json);
         if (result?.catch) {
           result
-            .then(() => this.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") }))
-            .catch(() => this.toast(json));
+            .then(() => this.notifications.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") }))
+            .catch(() => this.notifications.toast(json));
           return;
         }
-        this.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") });
+        this.notifications.toast(this.t("debug_info_copied"), { detail: this.t("debug_info_copied_detail") });
       } catch (err) {
         const message = err?.message ? String(err.message) : String(err || "");
-        this.toast(`${this.t("debug_info_copied")}: ${message}`);
+        this.notifications.toast(`${this.t("debug_info_copied")}: ${message}`);
       }
     }
 
-
-    async downloadVideo(anchorElement = null) {
+    async downloadVideo() {
       if (this.isDownloading) {
-        this.nudgeDownloadStatus();
+        this.notifications.nudgeDownloadStatus();
         return;
       }
-      this.captureToastAnchor(anchorElement || this.downloadButtonEl || this.launcher);
       this.isDownloading = true;
-      this.showDownloadPreparing();
+      this.downloadCancelRequested = false;
+      this.notifications.showDownloadPreparing();
 
       try {
-        const media = await this.waitForCurrentMedia();
+        const media = await this.waitForCurrentMedia({
+          anchorElement: this.getCurrentActionAnchor(),
+        });
         const images = ensureArray(media?.images).filter((image) => image?.url);
-        if (!media?.video?.primaryUrl && images.length) {
-          let lastFilename = "";
-          let successCount = 0;
-          const failures = [];
-          for (const [index, image] of images.entries()) {
-            const filename = this.getImageFilename(media, image, index);
-            lastFilename = filename;
-            this.showAlbumProgress(index + 1, images.length, filename);
-            try {
-              await this.downloader.downloadUrl(
-                unique([image.url, ...ensureArray(image.fallbackUrls)]),
-                filename,
-              );
-              successCount += 1;
-            } catch (err) {
-              failures.push({ index: index + 1, filename, message: err?.message || String(err) });
-            }
-          }
-          if (!failures.length) {
-            this.showDownloadSuccess(lastFilename);
-          } else if (successCount > 0) {
-            this.showDownloadError(
-              `${this.t("download_album")}: ${successCount}/${images.length}, ${this.t("download_failed")}: ${failures.length}`,
-            );
-          } else {
-            this.showDownloadError(failures[0]?.message || this.t("download_failed"));
-          }
+        if (!media?.video?.primaryUrl && !images.length) {
+          this.notifications.showDownloadError(this.getLastMediaErrorMessage());
           return;
         }
-        if (!media?.video?.primaryUrl) {
-          this.showDownloadError(this.t("no_media"));
-          return;
-        }
-        const filename = this.getFilename(media, media.video.format || "mp4");
-        const urls = [media.video.primaryUrl, ...media.video.fallbackUrls];
-        this.showVideoPreparing(filename);
-        try {
-          await this.downloader.downloadUrl(urls, filename);
-          this.showDownloadSuccess(filename);
-        } catch (err) {
-          this.showDownloadError(err?.message || String(err));
+        const result = await this.downloadResolvedMedia(media);
+        const successCount = ensureArray(result?.successfulAssets).length;
+        const failureCount = ensureArray(result?.failedAssets).length;
+        if (result?.status === "cancelled") {
+          this.notifications.setDownloadStatus({
+            type: "error",
+            title: this.t("download_cancelled"),
+            detail: images.length
+              ? `${this.t("download_album")}: ${successCount}/${images.length}`
+              : "",
+          });
+        } else if (result?.status === "success") {
+          this.notifications.showDownloadSuccess(result.filename || "");
+        } else if (result?.status === "partial") {
+          this.notifications.showDownloadError(
+            `${this.t("download_album")}: ${successCount}/${images.length}, ${this.t("download_failed")}: ${failureCount}`,
+          );
+        } else {
+          this.notifications.showDownloadError(result?.message || this.t("download_failed"));
         }
       } finally {
         this.isDownloading = false;
+        this.downloadCancelRequested = false;
       }
     }
 
-    async downloadAsset(url, filename, anchorElement = null) {
+    async downloadAsset(url, filename, kind = "image") {
       if (this.isDownloading) {
-        this.nudgeDownloadStatus();
+        this.notifications.nudgeDownloadStatus();
         return;
       }
-      this.captureToastAnchor(anchorElement || this.downloadButtonEl || this.launcher);
       this.isDownloading = true;
+      this.downloadCancelRequested = false;
 
       try {
         const urls = unique(ensureArray(url));
         if (!urls.length) {
-          this.showDownloadError(this.t("asset_empty"));
+          this.notifications.showDownloadError(this.t("asset_empty"));
           return;
         }
-        this.showImageDownloading(filename);
+        if (kind === "video") this.notifications.showVideoDownloading(filename);
+        else if (kind === "music") this.notifications.showMusicDownloading(filename);
+        else this.notifications.showImageDownloading(filename);
         try {
           await this.downloader.downloadUrl(urls, filename);
-          this.showDownloadSuccess(filename);
+          this.notifications.showDownloadSuccess(filename);
         } catch (err) {
-          this.showDownloadError(err?.message || String(err));
+          this.notifications.showDownloadError(err?.message || String(err));
         }
       } finally {
         this.isDownloading = false;
+        this.downloadCancelRequested = false;
       }
     }
 
@@ -8178,31 +7982,11 @@
     }
 
     async downloadOverlayImage() {
-      if (this.isDownloading) {
-        this.nudgeDownloadStatus();
-        return;
-      }
-      this.captureToastAnchor(this.imageDownloadButton || this.downloadButtonEl || this.launcher);
-      this.isDownloading = true;
-
-      try {
-        const overlay = this.openImageOverlay;
-        if (!overlay?.imageUrl) {
-          this.showDownloadError(this.t("asset_empty"));
-          return;
-        }
-        const media = this.currentMedia || {};
-        const filename = this.getOverlayImageFilename(media, overlay.imageUrl);
-        this.showImageDownloading(filename);
-        try {
-          await this.downloader.downloadUrl(overlay.imageUrl, filename);
-          this.showDownloadSuccess(filename);
-        } catch (err) {
-          this.showDownloadError(err?.message || String(err));
-        }
-      } finally {
-        this.isDownloading = false;
-      }
+      const imageUrl = this.openImageOverlay?.imageUrl || "";
+      const filename = imageUrl
+        ? this.getOverlayImageFilename(this.currentMedia || {}, imageUrl)
+        : "";
+      return this.downloadAsset(imageUrl, filename, "image");
     }
 
     getFrameFilename(media = {}) {
@@ -8242,7 +8026,7 @@
           "Canvas export failed. The video may be blocked by browser cross-origin restrictions.",
         );
       }
-      const media = this.currentMedia || this.refreshMedia() || {};
+      const media = this.currentMedia || {};
       return {
         blob,
         url: this.window.URL.createObjectURL(blob),
@@ -8270,6 +8054,7 @@
         const frame = await this.captureCurrentFrame();
         const modal = this.createModal(this.t("frame_title"), "", {
           closeOnBackdrop: false,
+          onClose: () => this.window.URL.revokeObjectURL?.(frame.url),
         });
         modal.classList.add(`${SCRIPT_PREFIX}-frame-modal`);
         const main = modal.querySelector("main");
@@ -8287,18 +8072,18 @@
           this.actionButton(this.t("copy_frame"), async () => {
             try {
               await this.copyFrameToClipboard(frame);
-              this.toast(this.t("frame_copied"));
+              this.notifications.toast(this.t("frame_copied"));
             } catch (err) {
-              this.toast(`${this.t("frame_copy_failed")}: ${err?.message || err}`);
+              this.notifications.toast(`${this.t("frame_copy_failed")}: ${err?.message || err}`);
             }
           }, "primary"),
           this.actionButton(this.t("save_frame"), () => {
             this.downloader.downloadBlob(frame.blob, frame.filename);
-          }),
+          }, "secondary"),
         );
         main.append(preview, meta, actions);
       } catch (err) {
-        this.toast(`${this.t("frame_failed")}: ${err?.message || err}`);
+        this.notifications.toast(`${this.t("frame_failed")}: ${err?.message || err}`);
       } finally {
         this.isCapturingFrame = false;
       }
@@ -8355,33 +8140,16 @@
       return musicSection;
     }
 
-    async openDetails() {
-      const media = await this.waitForCurrentMedia();
-      if (!hasUsableMedia(media)) {
-        this.toast(this.t("no_media"));
-        return;
-      }
-      const language = resolveLanguage(this.configStore.get(), this.window.navigator);
-      const details = buildDetailsModel(media, this.configStore.get(), language);
-      const modal = this.createModal(this.t("details_title"));
-      modal.classList.add(`${SCRIPT_PREFIX}-details-modal`);
-      modal.querySelector("header")?.remove();
-      const close = createElement(this.document, "button", `${SCRIPT_PREFIX}-details-close`, "x");
-      close.type = "button";
-      close.title = this.t("close");
-      close.addEventListener("click", () => modal.parentElement.remove());
-      modal.appendChild(close);
-      const main = modal.querySelector("main");
-
+    buildDetailModalHelpers() {
       const copyText = (value) => {
         const text = String(value || "");
         if (!text) return;
         try {
           const result = this.window.navigator.clipboard?.writeText(text);
           if (result?.catch) result.catch(() => {});
-          this.toast(this.t("copied"));
+          this.notifications.toast(this.t("copied"));
         } catch (_err) {
-          this.toast(text);
+          this.notifications.toast(text);
         }
       };
 
@@ -8415,8 +8183,8 @@
         return actions;
       };
 
-      const makeDownloadPill = (urls, filename, label = this.t("download")) => {
-        const button = makePillButton(label, () => this.downloadAsset(urls, filename, button));
+      const makeDownloadPill = (urls, filename, label = this.t("download"), kind = "image") => {
+        const button = makePillButton(label, () => this.downloadAsset(urls, filename, kind));
         button.removeAttribute?.("title");
         return button;
       };
@@ -8488,27 +8256,23 @@
         return value ? this.t("yes") : this.t("no");
       };
 
-      const tabs = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-tabs`);
-      const body = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-body`);
-      const panels = new Map();
-      const activateTab = (id) => {
-        tabs.querySelectorAll(`.${SCRIPT_PREFIX}-detail-tab`).forEach((button) => {
-          button.classList.toggle("active", button.dataset.tab === id);
-        });
-        panels.forEach((panel, panelId) => {
-          panel.hidden = panelId !== id;
-        });
+      return {
+        copyText,
+        makeFieldset,
+        makePillButton,
+        makePillLink,
+        makeActions,
+        makeDownloadPill,
+        makeCopyPill,
+        appendValue,
+        makeRows,
+        makeTable,
+        formatBool,
       };
+    }
 
-      details.tabs.forEach((tab, index) => {
-        const button = createElement(this.document, "button", `${SCRIPT_PREFIX}-detail-tab`, tab.label);
-        button.type = "button";
-        button.dataset.tab = tab.id;
-        button.addEventListener("click", () => activateTab(tab.id));
-        if (index === 0) button.classList.add("active");
-        tabs.appendChild(button);
-      });
-
+    renderDetailsMediaPanel(details, helpers) {
+      const { makeFieldset, makeRows, makeActions, makePillLink, makeDownloadPill, makeCopyPill, makeTable } = helpers;
       const mediaPanel = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-panel`);
       const coverSection = makeFieldset(this.t("video_cover"));
       if (details.cover.url) {
@@ -8517,7 +8281,7 @@
         const image = createElement(this.document, "img", `${SCRIPT_PREFIX}-detail-cover`);
         image.src = details.cover.url;
         image.alt = this.t("cover");
-        const info = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-cover-info`);
+        const info = createElement(this.document, "div");
         const coverResolution = createElement(
           this.document,
           "strong",
@@ -8528,7 +8292,7 @@
           makeRows([{ label: this.t("resolution"), value: coverResolution }]),
           makeActions(
             makePillLink(this.t("new_tab_open"), details.cover.url),
-            makeDownloadPill(details.cover.url, details.cover.filename, this.t("download_cover")),
+            makeDownloadPill(details.cover.url, details.cover.filename, this.t("download_cover"), "image"),
           ),
         );
         coverRow.append(image, info);
@@ -8547,7 +8311,7 @@
           const actions = makeActions(
             makePillLink(this.t("open"), source.url),
             makeCopyPill(source.url),
-            makeDownloadPill(source.urls, source.filename, this.t("download")),
+            makeDownloadPill(source.urls, source.filename, this.t("download"), "video"),
           );
           return [
             ...details.videoSourceColumns.map((column) => source[column.key] || "-"),
@@ -8565,20 +8329,24 @@
             const actions = makeActions(
               makePillLink(this.t("open"), image.url),
               makeCopyPill(image.url),
-              makeDownloadPill(image.urls, image.filename, this.t("download")),
+              makeDownloadPill(image.urls, image.filename, this.t("download"), "image"),
             );
             return [String(image.index), image.resolution, actions];
           }),
         ),
       );
 
-      const musicSection = this.renderMusicSection(details, { makeFieldset, makeRows });
+      const musicSection = this.renderMusicSection(details, helpers);
       const mediaGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-media-grid`);
       mediaGrid.append(coverSection, musicSection);
       mediaPanel.appendChild(mediaGrid);
       if (details.showVideoSources) mediaPanel.appendChild(videoSection);
       if (details.isImagePost) mediaPanel.appendChild(imageSection);
+      return mediaPanel;
+    }
 
+    renderDetailsAuthorPanel(details, helpers) {
+      const { makeFieldset, makeRows, makeActions, makePillLink } = helpers;
       const authorPanel = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-panel`);
       authorPanel.hidden = true;
       const authorSection = makeFieldset(this.t("author_info"));
@@ -8608,7 +8376,11 @@
         ]),
       );
       authorPanel.appendChild(authorSection);
+      return authorPanel;
+    }
 
+    renderDetailsPostPanel(details, helpers) {
+      const { makeFieldset, makeRows, formatBool } = helpers;
       const postPanel = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-panel`);
       postPanel.hidden = true;
       const descSection = makeFieldset(this.t("description"));
@@ -8648,7 +8420,11 @@
         );
         postPanel.appendChild(permissionsSection);
       }
+      return postPanel;
+    }
 
+    renderDetailsJsonPanel(details, media, helpers) {
+      const { makeFieldset, makePillButton, copyText } = helpers;
       const jsonPanel = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-panel`);
       jsonPanel.hidden = true;
       const jsonSection = makeFieldset(this.t("raw_json"));
@@ -8664,147 +8440,387 @@
         }),
         makePillButton(this.t("console_log"), () => {
           this.window.console?.log?.("[TikTok Helper]", media.raw || media);
-          this.toast(this.t("json_logged"));
+          this.notifications.toast(this.t("json_logged"));
         }),
         makePillButton(this.t("copy_json"), () => copyText(details.rawJson)),
       );
       jsonSection.append(jsonActions, pre);
       jsonPanel.appendChild(jsonSection);
+      return jsonPanel;
+    }
+
+    async openDetails() {
+      const media = await this.waitForCurrentMedia({
+        anchorElement: this.getCurrentActionAnchor(),
+      });
+      if (!hasUsableMedia(media)) {
+        this.notifications.toast(this.getLastMediaErrorMessage());
+        return;
+      }
+      const language = resolveLanguage(this.configStore.get(), this.window.navigator);
+      const details = buildDetailsModel(media, this.configStore.get(), language);
+      const modal = this.createModal(this.t("details_title"), "", { showHeader: false });
+      modal.classList.add(`${SCRIPT_PREFIX}-details-modal`);
+      const close = createTuxIconButton(
+        this.document,
+        this.t("close"),
+        () => modal.close?.(),
+        "close",
+        `${SCRIPT_PREFIX}-details-close`,
+      );
+      const main = modal.querySelector("main");
+
+      const helpers = this.buildDetailModalHelpers();
+
+      const tabs = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-tabs`);
+      const header = createElement(this.document, "div", `${SCRIPT_PREFIX}-details-header`);
+      const body = createElement(this.document, "div", `${SCRIPT_PREFIX}-detail-body`);
+      const panels = new Map();
+      const activateTab = (id) => {
+        tabs.querySelectorAll(`.${SCRIPT_PREFIX}-detail-tab`).forEach((button) => {
+          button.classList.toggle("active", button.dataset.tab === id);
+        });
+        panels.forEach((panel, panelId) => {
+          panel.hidden = panelId !== id;
+        });
+      };
+
+      details.tabs.forEach((tab, index) => {
+        const button = createElement(this.document, "button", `${SCRIPT_PREFIX}-detail-tab`, tab.label);
+        button.type = "button";
+        button.dataset.tab = tab.id;
+        button.addEventListener("click", () => activateTab(tab.id));
+        if (index === 0) button.classList.add("active");
+        tabs.appendChild(button);
+      });
+
+      const mediaPanel = this.renderDetailsMediaPanel(details, helpers);
+      const authorPanel = this.renderDetailsAuthorPanel(details, helpers);
+      const postPanel = this.renderDetailsPostPanel(details, helpers);
+      const jsonPanel = this.renderDetailsJsonPanel(details, media, helpers);
 
       panels.set("media", mediaPanel);
       panels.set("author", authorPanel);
       panels.set("post", postPanel);
       panels.set("json", jsonPanel);
       body.append(mediaPanel, authorPanel, postPanel, jsonPanel);
-      main.append(tabs, body);
+      header.append(tabs, close);
+      main.append(header, body);
     }
-
 
     getProfileBulkTaskDelayMs() {
       return 1500 + Math.floor(Math.random() * 501);
     }
 
-    formatTemplateMessage(key, values = {}) {
-      let text = this.t(key);
-      for (const [name, value] of Object.entries(values)) {
-        text = text.replaceAll("${" + name + "}", String(value));
-      }
-      return text;
-    }
-
-    formatBulkItemCount(count) {
-      return String(count);
-    }
-
-    formatBulkProgressCount(index, total) {
-      return `${index}/${total}`;
-    }
-
     showBulkDownloadProgress(index, total, detail = "") {
-      this.setDownloadStatus({
+      this.notifications.setDownloadStatus({
         type: "busy",
-        title: `${this.t("bulk_downloading")} ${this.formatBulkProgressCount(index, total)}`,
+        title: `${this.t("bulk_downloading")} ${index}/${total}`,
         detail,
-        spinner: false,
       });
     }
 
-    resolveProfileBulkMedia(item = {}) {
-      const config = this.configStore.get();
-      const pageUrl = item.pageUrl || item.href || "";
-      const dataCandidates = [
-        parsePageDataFromDocument(this.document),
-        ...getWindowDataCandidates(this.window),
-      ].filter(Boolean);
-      for (const data of dataCandidates) {
-        const media = extractMediaFromPageData(data, pageUrl, config);
-        if (hasUsableMedia(media)) return media;
+    async resolveProfileBulkMedia(item = {}) {
+      const rawUrl = item?.pageUrl || item?.href || "";
+      const identity = parseTikTokItemIdentityFromUrl(rawUrl);
+      const trace = {
+        capturedAt: new Date().toISOString(),
+        itemId: item?.id || "",
+        rawUrl,
+        identity: identity ? { ...identity, evidence: "profile-card-link" } : null,
+      };
+      if (!identity) {
+        this.lastProfileBulkResolve = {
+          ...trace,
+          result: "failure",
+          errorCode: "canonical-permalink-missing",
+        };
+        return null;
       }
-      const cached = this.runtimeCache?.getMedia?.(pageUrl, config);
-      if (hasUsableMedia(cached)) return cached;
-      return null;
+      const dataResult = this.itemDataProvider.resolve(
+        {
+          identity: { ...identity, evidence: "profile-card-link" },
+          fragments: item?.exactItem ? [item.exactItem] : [],
+        },
+        this.configStore.get(),
+      );
+      if (!dataResult?.ok) {
+        this.lastProfileBulkResolve = {
+          ...trace,
+          result: "failure",
+          errorCode: dataResult?.code || "detail-data-missing",
+          details: dataResult?.details || null,
+          provider: this.itemDataProvider.getDebugSnapshot(),
+        };
+        return null;
+      }
+      const media = normalizeMediaItem(
+        dataResult.item,
+        identity.permalink,
+        this.configStore.get(),
+      );
+      if (!hasUsableMedia(media) || String(media.id || "") !== identity.id) {
+        this.lastProfileBulkResolve = {
+          ...trace,
+          result: "failure",
+          errorCode: hasUsableMedia(media) ? "detail-id-mismatch" : "media-empty",
+          returnedMediaId: media?.id || "",
+        };
+        return null;
+      }
+      media.extraction = {
+        source: dataResult.source,
+        exactId: true,
+        identityEvidence: "profile-card-link",
+      };
+      this.lastProfileBulkResolve = {
+        ...trace,
+        result: "success",
+        source: dataResult.source,
+        mediaId: media.id,
+      };
+      return media;
     }
 
-    async downloadResolvedMedia(media, item = {}, context = {}) {
-      const images = ensureArray(media?.images).filter((image) => image?.url);
-      if (!media?.video?.primaryUrl && images.length) {
-        let successCount = 0;
-        const failures = [];
-        for (const [index, image] of images.entries()) {
-          const filename = this.getImageFilename(media, image, index);
-          this.showBulkDownloadProgress(
-            context.index || 1,
-            context.total || 1,
-            `${this.t("bulk_type_album")} ${index + 1}/${images.length} · ${filename}`,
+    async downloadResolvedMedia(media, context = {}) {
+      const bulk = context.bulk === true;
+      const imageEntries = ensureArray(media?.images)
+        .filter((image) => image?.url)
+        .map((image, index) => ({
+          image,
+          originalIndex: Math.max(0, Number(image.index || index + 1) - 1),
+        }));
+      if (!media?.video?.primaryUrl && imageEntries.length) {
+        const successfulAssets = [];
+        const failedAssets = [];
+        for (let index = 0; index < imageEntries.length; index += 1) {
+          const entry = imageEntries[index];
+          const image = entry.image;
+          const originalIndex = entry.originalIndex;
+          const filename = this.getImageFilename(
+            media,
+            image,
+            originalIndex,
           );
+          if (this.downloadCancelRequested) {
+            return {
+              status: "cancelled",
+              successfulAssets,
+              failedAssets,
+              message: this.t(bulk ? "bulk_download_cancelled" : "download_cancelled"),
+            };
+          }
+          if (bulk) {
+            this.showBulkDownloadProgress(
+              context.index || 1,
+              context.total || 1,
+              `${this.t("bulk_type_album")} ${index + 1}/${imageEntries.length} · ${filename}`,
+            );
+          } else {
+            this.notifications.showAlbumProgress(index + 1, imageEntries.length, filename);
+          }
           try {
             await this.downloader.downloadUrl(
               unique([image.url, ...ensureArray(image.fallbackUrls)]),
               filename,
             );
-            successCount += 1;
+            successfulAssets.push({
+              index: originalIndex + 1,
+              url: image.url,
+              filename,
+            });
           } catch (err) {
-            failures.push(err?.message || String(err));
+            failedAssets.push({
+              index: originalIndex + 1,
+              filename,
+              message: err?.message || String(err),
+              stage: "download-image",
+            });
           }
-          if (index < images.length - 1) await this.wait(500);
+          if (
+            bulk &&
+            index < imageEntries.length - 1 &&
+            !this.downloadCancelRequested
+          ) {
+            await this.wait(500);
+          }
         }
-        if (successCount > 0) return { ok: true, filename: `${successCount}/${images.length}` };
-        return { ok: false, message: failures[0] || this.t("download_failed") };
+        if (!failedAssets.length) {
+          return {
+            status: "success",
+            successfulAssets,
+            failedAssets: [],
+            filename: successfulAssets.at(-1)?.filename || "",
+          };
+        }
+        return {
+          status: successfulAssets.length ? "partial" : "failed",
+          successfulAssets,
+          failedAssets,
+          message: failedAssets[0]?.message || this.t("download_failed"),
+        };
       }
       if (!media?.video?.primaryUrl) {
-        return { ok: false, message: this.t("no_media") };
+        return {
+          status: "failed",
+          successfulAssets: [],
+          failedAssets: [],
+          message: this.t("no_media"),
+        };
       }
-      const filename = this.getFilename(media, media.video.format || "mp4");
-      await this.downloader.downloadUrl([media.video.primaryUrl, ...ensureArray(media.video.fallbackUrls)], filename);
-      return { ok: true, filename };
+      if (this.downloadCancelRequested) {
+        return {
+          status: "cancelled",
+          successfulAssets: [],
+          failedAssets: [],
+          message: this.t(bulk ? "bulk_download_cancelled" : "download_cancelled"),
+        };
+      }
+      const filename = this.getFilename(
+        media,
+        media.video.format || "mp4",
+      );
+      if (!bulk) this.notifications.showVideoPreparing(filename);
+      try {
+        await this.downloader.downloadUrl(
+          [
+            media.video.primaryUrl,
+            ...ensureArray(media.video.fallbackUrls),
+          ],
+          filename,
+        );
+        return {
+          status: "success",
+          successfulAssets: [{ filename, url: media.video.primaryUrl }],
+          failedAssets: [],
+          filename,
+        };
+      } catch (err) {
+        const message = err?.message || String(err);
+        return {
+          status: "failed",
+          successfulAssets: [],
+          failedAssets: [{ filename, url: media.video.primaryUrl, message }],
+          message,
+        };
+      }
     }
 
     async downloadProfileBulkItems(items = []) {
       const queue = ensureArray(items).filter(Boolean);
       if (!queue.length) {
-        this.toast(this.t("bulk_no_selection"));
+        this.notifications.toast(this.t("bulk_no_selection"));
         return;
       }
       if (this.isDownloading) {
-        this.nudgeDownloadStatus();
+        this.notifications.nudgeDownloadStatus();
         return;
       }
       this.isDownloading = true;
-      const failures = [];
+      this.downloadCancelRequested = false;
+      queue.forEach((item) => {
+        item.bulkDownloadResult = { status: "pending" };
+      });
       let success = 0;
+      let failed = 0;
+      let cancelled = false;
+      const runTrace = {
+        startedAt: new Date().toISOString(),
+        queueSize: queue.length,
+        results: [],
+      };
       try {
         for (let index = 0; index < queue.length; index += 1) {
           const item = queue[index];
+          if (this.downloadCancelRequested) {
+            cancelled = true;
+            break;
+          }
           if (index > 0) await this.wait(this.getProfileBulkTaskDelayMs());
-          this.showBulkDownloadProgress(index + 1, queue.length, item.desc || item.pageUrl || item.id || "");
+          if (this.downloadCancelRequested) {
+            cancelled = true;
+            break;
+          }
+          this.showBulkDownloadProgress(
+            index + 1,
+            queue.length,
+            item.desc || item.pageUrl || item.id || "",
+          );
           try {
-            const media = this.resolveProfileBulkMedia(item);
+            const media = await this.resolveProfileBulkMedia(item);
             if (!hasUsableMedia(media)) {
-              failures.push({ item, message: this.t("no_media") });
+              failed += 1;
+              item.bulkDownloadResult = { status: "failed" };
+              runTrace.results.push({
+                itemId: item.id || "",
+                status: "failed",
+                message: this.t("no_media"),
+                errorCode: this.lastProfileBulkResolve?.errorCode || "media-empty",
+              });
               continue;
             }
-            const result = await this.downloadResolvedMedia(media, item, {
+            const result = await this.downloadResolvedMedia(media, {
+              bulk: true,
               index: index + 1,
               total: queue.length,
             });
-            if (result?.ok) success += 1;
-            else failures.push({ item, message: result?.message || this.t("download_failed") });
+            const status = result?.status || "failed";
+            const successfulAssetCount = ensureArray(result?.successfulAssets).length;
+            const failedAssetCount = ensureArray(result?.failedAssets).length;
+            item.bulkDownloadResult = {
+              status,
+              successfulAssetCount,
+              totalAssetCount: successfulAssetCount + failedAssetCount,
+            };
+            runTrace.results.push({
+              itemId: item.id || media.id || "",
+              mediaSource: media.extraction?.source || "",
+              status,
+              successfulAssetCount,
+              failedAssetCount,
+              message: result?.message || "",
+            });
+            if (status === "success") {
+              success += 1;
+            } else {
+              if (status === "cancelled") cancelled = true;
+              else failed += 1;
+              if (status === "cancelled") {
+                break;
+              }
+            }
           } catch (err) {
-            failures.push({ item, message: err?.message || String(err) });
+            failed += 1;
+            item.bulkDownloadResult = { status: "failed" };
+            runTrace.results.push({
+              itemId: item.id || "",
+              status: "failed",
+              message: err?.message || String(err),
+            });
           }
         }
-        const detail = this.formatTemplateMessage("bulk_download_result", {
-          success,
-          failed: failures.length,
-        });
-        if (failures.length) {
-          this.setDownloadStatus({
-            type: success > 0 ? "error" : "error",
+        runTrace.completedAt = new Date().toISOString();
+        runTrace.success = success;
+        runTrace.failed = failed;
+        runTrace.cancelled = cancelled;
+        this.lastProfileBulkRun = runTrace;
+        const detail = this.t("bulk_download_result_detailed")
+          .replaceAll("${success}", String(success))
+          .replaceAll("${failed}", String(failed));
+        if (cancelled) {
+          this.notifications.setDownloadStatus({
+            type: "error",
+            title: this.t("bulk_download_cancelled"),
+            detail,
+          });
+        } else if (failed) {
+          this.notifications.setDownloadStatus({
+            type: "error",
             title: this.t("bulk_download_done"),
             detail,
           });
         } else {
-          this.setDownloadStatus({
+          this.notifications.setDownloadStatus({
             type: "success",
             title: this.t("bulk_download_done"),
             detail,
@@ -8813,33 +8829,26 @@
         }
       } finally {
         this.isDownloading = false;
+        this.downloadCancelRequested = false;
+        this.profilePageBulkAdapter?.refreshCheckboxStates?.();
       }
+      if (cancelled || failed) this.profilePageBulkAdapter?.openConfirmModal?.();
     }
 
-    openSettings() {
-      const config = this.configStore.get();
-      const modal = this.createModal(this.t("settings"), "", {
-        closeOnBackdrop: false,
-      });
-      modal.classList.add(`${SCRIPT_PREFIX}-settings-modal`);
-      modal.querySelector("header")?.remove();
-      const main = modal.querySelector("main");
-      const closeModal = () => modal.parentElement.remove();
+    requestDownloadCancel() {
+      if (!this.isDownloading) return false;
+      this.downloadCancelRequested = true;
+      return true;
+    }
 
-      const header = createElement(this.document, "header", `${SCRIPT_PREFIX}-settings-header`);
-      const settingsTitle = createElement(this.document, "h2", `${SCRIPT_PREFIX}-settings-title`, this.t("settings"));
-      header.appendChild(settingsTitle);
-      const headerActions = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-header-actions`);
-      header.appendChild(headerActions);
-      modal.insertBefore(header, main);
+    buildSettingsFieldset(title, ...children) {
+      const fieldset = createElement(this.document, "fieldset", `${SCRIPT_PREFIX}-detail-fieldset ${SCRIPT_PREFIX}-settings-fieldset`);
+      fieldset.appendChild(createElement(this.document, "legend", "", title));
+      children.filter(Boolean).forEach((child) => fieldset.appendChild(child));
+      return fieldset;
+    }
 
-      const makeFieldset = (title, ...children) => {
-        const fieldset = createElement(this.document, "fieldset", `${SCRIPT_PREFIX}-detail-fieldset ${SCRIPT_PREFIX}-settings-fieldset`);
-        fieldset.appendChild(createElement(this.document, "legend", "", title));
-        children.filter(Boolean).forEach((child) => fieldset.appendChild(child));
-        return fieldset;
-      };
-
+    buildSettingsAppearanceGrid(config) {
       const language = this.input(
         this.t("language"),
         "select",
@@ -8855,21 +8864,12 @@
         language.appendChild(option);
       });
 
-      const theme = this.input(
-        this.t("theme"),
-        "select",
-        "theme",
-        config.theme,
-        "tooltip_theme",
-      );
-      THEME_OPTIONS.forEach(([value, label]) => {
-        const option = createElement(this.document, "option");
-        option.value = value;
-        option.textContent = label;
-        if (value === config.theme) option.selected = true;
-        theme.appendChild(option);
-      });
+      const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      grid.append(language.wrapper);
+      return grid;
+    }
 
+    buildSettingsDownloadGrid(config) {
       const quality = this.input(
         this.t("video_resolution"),
         "select",
@@ -8885,32 +8885,8 @@
         quality.appendChild(option);
       });
 
-      const downloadMethod = this.input(
-        this.t("download"),
-        "select",
-        "download_method",
-        config.download_method,
-        "tooltip_browser_downloads_only",
-      );
-      DOWNLOAD_METHOD_OPTIONS.forEach((value) => {
-        const option = createElement(this.document, "option");
-        option.value = value;
-        option.textContent = this.t(`download_method_${value}`) || value;
-        if (value === config.download_method) option.selected = true;
-        downloadMethod.appendChild(option);
-      });
-
-      const appearanceGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      appearanceGrid.append(language.wrapper, theme.wrapper);
-
-      const downloadGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      const downloaderNote = createElement(
-        this.document,
-        "div",
-        `${SCRIPT_PREFIX}-readonly ${SCRIPT_PREFIX}-settings-note full`,
-        this.t("browser_downloader_note"),
-      );
-      downloadGrid.append(downloadMethod.wrapper, quality.wrapper, downloaderNote);
+      const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      grid.append(quality.wrapper);
 
       const selectedSourceColumns = new Set(normalizeVideoSourceColumns(config.video_source_columns));
       const sourceColumns = this.fieldWrapper(this.t("source_columns"), "", "full");
@@ -8931,36 +8907,44 @@
         sourceColumnList.appendChild(chip);
       });
       sourceColumns.appendChild(sourceColumnList);
-      downloadGrid.appendChild(sourceColumns);
+      grid.appendChild(sourceColumns);
 
-      const profileCheckboxSizeWrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-profile-slider-field`);
-      const profileCheckboxSizeHead = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-slider-head`);
-      const profileCheckboxSizeLabel = createElement(this.document, "label", "", this.t("profile_bulk_checkbox_size"));
-      const profileCheckboxSizeDesc = createElement(
+      return grid;
+    }
+
+    buildSettingsProfileBulkGrid(config) {
+      const wrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-profile-slider-field`);
+      const head = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-slider-head`);
+      const label = createElement(this.document, "label", "", this.t("profile_bulk_checkbox_size"));
+      const desc = createElement(
         this.document,
         "span",
         `${SCRIPT_PREFIX}-profile-slider-desc`,
         this.t("tooltip_profile_bulk_checkbox_size"),
       );
-      const profileCheckboxSizeValue = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-slider-value`);
-      const profileCheckboxSize = createElement(this.document, "input");
-      profileCheckboxSize.type = "range";
-      profileCheckboxSize.dataset.configKey = "profile_bulk_checkbox_size";
-      profileCheckboxSize.min = "18";
-      profileCheckboxSize.max = "40";
-      profileCheckboxSize.step = "2";
-      profileCheckboxSize.value = String(config.profile_bulk_checkbox_size ?? DEFAULT_CONFIG.profile_bulk_checkbox_size);
-      const updateProfileCheckboxSizeValue = () => {
-        profileCheckboxSizeValue.textContent = `${Math.round(clampNumber(Number(profileCheckboxSize.value), 18, 40, DEFAULT_CONFIG.profile_bulk_checkbox_size))}px`;
+      const valueEl = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-slider-value`);
+      const slider = createElement(this.document, "input");
+      slider.type = "range";
+      slider.dataset.configKey = "profile_bulk_checkbox_size";
+      slider.min = "18";
+      slider.max = "40";
+      slider.step = "2";
+      slider.value = String(config.profile_bulk_checkbox_size ?? DEFAULT_CONFIG.profile_bulk_checkbox_size);
+      const updateValue = () => {
+        valueEl.textContent = `${Math.round(clampNumber(Number(slider.value), 18, 40, DEFAULT_CONFIG.profile_bulk_checkbox_size))}px`;
       };
-      profileCheckboxSize.addEventListener("input", updateProfileCheckboxSizeValue);
-      updateProfileCheckboxSizeValue();
-      profileCheckboxSizeHead.append(profileCheckboxSizeLabel, profileCheckboxSizeDesc, profileCheckboxSizeValue);
-      profileCheckboxSizeWrapper.append(profileCheckboxSizeHead, profileCheckboxSize);
-      profileCheckboxSize.wrapper = profileCheckboxSizeWrapper;
-      const profileBulkGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      profileBulkGrid.append(profileCheckboxSize.wrapper);
+      slider.addEventListener("input", updateValue);
+      updateValue();
+      head.append(label, desc, valueEl);
+      wrapper.append(head, slider);
+      slider.wrapper = wrapper;
 
+      const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      grid.append(slider.wrapper);
+      return grid;
+    }
+
+    buildSettingsFilenameGrid(config) {
       const maxLength = this.input(
         this.t("filename_max_length"),
         "number",
@@ -8989,10 +8973,13 @@
         getMaxLength: () => Number(maxLength.value || config.filename_max_length || 80),
       });
       maxLength.addEventListener("input", () => filenameEditor.updatePreview());
-      const filenameGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-      filenameGrid.append(maxLength.wrapper, albumIndexFormat.wrapper, filenameEditor.element);
+      const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+      grid.append(maxLength.wrapper, albumIndexFormat.wrapper, filenameEditor.element);
+      return { grid, filenameEditor };
+    }
 
-      const shortcutGrid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
+    buildSettingsShortcutGrid(config) {
+      const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
       const shortcutInputs = [
         this.input(this.t("shortcut_download"), "text", "shortcut_download", config.shortcut_download),
         this.input(this.t("shortcut_frame"), "text", "shortcut_frame", config.shortcut_frame),
@@ -9014,8 +9001,11 @@
         `${SCRIPT_PREFIX}-readonly ${SCRIPT_PREFIX}-settings-note full`,
         this.t("shortcut_hint"),
       );
-      shortcutGrid.append(...shortcutInputs.map((input) => input.wrapper), shortcutNote);
+      grid.append(...shortcutInputs.map((input) => input.wrapper), shortcutNote);
+      return grid;
+    }
 
+    buildSettingsAdvancedSection(config, settingsTitle) {
       const makeLeftCheckbox = (labelText, key, checked) => {
         const wrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-check-left`);
         const label = createElement(this.document, "label");
@@ -9040,34 +9030,63 @@
         config.show_debug_info_menu,
       );
       advancedGrid.append(showTestMenu.wrapper, showDebugInfoMenu.wrapper);
-      const advancedFieldset = makeFieldset(this.t("advanced_section"), advancedGrid);
-      advancedFieldset.hidden = true;
-      let settingsTitleClickCount = 0;
-      let settingsTitleClickTimer = null;
+      const fieldset = this.buildSettingsFieldset(this.t("advanced_section"), advancedGrid);
+      fieldset.hidden = true;
+
+      let clickCount = 0;
+      let clickTimer = null;
       settingsTitle.addEventListener("click", () => {
-        settingsTitleClickCount += 1;
-        if (settingsTitleClickTimer) this.window.clearTimeout?.(settingsTitleClickTimer);
-        settingsTitleClickTimer = this.window.setTimeout?.(() => {
-          settingsTitleClickCount = 0;
-          settingsTitleClickTimer = null;
+        clickCount += 1;
+        if (clickTimer) this.window.clearTimeout?.(clickTimer);
+        clickTimer = this.window.setTimeout?.(() => {
+          clickCount = 0;
+          clickTimer = null;
         }, 1500) || null;
-        if (settingsTitleClickCount >= 5) {
-          advancedFieldset.hidden = false;
-          settingsTitleClickCount = 0;
+        if (clickCount >= 5) {
+          fieldset.hidden = false;
+          clickCount = 0;
         }
       });
 
+      return { fieldset, showTestMenu, showDebugInfoMenu };
+    }
+
+    openSettings() {
+      const config = this.configStore.get();
+      const modal = this.createModal(this.t("settings"), "", {
+        closeOnBackdrop: false,
+        showHeader: false,
+      });
+      modal.classList.add(`${SCRIPT_PREFIX}-settings-modal`);
+      const main = modal.querySelector("main");
+      const closeModal = () => modal.close?.();
+
+      const header = createElement(this.document, "header", `${SCRIPT_PREFIX}-settings-header`);
+      const settingsTitle = createElement(this.document, "h2", "", this.t("settings"));
+      header.appendChild(settingsTitle);
+      const headerActions = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-header-actions`);
+      header.appendChild(headerActions);
+      modal.insertBefore(header, main);
+
+      const appearanceGrid = this.buildSettingsAppearanceGrid(config);
+      const downloadGrid = this.buildSettingsDownloadGrid(config);
+      const profileBulkGrid = this.buildSettingsProfileBulkGrid(config);
+      const { grid: filenameGrid, filenameEditor } = this.buildSettingsFilenameGrid(config);
+      const shortcutGrid = this.buildSettingsShortcutGrid(config);
+      const { fieldset: advancedFieldset, showTestMenu, showDebugInfoMenu } =
+        this.buildSettingsAdvancedSection(config, settingsTitle);
+
       main.append(
-        makeFieldset(this.t("appearance_section"), appearanceGrid),
-        makeFieldset(this.t("download_section"), downloadGrid),
-        makeFieldset(this.t("profile_bulk_section"), profileBulkGrid),
-        makeFieldset(this.t("filename_section"), filenameGrid),
-        makeFieldset(this.t("shortcut_section"), shortcutGrid),
+        this.buildSettingsFieldset(this.t("appearance_section"), appearanceGrid),
+        this.buildSettingsFieldset(this.t("download_section"), downloadGrid),
+        this.buildSettingsFieldset(this.t("profile_bulk_section"), profileBulkGrid),
+        this.buildSettingsFieldset(this.t("filename_section"), filenameGrid),
+        this.buildSettingsFieldset(this.t("shortcut_section"), shortcutGrid),
         advancedFieldset,
       );
 
       headerActions.append(
-        this.actionButton(this.t("save"), () => {
+        createTuxIconButton(this.document, this.t("save"), () => {
           const formValues = {};
           modal.querySelectorAll("[data-config-key]").forEach((input) => {
             formValues[input.dataset.configKey] = input.value;
@@ -9086,11 +9105,12 @@
           ).map((input) => input.dataset.sourceColumn);
           this.configStore.save({ ...formValues, ...filenameEditor.getValues() });
           this.applyPanelState();
+          this.renderImageDownloadButton();
           this.mountPanel();
           closeModal();
-          this.toast(this.t("settings_saved"));
-        }, "primary"),
-        this.actionButton(this.t("close"), closeModal, "secondary"),
+          this.notifications.toast(this.t("settings_saved"));
+        }, "save"),
+        createTuxIconButton(this.document, this.t("close"), closeModal),
       );
     }
 
@@ -9107,7 +9127,6 @@
         getFilenameTemplate(config),
         "tooltip_custom_template",
       );
-      templateInput.classList.add(`${SCRIPT_PREFIX}-template-textarea`);
       delete templateInput.dataset.configKey;
       const previewBlock = this.fieldWrapper(this.t("filename_preview"), "", "full");
       const previewValue = createElement(this.document, "div", `${SCRIPT_PREFIX}-filename-preview`);
@@ -9126,7 +9145,7 @@
       };
       templateInput.addEventListener("input", () => {
         const rawValue = templateInput.value;
-        const cursor = templateInput.selectionStart || rawValue.length;
+        const cursor = templateInput.selectionStart ?? rawValue.length;
         const nextValue = rawValue.replace(/`/g, "");
         if (nextValue !== templateInput.value) {
           const removedBeforeCursor =
@@ -9148,14 +9167,13 @@
       element.append(templateInput.wrapper, availableBlock, previewBlock);
 
       const insertToken = (token) => {
-        templateInput.value = appendFilenameTemplateToken(templateInput.value, token);
-        templateInput.selectionStart = templateInput.selectionEnd = templateInput.value.length;
+        if (!getFilenameField(token)) return;
+        insertTextAtSelection(templateInput, `\${${token}}`);
         templateInput.dispatchEvent(new Event("input", { bubbles: true }));
       };
 
       const insertLiteral = (literal) => {
-        templateInput.value = appendFilenameTemplateLiteral(templateInput.value, literal);
-        templateInput.selectionStart = templateInput.selectionEnd = templateInput.value.length;
+        insertTextAtSelection(templateInput, literal);
         templateInput.dispatchEvent(new Event("input", { bubbles: true }));
       };
 
@@ -9215,23 +9233,9 @@
       };
     }
 
-    section(title, ...children) {
-      const section = createElement(this.document, "section", `${SCRIPT_PREFIX}-section`);
-      const heading = createElement(this.document, "h3", `${SCRIPT_PREFIX}-section-title`, title);
-      section.append(heading, ...children);
-      return section;
-    }
-
     fieldLabel(field) {
       const language = resolveLanguage(this.configStore.get(), this.window.navigator);
       return language === "zh" ? field?.zh || field?.en || "" : field?.en || field?.zh || "";
-    }
-
-    fieldDescription(field) {
-      const language = resolveLanguage(this.configStore.get(), this.window.navigator);
-      return language === "zh"
-        ? field?.description_zh || field?.description_en || ""
-        : field?.description_en || field?.description_zh || "";
     }
 
     separatorLabel(separator) {
@@ -9271,13 +9275,22 @@
       return input;
     }
     actionButton(text, onClick, className = "") {
+      const classes = className.split(/\s+/).filter(Boolean);
+      const variant = classes.find((name) => name === "primary" || name === "secondary") || "";
+      const tuxClasses = variant
+        ? ` TUXButton TUXButton--capsule TUXButton--medium TUXButton--${variant}`
+        : "";
       const button = createElement(
         this.document,
         "button",
-        `${SCRIPT_PREFIX}-button${className ? ` ${className}` : ""}`,
-        text,
+        `${SCRIPT_PREFIX}-button${tuxClasses}${className ? ` ${className}` : ""}`,
       );
       button.type = "button";
+      if (variant) {
+        button.appendChild(createElement(this.document, "div", "TUXButton-content", text));
+      } else {
+        button.textContent = text;
+      }
       button.addEventListener("click", onClick);
       return button;
     }
@@ -9288,369 +9301,83 @@
         "div",
         `${SCRIPT_PREFIX}-modal-backdrop`,
       );
-      const modal = createElement(this.document, "section", `${SCRIPT_PREFIX}-modal`);
-      modal.classList.add(this.getTheme());
-      const header = createElement(this.document, "header");
-      const titleGroup = createElement(this.document, "div");
-      const heading = createElement(this.document, "h2", "", title);
-      titleGroup.appendChild(heading);
-      if (subtitle) {
-        titleGroup.appendChild(
-          createElement(this.document, "p", `${SCRIPT_PREFIX}-subtitle`, subtitle),
-        );
-      }
-      const close = createElement(this.document, "button", `${SCRIPT_PREFIX}-close`, this.t("close"));
-      close.type = "button";
-      close.addEventListener("click", () => backdrop.remove());
+      const modal = createElement(
+        this.document,
+        "section",
+        `${SCRIPT_PREFIX}-modal`,
+      );
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      if (title) modal.setAttribute("aria-label", title);
       const main = createElement(this.document, "main");
-      header.append(titleGroup, close);
-      modal.append(header, main);
+      let close = null;
+      if (options.showHeader !== false) {
+        const header = createElement(this.document, "header");
+        const titleGroup = createElement(this.document, "div");
+        const heading = createElement(this.document, "h2", "", title);
+        titleGroup.appendChild(heading);
+        if (subtitle) {
+          titleGroup.appendChild(
+            createElement(
+              this.document,
+              "p",
+              `${SCRIPT_PREFIX}-subtitle`,
+              subtitle,
+            ),
+          );
+        }
+        close = createTuxIconButton(this.document, this.t("close"));
+        header.append(titleGroup, close);
+        modal.append(header, main);
+      } else {
+        modal.appendChild(main);
+      }
       backdrop.appendChild(modal);
+
+      const previousActiveElement = this.document.activeElement;
+      let closed = false;
+      const handleEscape = (event) => {
+        if (event.key === "Escape" || event.key === "Esc") {
+          closeModal("escape");
+        }
+      };
+      const closeModal = (reason = "programmatic") => {
+        if (closed) return;
+        closed = true;
+        this.document.removeEventListener("keydown", handleEscape, true);
+        backdrop.remove();
+        try {
+          options.onClose?.(reason);
+        } catch (_err) {}
+        if (
+          options.restoreFocus !== false &&
+          previousActiveElement?.isConnected &&
+          typeof previousActiveElement.focus === "function"
+        ) {
+          previousActiveElement.focus();
+        }
+      };
+
+      modal.close = closeModal;
+      backdrop.closeModal = closeModal;
+      close?.addEventListener("click", () => closeModal("close-button"));
       if (options.closeOnBackdrop !== false) {
         backdrop.addEventListener("click", (event) => {
-          if (event.target === backdrop) backdrop.remove();
+          if (event.target === backdrop) closeModal("backdrop");
         });
       }
+      this.document.addEventListener("keydown", handleEscape, true);
       this.document.body.appendChild(backdrop);
-      return modal;
-    }
-
-    captureToastAnchor(element) {
-      const rect = toPlainRect(element?.getBoundingClientRect?.());
-      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
-      this.lastToastAnchorRect = rect;
-      this.lastToastAnchorAt = Date.now();
-      return rect;
-    }
-
-    getNotificationStackElement() {
-      if (this.notificationStackEl?.isConnected) return this.notificationStackEl;
-      const stack = createElement(this.document, "div", `${SCRIPT_PREFIX}-notification-stack`);
-      this.document.body.appendChild(stack);
-      this.notificationStackEl = stack;
-      return stack;
-    }
-
-    updateNotificationStackLayout() {
-      const stack = this.notificationStackEl;
-      if (!stack?.isConnected) return;
-      const cards = Array.from(stack.querySelectorAll(`.${SCRIPT_PREFIX}-notification-card`));
-      let expandedY = 0;
-      let collapsedHeight = 0;
-      const gap = 6;
-      cards.forEach((card, index) => {
-        const depth = Math.min(index, 5);
-        const height = Math.max(68, Math.round(card.offsetHeight || card.getBoundingClientRect?.().height || 78));
-        const collapsedY = depth * 7;
-        card.style.zIndex = String(1000 - index);
-        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-y`, `${collapsedY}px`);
-        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-expanded-y`, `${expandedY}px`);
-        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-scale`, String(1 - depth * 0.026));
-        card.style.setProperty(`--${SCRIPT_PREFIX}-stack-opacity`, String(index > 5 ? 0 : 1 - depth * 0.06));
-        expandedY += height + gap;
-        collapsedHeight = Math.max(collapsedHeight, height + collapsedY);
-      });
-      const expandedHeight = Math.max(92, Math.min(expandedY, (this.window.innerHeight || 720) - 92));
-      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-collapsed-height`, `${Math.max(92, collapsedHeight)}px`);
-      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-expanded-height`, `${expandedHeight}px`);
-      stack.style.setProperty(`--${SCRIPT_PREFIX}-notification-stack-height`, `${Math.max(92, collapsedHeight)}px`);
-    }
-
-    removeNotificationCard(card, { immediate = false } = {}) {
-      if (!card) return;
-      const remove = () => {
-        card.remove();
-        this.updateNotificationStackLayout();
+      const focusModal = () => {
+        const focusTarget = modal.querySelector(`.${SCRIPT_PREFIX}-close-button`);
+        if (!closed && focusTarget?.isConnected) focusTarget.focus?.({ preventScroll: true });
       };
-      if (immediate) {
-        remove();
-        return;
-      }
-      card.classList.add("fading");
-      this.window.setTimeout?.(remove, 75);
-    }
-
-    createNotificationCard({ type = "info", title = "", detail = "", meta = "", iconText = "i", spinner = false, download = false } = {}) {
-      const stack = this.getNotificationStackElement();
-      const card = createElement(
-        this.document,
-        "div",
-        `${SCRIPT_PREFIX}-notification-card${download ? ` ${SCRIPT_PREFIX}-download-status` : ""}`,
-      );
-      card.classList.add(this.getTheme(), type);
-      card.dataset.notificationId = String(++this.notificationId);
-
-      const icon = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-icon` : `${SCRIPT_PREFIX}-notification-icon`,
-      );
-      const main = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-main` : `${SCRIPT_PREFIX}-notification-main`,
-      );
-      const head = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-head` : `${SCRIPT_PREFIX}-notification-head`,
-      );
-      const titleEl = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-title` : `${SCRIPT_PREFIX}-notification-title`,
-        title,
-      );
-      const metaEl = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-meta` : `${SCRIPT_PREFIX}-notification-meta`,
-        meta,
-      );
-      const detailEl = createElement(
-        this.document,
-        "div",
-        download ? `${SCRIPT_PREFIX}-download-status-detail` : `${SCRIPT_PREFIX}-notification-detail`,
-        detail,
-      );
-      const close = createElement(
-        this.document,
-        "button",
-        download ? `${SCRIPT_PREFIX}-download-status-close` : `${SCRIPT_PREFIX}-notification-close`,
-        "×",
-      );
-
-      close.type = "button";
-      close.setAttribute("aria-label", this.t("close"));
-      close.addEventListener("click", () => this.removeNotificationCard(card));
-
-      if (spinner) {
-        icon.appendChild(createDownloadSpinner(this.document));
+      if (typeof this.window.requestAnimationFrame === "function") {
+        this.window.requestAnimationFrame(focusModal);
       } else {
-        icon.textContent = iconText || "i";
+        this.window.setTimeout?.(focusModal, 0);
       }
-
-      head.append(titleEl, metaEl);
-      main.append(head, detailEl);
-      card.append(icon, main, close);
-      stack.prepend(card);
-      this.updateNotificationStackLayout();
-
-      return { card, icon, titleEl, metaEl, detailEl };
-    }
-
-    getDownloadStatusElement() {
-      if (this.downloadStatusEl?.isConnected) {
-        const stack = this.getNotificationStackElement();
-        if (this.downloadStatusEl.parentElement !== stack || stack.firstElementChild !== this.downloadStatusEl) {
-          stack.prepend(this.downloadStatusEl);
-          this.updateNotificationStackLayout();
-        }
-        return this.downloadStatusEl;
-      }
-
-      const refs = this.createNotificationCard({
-        type: "busy",
-        title: "",
-        detail: "",
-        iconText: "↓",
-        spinner: false,
-        download: true,
-      });
-      this.downloadStatusEl = refs.card;
-      this.downloadStatusIconEl = refs.icon;
-      this.downloadStatusTitleEl = refs.titleEl;
-      this.downloadStatusMetaEl = refs.metaEl;
-      this.downloadStatusDetailEl = refs.detailEl;
-
-      const close = this.downloadStatusEl.querySelector(`.${SCRIPT_PREFIX}-download-status-close`);
-      close?.addEventListener?.("click", () => {
-        this.stopDownloadTitleDots();
-        if (this.downloadStatusEl) this.removeNotificationCard(this.downloadStatusEl);
-        this.downloadStatusEl = null;
-      }, { once: true });
-
-      return this.downloadStatusEl;
-    }
-
-    stripAnimatedDotsTitle(title = "") {
-      return String(title || "").replace(/[.。…]+$/g, "").trim();
-    }
-
-    stopDownloadTitleDots() {
-      if (this.downloadStatusDotsTimer) {
-        this.window.clearInterval?.(this.downloadStatusDotsTimer);
-        this.downloadStatusDotsTimer = null;
-      }
-      this.downloadStatusDotsBaseTitle = "";
-      this.downloadStatusDotsIndex = 0;
-    }
-
-    startDownloadTitleDots(title = "") {
-      this.stopDownloadTitleDots();
-      this.downloadStatusDotsBaseTitle = this.stripAnimatedDotsTitle(title);
-      this.downloadStatusDotsIndex = 0;
-      const render = () => {
-        if (!this.downloadStatusTitleEl) return;
-        const count = (this.downloadStatusDotsIndex % 3) + 1;
-        this.downloadStatusTitleEl.textContent = `${this.downloadStatusDotsBaseTitle}${".".repeat(count)}`;
-        this.downloadStatusDotsIndex += 1;
-      };
-      render();
-      this.downloadStatusDotsTimer = this.window.setInterval?.(render, 320);
-    }
-
-    setDownloadStatus({ type = "busy", title = "", detail = "", meta = "", spinner = false, autoHideMs = 0 } = {}) {
-      if (this.downloadStatusHideTimer) {
-        this.window.clearTimeout?.(this.downloadStatusHideTimer);
-        this.downloadStatusHideTimer = null;
-      }
-
-      const card = this.getDownloadStatusElement();
-      card.className = `${SCRIPT_PREFIX}-notification-card ${SCRIPT_PREFIX}-download-status ${this.getTheme()} ${type}`;
-
-      const isActiveDownload = ["busy", "album", "image"].includes(type);
-      if (this.downloadStatusTitleEl) {
-        if (isActiveDownload) this.startDownloadTitleDots(title || "");
-        else {
-          this.stopDownloadTitleDots();
-          this.downloadStatusTitleEl.textContent = title || "";
-        }
-      }
-      if (this.downloadStatusMetaEl) this.downloadStatusMetaEl.textContent = meta || "";
-      if (this.downloadStatusDetailEl) this.downloadStatusDetailEl.textContent = detail || "";
-      if (this.downloadStatusIconEl) {
-        this.downloadStatusIconEl.textContent = "";
-        if (type === "success") {
-          this.downloadStatusIconEl.textContent = "✓";
-        } else if (type === "error") {
-          this.downloadStatusIconEl.textContent = "!";
-        } else if (type === "album") {
-          this.downloadStatusIconEl.textContent = "▦";
-        } else if (type === "image") {
-          this.downloadStatusIconEl.textContent = "◧";
-        } else {
-          this.downloadStatusIconEl.textContent = "↓";
-        }
-      }
-
-      this.updateNotificationStackLayout();
-      if (autoHideMs > 0) this.hideDownloadStatus(autoHideMs);
-      return card;
-    }
-
-    hideDownloadStatus(delay = 0, immediate = false) {
-      const remove = () => {
-        const card = this.downloadStatusEl;
-        if (!card) return;
-        this.stopDownloadTitleDots();
-        this.removeNotificationCard(card, { immediate });
-        if (this.downloadStatusEl === card) this.downloadStatusEl = null;
-      };
-
-      if (this.downloadStatusHideTimer) {
-        this.window.clearTimeout?.(this.downloadStatusHideTimer);
-        this.downloadStatusHideTimer = null;
-      }
-
-      if (immediate || delay <= 0) {
-        remove();
-        return;
-      }
-
-      this.downloadStatusHideTimer = this.window.setTimeout?.(remove, delay);
-    }
-
-    nudgeDownloadStatus(message = this.t("download_already_running")) {
-      const card = this.getDownloadStatusElement();
-      card.classList.remove("attention");
-      void card.offsetWidth;
-      card.classList.add("attention");
-
-      const detailEl = this.downloadStatusDetailEl;
-      const previousDetail = detailEl?.textContent || "";
-      if (detailEl && message) {
-        detailEl.textContent = message;
-      }
-
-      this.window.setTimeout?.(() => card.classList.remove("attention"), 1050);
-      this.window.clearTimeout?.(this.downloadStatusRepeatHintTimer);
-      this.downloadStatusRepeatHintTimer = this.window.setTimeout?.(() => {
-        if (detailEl?.isConnected && detailEl.textContent === message) {
-          detailEl.textContent = previousDetail;
-        }
-      }, 1600);
-    }
-
-    showDownloadPreparing(detail = "") {
-      this.setDownloadStatus({
-        type: "busy",
-        title: this.t("download_preparing"),
-        detail,
-        spinner: false,
-      });
-    }
-
-    showVideoPreparing(filename = "") {
-      this.setDownloadStatus({
-        type: "busy",
-        title: this.t("preparing_video_download"),
-        detail: filename,
-        spinner: false,
-      });
-    }
-
-    showAlbumProgress(index, total, filename = "") {
-      this.setDownloadStatus({
-        type: "album",
-        title: `${index}/${total} ${this.t("downloading_album")}`,
-        detail: filename,
-        meta: "",
-        spinner: false,
-      });
-    }
-
-    showImageDownloading(filename = "") {
-      this.setDownloadStatus({
-        type: "image",
-        title: this.t("downloading_image"),
-        detail: filename,
-        spinner: false,
-      });
-    }
-
-    showDownloadSuccess(filename = "") {
-      this.setDownloadStatus({
-        type: "success",
-        title: this.t("download_completed"),
-        detail: filename,
-        autoHideMs: 3000,
-      });
-    }
-
-    showDownloadError(message = "") {
-      this.setDownloadStatus({
-        type: "error",
-        title: this.t("download_failed"),
-        detail: message,
-      });
-    }
-
-    toast(message, options = {}) {
-      const refs = this.createNotificationCard({
-        type: options.type || "info",
-        title: String(message || ""),
-        detail: options.detail || "",
-        meta: options.meta || "",
-        iconText: options.iconText || "i",
-        spinner: Boolean(options.spinner),
-        download: false,
-      });
-      const autoHideMs = Number(options.autoHideMs ?? 3200);
-      if (!options.persist && autoHideMs > 0) {
-        this.window.setTimeout?.(() => this.removeNotificationCard(refs.card), autoHideMs);
-      }
-      return refs.card;
+      return modal;
     }
 
     bindHotkey() {
@@ -9695,7 +9422,7 @@
           if (win.location.href === this.lastHref) return;
           this.lastHref = win.location.href;
           win.setTimeout?.(() => {
-            this.refreshMedia();
+            this.currentMedia = null;
             this.mountPanel();
             this.applyPanelState();
           }, 120);
@@ -9751,33 +9478,14 @@
     }
 
     getPanelPositionSignature() {
-      const config = this.configStore?.get?.() || {};
-      const pageType = this.getCurrentPageType();
-      let actionBarSignature = "";
-      if (this.shouldEmbedPanelInActionBar(pageType)) {
-        const host = this.findActionBarHost();
-        const rect = this.getElementRect(host);
-        const childCount = this.getNativeActionChildren(host).length;
-        actionBarSignature = rect
-          ? `${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${childCount}`
-          : "no-action-bar";
-      } else if (pageType === "profile-dialog") {
-        actionBarSignature = this.profileBrowseDialogAdapter?.getPositionSignature?.() || "no-profile-dialog";
-      } else if (pageType === "profile") {
-        const userMore = this.profilePageBulkAdapter?.findUserMoreButton?.() || this.document.querySelector?.('[data-e2e="user-more"]');
-        const rect = this.getElementRect(userMore);
-        const parent = userMore?.parentElement?.parentElement || userMore?.parentElement || null;
-        actionBarSignature = rect
-          ? `profile-more:${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${parent?.children?.length || 0}`
-          : "profile-no-user-more";
-      }
+      const placement = this.resolvePanelPlacement();
       return [
         this.window.location?.href || "",
-        pageType,
+        placement.surface,
         this.window.innerWidth || 0,
         this.window.innerHeight || 0,
         this.openImageOverlay?.imageUrl || "",
-        actionBarSignature,
+        placement.signature,
       ].join("|");
     }
 
@@ -9797,10 +9505,25 @@
         }
       };
       const scheduleIfChanged = () => {
-        const signature = this.getPanelPositionSignature();
-        if (signature === this.lastPanelPositionSignature) return;
-        this.lastPanelPositionSignature = signature;
-        schedule();
+        const now = Date.now();
+        const elapsed = now - (this.lastPanelPositionCheckAt || 0);
+        if (elapsed >= PANEL_POSITION_CHECK_THROTTLE_MS) {
+          this.lastPanelPositionCheckAt = now;
+          const signature = this.getPanelPositionSignature();
+          if (signature === this.lastPanelPositionSignature) return;
+          this.lastPanelPositionSignature = signature;
+          schedule();
+          return;
+        }
+        if (this.pendingPanelPositionCheck) return;
+        this.pendingPanelPositionCheck = this.window.setTimeout(() => {
+          this.pendingPanelPositionCheck = null;
+          this.lastPanelPositionCheckAt = Date.now();
+          const signature = this.getPanelPositionSignature();
+          if (signature === this.lastPanelPositionSignature) return;
+          this.lastPanelPositionSignature = signature;
+          schedule();
+        }, PANEL_POSITION_CHECK_THROTTLE_MS - elapsed);
       };
 
       let imageOverlayFrame = null;
@@ -9818,15 +9541,19 @@
       };
 
       if (typeof this.window.MutationObserver === "function" && this.document.body) {
-        this.positionObserver = new this.window.MutationObserver(() => {
-          scheduleIfChanged();
+        this.positionObserver = new this.window.MutationObserver((records) => {
+          const hasExternalMutation = records.some((record) => {
+            const target = record.target;
+            if (this.panel?.contains?.(target)) return false;
+            if (this.notifications?.notificationStackEl?.contains?.(target)) return false;
+            return true;
+          });
+          if (hasExternalMutation) scheduleIfChanged();
           checkImageOverlay();
         });
         this.positionObserver.observe(this.document.body, {
           childList: true,
           subtree: true,
-          attributes: true,
-          attributeFilter: ["class", "style"],
         });
       } else {
         this.positionObserver = { disconnect() {} };
@@ -9834,10 +9561,8 @@
       this.window.addEventListener?.("resize", scheduleIfChanged);
       this.window.addEventListener?.("orientationchange", scheduleIfChanged);
       this.document.addEventListener?.("scroll", scheduleIfChanged, true);
-      this.document.addEventListener?.("wheel", scheduleIfChanged, true);
-      this.document.addEventListener?.("touchmove", scheduleIfChanged, true);
       if (!this.positionPoll && typeof this.window.setInterval === "function") {
-        this.positionPoll = this.window.setInterval(scheduleIfChanged, 250);
+        this.positionPoll = this.window.setInterval(scheduleIfChanged, 2000);
       }
       scheduleIfChanged();
       schedule();
@@ -9853,73 +9578,6 @@
       .replace(/'/g, "&#39;");
   }
 
-  const testApi = {
-    DEFAULT_CONFIG,
-    VIDEO_QUALITY_OPTIONS,
-    LANGUAGE_OPTIONS,
-    THEME_OPTIONS,
-    DOWNLOAD_METHOD_OPTIONS,
-    ALBUM_INDEX_FORMAT_OPTIONS,
-    getMessage,
-    resolveLanguage,
-    resolveTheme,
-    parseJsonScriptText,
-    parsePageDataFromWindow,
-    findVideoItemInPageData,
-    findVideoItemDeep,
-    collectVideoItemsDeep,
-    RuntimeMediaCache,
-    findBestMediaMatch,
-    TikTokMediaExtractor,
-    TikTokDlApp,
-    ActionBarLocator,
-    findOpenImageOverlay,
-    getSafeOverlayButtonPlacement,
-    getPanelStyleSheet,
-    calculatePanelPosition,
-    calculateEmbeddedPanelPosition,
-    calculatePanelMenuPlacement,
-    isActionBarClassName,
-    isUsableActionBarRect,
-    scoreActionBarRect,
-    getEmbeddedLauncherPalette,
-    extractMediaFromPageData,
-    extractMediaFromVideoElement,
-    extractImageSources,
-    extractVideoSources,
-    extractVideoUrls,
-    selectVideoSource,
-    normalizeMediaItem,
-    normalizeFilename,
-    truncateAtUtf16Boundary,
-    FILENAME_TEMPLATE_FIELDS,
-    FILENAME_TEMPLATE_SEPARATORS,
-    getFilenameTemplate,
-    formatAlbumIndex,
-    appendFilenameTemplateToken,
-    appendFilenameTemplateLiteral,
-    sanitizeConfig,
-    normalizeHotkey,
-    hotkeyFromEvent,
-    captureShortcutInputKey,
-    eventMatchesHotkey,
-    buildFilename,
-    buildDetailsModel,
-    formatNumber,
-    formatOptionalNumber,
-    normalizeHeaders,
-    normalizeSafeDownloadUrl,
-    isAllowedDownloadHost,
-    isLikelyLiveContextText,
-    shouldInspectRuntimeResponse,
-    normalizeFileExtension,
-    toShortId,
-  };
-
-  if (typeof module !== "undefined" && module.exports) {
-    module.exports = { __test: testApi };
-  }
-
   const INSTALL_FLAG = "__tthelperInstalled__";
 
   if (root?.document && !root[INSTALL_FLAG]) {
@@ -9930,11 +9588,8 @@
       writable: false,
     });
 
-    const runtimeCache = new RuntimeMediaCache();
-    new RuntimeResponseObserver(root, runtimeCache).install();
-
     const start = () => {
-      const app = new TikTokDlApp(root, runtimeCache);
+      const app = new TikTokDlApp(root);
       app.start();
     };
     if (root.document.readyState === "loading") {
@@ -9943,4 +9598,4 @@
       start();
     }
   }
-})(typeof unsafeWindow !== "undefined" ? unsafeWindow : globalThis);
+})(typeof unsafeWindow !== "undefined" ? unsafeWindow : window);
