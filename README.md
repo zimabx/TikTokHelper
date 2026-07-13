@@ -19,7 +19,7 @@ TikTokHelper is a browser userscript for TikTok Web. It adds a compact action pa
 
 ## Installation
 
-Save the `TikTokHelper.js` file and use it in Tampermonkey.
+To open the [TikTokHelper](https://greasyfork.org/zh-CN/scripts/586881-tiktokhelper) file, you'll need to install the Tampermonkey extension first.
 
 ## Usage
 
