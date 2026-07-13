@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name			TikTokHelper
-// @name:zh-CN		TikTokHelper - TikTok 下载助手
-// @description		Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
-// @description:zh-CN   为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
-// @namespace       https://github.com/zimabx/TikTokHelper
-// @namespace       https://github.com/zimabx/TikTokHelper
-// @version         1.0.0
-// @author          zimabx
+// @name				TikTokHelper
+// @name:zh-CN			TikTokHelper - TikTok 下载助手
+// @description			Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
+// @description:zh-CN	为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
+// @namespace			https://github.com/zimabx/TikTokHelper
+// @supportURL			https://github.com/zimabx/TikTokHelper/issues
+// @version				1.0.0
+// @author          	zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
 // @license         MIT
