@@ -20,7 +20,7 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 
 ## 安装
 
-保存“TikTokHelper.js”文件，在 tampermonkey 中使用。
+打开 [TikTokHelper](https://greasyfork.org/zh-CN/scripts/586881-tiktokhelper) 文件，需要提前安装 tampermonkey 插件。
 
 ## 使用
 
