@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name				TikTokHelper
-// @name:zh-CN			TikTokHelper - TikTok 下载助手
-// @description			Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
+// @name			TikTokHelper
+// @name:zh-CN		TikTokHelper - TikTok 下载助手
+// @description		Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
 // @description:zh-CN	为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
-// @namespace			https://github.com/zimabx/TikTokHelper
-// @supportURL			https://github.com/zimabx/TikTokHelper/issues
-// @version				1.0.0
-// @author          	zimabx
+// @namespace		https://github.com/zimabx/TikTokHelper
+// @supportURL		https://github.com/zimabx/TikTokHelper/issues
+// @version			1.0.1
+// @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
 // @license         MIT
@@ -7321,19 +7321,22 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
       if (cinemaRoot) {
         const anchor = getVisibleCinemaMoreButton(this.document, cinemaRoot);
         const rect = this.actionBarLocator.getElementRect(anchor);
+        const isLive = this.isCurrentLiveContext(anchor);
         return {
           surface: "cinema",
-          mode: !this.openImageOverlay && anchor ? "cinema" : "inactive",
-          anchor,
-          signature: rect
-            ? [
-              "cinema",
-              Math.round(rect.left),
-              Math.round(rect.top),
-              Math.round(rect.width),
-              Math.round(rect.height),
-            ].join(":")
-            : "cinema:no-anchor",
+          mode: !this.openImageOverlay && !isLive && anchor ? "cinema" : "inactive",
+          anchor: isLive ? null : anchor,
+          signature: isLive
+            ? "cinema:live-not-supported"
+            : rect
+              ? [
+                "cinema",
+                Math.round(rect.left),
+                Math.round(rect.top),
+                Math.round(rect.width),
+                Math.round(rect.height),
+              ].join(":")
+              : "cinema:no-anchor",
         };
       }
 
@@ -7428,9 +7431,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
     }
 
     getCurrentActionAnchor() {
-      return this.currentPlacementMode === "recommend"
-        ? this.actionBarLocator.resolveCurrentActionBarHost()
-        : null;
+      const placement = this.resolvePanelPlacement();
+      if (!["recommend", "cinema", "profile-dialog"].includes(placement.mode)) {
+        return null;
+      }
+      return placement.anchor || placement.host || null;
     }
 
     getCurrentLiveContextText(anchorElement = null) {
