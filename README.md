@@ -12,7 +12,8 @@ TikTokHelper is a browser userscript for TikTok Web. It adds a compact action pa
 - Capture the current video frame.
 - View media information for the current post.
 - Batch-download posts from profile pages.
-- Save images from the image preview.
+- Translate comments.
+- Save images from the comments section.
 - Choose a preferred video source.
 - Customize download filenames with templates.
 - Configure keyboard shortcuts.
