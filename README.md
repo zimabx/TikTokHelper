@@ -1,6 +1,7 @@
 # TikTokHelper
 
-[简体中文](README.zh-CN.md)
+[Simplified Chinese](README.zh-CN.md)
+[supportURL](https://github.com/zimabx/TikTokHelper/issues)
 
 TikTokHelper is a browser userscript for TikTok Web. It adds a compact action panel to TikTok pages so you can save media, capture video frames, inspect post metadata, and customize filenames without leaving the current page.
 
