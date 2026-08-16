@@ -36,6 +36,30 @@ After installation, TikTokHelper adds a small floating button near the active Ti
 
 The default download shortcut is `M`. Other shortcuts are disabled by default and can be configured in Settings.
 
+## Release Notes
+
+<details>
+<summary>1.1.0</summary>
+  
+- Added PNG / JPG / WEBP formats for frame saving, with an improved frame copy and save workflow.
+- Added retry support for failed profile bulk downloads, retrying only failed posts or album images.
+- Added --Continue Download-- after cancelling a profile bulk download, automatically skipping completed posts and images.
+- Downloads can now abort the active network transfer instead of only stopping subsequent tasks.
+- Improved comment translation with batch translation and better caching, reducing duplicate requests and improving performance for large comment sections. 
+- Improved translation result detection and caching for unchanged or untranslated text. 
+- Improved album download and retry logic so only failed or unfinished images are downloaded again.
+- Improved profile post resolution by reusing available local page data before performing additional scans.
+- Fixed frame capture occasionally targeting a neighboring video instead of the current post.
+- Fixed incorrect Live frame filenames and the accidental use of regular post metadata for Live captures.
+- Fixed inconsistent file extensions between main downloads and downloads from the details panel.
+- Fixed incorrect fallback handling for some image file extensions.
+- Fixed duplicate shortcut conflicts and added clear conflict warnings.
+- Improved status and progress feedback for downloads, cancellations, partial failures, retries, and resumed downloads.
+- Improved filename generation, album numbering, and multiple UI interaction details.
+- Removed redundant code and unnecessary work to improve overall performance and stability.
+
+</details>
+
 ## Other
 
 This is not an official TikTok product. Use it only for content you have the right to save.
