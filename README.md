@@ -1,7 +1,8 @@
 # TikTokHelper
 
 [Simplified Chinese](README.zh-CN.md)
-[supportURL](https://github.com/zimabx/TikTokHelper/issues)
+
+Provide Feedback: [supportURL](https://github.com/zimabx/TikTokHelper/issues)
 
 TikTokHelper is a browser userscript for TikTok Web. It adds a compact action panel to TikTok pages so you can save media, capture video frames, inspect post metadata, and customize filenames without leaving the current page.
 
@@ -31,6 +32,7 @@ After installation, TikTokHelper adds a small floating button near the active Ti
 - **Video Frame**: captures the currently visible video frame and lets you copy or save it.
 - **Details**: opens a tabbed inspector for media resources, author data, post data, and raw JSON.
 - **Settings**: changes language, automatic theme behavior, video quality preference, filename rules, source columns, and shortcuts.
+- **Translate**: Click the translate button to the right of the input field to translate the current comment.
 
 The default download shortcut is `M`. Other shortcuts are disabled by default and can be configured in Settings.
 
