@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name			TikTokHelper
 // @name:zh-CN		TikTokHelper - TikTok 下载助手
-// @description		Add compact download tools for TikTok videos, photo posts, profile pop-ups, and manually selected profile posts.
-// @description:zh-CN	为 TikTok 网页端添加紧凑的下载工具，支持推荐页、图集、个人页视频弹窗和个人主页手动多选下载。
+// @description		Add compact TikTok tools for video and photo downloads, frame capture, media details, comment translation, customizable filenames, and profile bulk downloads.
+// @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译、自定义文件名和个人主页批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.0.3
+// @version			1.1.0
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -30,8 +30,6 @@
 // @connect         muscdn.com
 // @connect         *.muscdn.com
 // @connect         translate.googleapis.com
-// @connect         edge.microsoft.com
-// @connect         api-edge.cognitive.microsofttranslator.com
 // @connect         www.bing.com
 // @run-at          document-end
 // ==/UserScript==
@@ -54,6 +52,11 @@
     ? GM_registerMenuCommand
     : root?.GM_registerMenuCommand;
     const PANEL_POSITION_CHECK_THROTTLE_MS = 32;
+    const FRAME_SAVE_FORMATS = [
+        { extension: "png", mimeType: "image/png" },
+        { extension: "jpg", mimeType: "image/jpeg" },
+        { extension: "webp", mimeType: "image/webp" },
+    ];
 
     const DEFAULT_VIDEO_SOURCE_COLUMNS = ["quality", "resolution", "codec", "fps", "bitrate", "size"];
     const VIDEO_SOURCE_COLUMN_DEFINITIONS = [
@@ -73,7 +76,7 @@
 
     const DEFAULT_CONFIG = {
         filename_template: "${nickname}_${short_id}_${tags}_${desc}",
-        filename_max_length: 80,
+        filename_max_length: 64,
         album_index_format: "_01",
         video_quality: "highest_resolution",
         video_source_columns: [...DEFAULT_VIDEO_SOURCE_COLUMNS],
@@ -91,9 +94,8 @@
     };
 
     const COMMENT_TRANSLATION_PROVIDERS = [
-        { value: "google", messageKey: "translation_provider_google", concurrency: 4 },
-        { value: "microsoft", messageKey: "translation_provider_microsoft", concurrency: 3 },
-        { value: "bing", messageKey: "translation_provider_bing", concurrency: 2 },
+        { value: "google", messageKey: "translation_provider_google" },
+        { value: "bing", messageKey: "translation_provider_bing" },
     ];
 
     const COMMENT_TRANSLATION_TARGETS = [
@@ -117,7 +119,6 @@
         { value: "comparison", messageKey: "translation_display_comparison" },
         { value: "replace", messageKey: "translation_display_replace" },
     ];
-
     const ALLOWED_DOWNLOAD_HOST_SUFFIXES = [
         "tiktok.com",
         "tiktokcdn.com",
@@ -309,7 +310,6 @@
             translation_display_comparison: "Bilingual comparison",
             translation_display_replace: "Replace with translation",
             translation_provider_google: "Google (free)",
-            translation_provider_microsoft: "Microsoft (free)",
             translation_provider_bing: "Bing (free)",
             comment_translation_note: "Support for AI or API keys may be added in the future.",
             translate_comments: "Translate",
@@ -356,12 +356,6 @@
             id: "ID",
             author: "Author",
             description: "Description",
-            tooltip_language: "Choose the interface language. Auto follows your browser language.",
-            tooltip_video_resolution: "Pick which TikTok video source should be preferred when multiple qualities are available.",
-            tooltip_available_fields: "All filename attributes supported by this script. Click one to insert its `${name}` token at the current cursor position.",
-            tooltip_custom_template: "Plain filename template. Click an available attribute below to insert it at the current cursor position. Example: `${nickname}_${short_id}_${desc}`.",
-            tooltip_filename_max_length: "Maximum filename length before the extension is added. Invalid filename characters are replaced automatically.",
-            tooltip_album_index_format: "Numbering style appended to each image in an album.",
             quality_highest_resolution: "Highest resolution",
             quality_highest_bitrate: "Highest bitrate",
             quality_1080p: "1080p",
@@ -421,6 +415,7 @@
             shortcut_details: "Details shortcut",
             shortcut_settings: "Settings shortcut",
             shortcut_hint: "Focus a shortcut field and press a key combination. Backspace clears it.",
+            shortcut_conflict: "Shortcut conflict: ${first} and ${second} both use ${hotkey}.",
             gear_name: "Gear name",
             quality_type: "Quality type",
             width: "Width",
@@ -440,6 +435,8 @@
             bulk_cancel_selection: "Cancel selection",
             bulk_confirm_title: "Confirm selected videos",
             bulk_start_download: "Start download",
+            bulk_retry_failed: "Retry failed items",
+            bulk_continue_download: "Continue download",
             bulk_no_selection: "No videos selected.",
             bulk_selected_count: "Selected",
             bulk_type_video: "Video",
@@ -493,7 +490,6 @@
             translation_display_comparison: "双语对照",
             translation_display_replace: "译文替换",
             translation_provider_google: "谷歌（免费）",
-            translation_provider_microsoft: "微软（免费）",
             translation_provider_bing: "必应（免费）",
             comment_translation_note: "后续可能会支持接入 AI 或 API Key",
             translate_comments: "翻译",
@@ -540,12 +536,6 @@
             id: "ID",
             author: "作者",
             description: "描述",
-            tooltip_language: "选择界面语言。自动会跟随浏览器语言。",
-            tooltip_video_resolution: "当 TikTok 提供多个视频源时，优先选择哪一种清晰度。",
-            tooltip_available_fields: "脚本支持的全部文件名属性。点击属性会在模板当前光标处插入 `${name}`。",
-            tooltip_custom_template: "手动填写普通文件名模板。点击下方可用属性会在当前光标处插入。示例：`${nickname}_${short_id}_${desc}`。",
-            tooltip_filename_max_length: "扩展名前的文件名最大长度。非法文件名字符会自动替换。",
-            tooltip_album_index_format: "图集中每张图片追加的序号样式。",
             quality_highest_resolution: "最高分辨率",
             quality_highest_bitrate: "最高码率",
             quality_1080p: "1080p",
@@ -605,6 +595,7 @@
             shortcut_details: "详情快捷键",
             shortcut_settings: "设置快捷键",
             shortcut_hint: "聚焦快捷键输入框后按组合键。Backspace 可清空。",
+            shortcut_conflict: "快捷键冲突：${first} 和 ${second} 都使用了 ${hotkey}。",
             gear_name: "档位名",
             quality_type: "清晰度类型",
             width: "宽度",
@@ -624,6 +615,8 @@
             bulk_cancel_selection: "取消选择",
             bulk_confirm_title: "确认选中的作品",
             bulk_start_download: "开始下载",
+            bulk_retry_failed: "重试失败项",
+            bulk_continue_download: "继续下载",
             bulk_no_selection: "尚未选择作品。",
             bulk_selected_count: "已选择",
             bulk_type_video: "视频",
@@ -762,6 +755,25 @@
         input.value = value;
         input.blur?.();
         return value;
+    }
+
+    const SHORTCUT_CONFIG_KEYS = [
+        "shortcut_download",
+        "shortcut_frame",
+        "shortcut_details",
+        "shortcut_settings",
+    ];
+
+    function findShortcutConflict(values = {}) {
+        const used = new Map();
+        for (const key of SHORTCUT_CONFIG_KEYS) {
+            const hotkey = normalizeHotkey(values?.[key]);
+            if (!hotkey) continue;
+            const firstKey = used.get(hotkey);
+            if (firstKey) return { hotkey, firstKey, secondKey: key };
+            used.set(hotkey, key);
+        }
+        return null;
     }
 
     function normalizeConfigBoolean(value, fallback = false) {
@@ -1004,6 +1016,56 @@
             }
         }
         return roots;
+    }
+
+    function findLiveNicknameInReact(elements = []) {
+        const queue = [];
+        for (const element of ensureArray(elements).filter(Boolean)) {
+            for (const rootValue of getReactInternalRoots(element)) {
+                queue.push({ value: rootValue, depth: 0 });
+            }
+        }
+
+        const seen = new Set();
+        let inspected = 0;
+        const maxObjects = 240;
+        const maxDepth = 6;
+        const allowedKey = /^(?:children|props|liveInfo|liveRoomInfo|item|prerenderLiveParams)$/i;
+
+        while (queue.length && inspected < maxObjects) {
+            const current = queue.shift();
+            const value = current?.value;
+            const depth = Number(current?.depth || 0);
+            if (!value || typeof value !== "object" || seen.has(value)) continue;
+            seen.add(value);
+            inspected += 1;
+
+            const liveInfo = value.liveInfo;
+            const nickname = firstString(liveInfo?.nickname, liveInfo?.nickName);
+            if (nickname) return nickname;
+            if (depth >= maxDepth) continue;
+
+            if (Array.isArray(value)) {
+                for (const child of value.slice(0, 40)) {
+                    if (child && typeof child === "object") {
+                        queue.push({ value: child, depth: depth + 1 });
+                    }
+                }
+                continue;
+            }
+
+            let entries = [];
+            try {
+                entries = Object.entries(value);
+            } catch (_err) {
+                continue;
+            }
+            for (const [key, child] of entries) {
+                if (!allowedKey.test(key) || !child || typeof child !== "object") continue;
+                queue.push({ value: child, depth: depth + 1 });
+            }
+        }
+        return "";
     }
 
     function compactLiveContextText(value = "") {
@@ -1934,7 +1996,7 @@
         return cleanBase + extension;
     }
 
-    function normalizeFileExtension(value = "mp4", fallback = "mp4") {
+    function normalizeFileExtension(value = "", fallback = "mp4") {
         const text = String(value || fallback || "")
         .trim()
         .toLowerCase()
@@ -1989,7 +2051,26 @@
         const context = getFilenameContext(media);
         const value = renderFilenameTemplate(getFilenameTemplate(merged), context);
         return normalizeFilename(String(value), {
-            maxLength: Number(merged.filename_max_length || 80),
+            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+        });
+    }
+
+    function buildVideoFilename(media = {}, config = {}, format = "mp4") {
+        const base = buildFilename(media, config);
+        const extension = normalizeFileExtension(format, "mp4");
+        return extension ? `${base}.${extension}` : base;
+    }
+
+    function buildImageFilename(media = {}, image = {}, index = 0, config = {}) {
+        const merged = { ...DEFAULT_CONFIG, ...config };
+        const base = buildFilename(media, merged);
+        const url = String(image.url || "");
+        const extension = normalizeFileExtension(
+            url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1],
+            "jpg",
+        );
+        return normalizeFilename(`${base}_image${formatAlbumIndex(index, merged.album_index_format)}.${extension}`, {
+            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 16,
         });
     }
 
@@ -2076,8 +2157,7 @@
             return { key, label: t(definition?.messageKey || key) || key };
         });
         const baseName = buildFilename(media, merged);
-        const videoFormat = media.video?.format || "mp4";
-        const videoName = `${baseName}.${videoFormat}`;
+        const videoName = buildVideoFilename(media, merged, media.video?.format || "mp4");
         const coverName = `${baseName}_cover.jpg`;
         const dynamicName = `${baseName}_dynamic.webp`;
         const musicName = `${baseName}_music.mp3`;
@@ -2162,7 +2242,7 @@
             resolution: formatResolution(image.width, image.height),
             url: image.url,
             urls: unique([image.url, ...ensureArray(image.fallbackUrls)]),
-            filename: `${baseName}_image${formatAlbumIndex(index, merged.album_index_format)}.jpg`,
+            filename: buildImageFilename(media, image, index, merged),
         }));
         const isImagePost = Boolean(media.isImagePost || images.length);
         const coverWidth = firstPositiveNumber(media.cover?.width, media.video?.width);
@@ -3320,12 +3400,8 @@
             const id = String(identity?.id || "");
             const localFragments = ensureArray(resolution.fragments);
             const suppliedPageFragments = ensureArray(resolution.pageFragments);
-            const pageFragments = suppliedPageFragments.length
-            ? suppliedPageFragments
-            : id
-            ? this.collectPageFragments(id)
-            : [];
             const cached = id ? this.getCached(id) : null;
+            let pageFragments = suppliedPageFragments;
             const trace = {
                 capturedAt: new Date().toISOString(),
                 targetId: id,
@@ -3333,6 +3409,7 @@
                 identityEvidence: identity?.evidence || "",
                 localFragmentCount: localFragments.length,
                 pageFragmentCount: pageFragments.length,
+                pageScanAttempted: false,
                 cacheHit: Boolean(cached),
             };
             const finish = (result) => {
@@ -3345,25 +3422,26 @@
                 };
                 return result;
             };
-
-            if (!id) return finish({ ok: false, code: "current-item-id-not-found" });
-            const merged = this.enrichAuthorIdentity(
+            const mergeFragments = () => this.enrichAuthorIdentity(
                 mergeExactItemFragments(
                     [cached, ...localFragments, ...pageFragments].filter(Boolean),
                     id,
                 ),
                 identity,
             );
-            trace.merged = summarizeExactItem(
-                merged,
-                identity?.permalink || this.window?.location?.href || "",
-                config,
-            );
-            if (!hasUsableRawMediaItem(
-                merged,
-                identity?.permalink || this.window?.location?.href || "",
-                config,
-            )) {
+            const pageUrl = identity?.permalink || this.window?.location?.href || "";
+            const isUsable = (item) => hasUsableRawMediaItem(item, pageUrl, config);
+
+            if (!id) return finish({ ok: false, code: "current-item-id-not-found" });
+            let merged = mergeFragments();
+            if (!isUsable(merged) && !suppliedPageFragments.length) {
+                trace.pageScanAttempted = true;
+                pageFragments = this.collectPageFragments(id);
+                trace.pageFragmentCount = pageFragments.length;
+                merged = mergeFragments();
+            }
+            trace.merged = summarizeExactItem(merged, pageUrl, config);
+            if (!isUsable(merged)) {
                 return finish({
                     ok: false,
                     code: merged ? "media-empty" : "detail-data-missing",
@@ -3512,8 +3590,11 @@
                             });
                             return;
                         }
-                        const error = new Error(`HTTP ${status || "error"}`);
+                        const responseText = String(response?.responseText ?? response?.response ?? "");
+                        const detail = responseText.trim().slice(0, 500);
+                        const error = new Error(`HTTP ${status || "error"}${detail ? `: ${detail}` : ""}`);
                         error.status = status;
+                        error.responseText = responseText;
                         reject(error);
                     },
                     onerror(error) {
@@ -3537,8 +3618,10 @@
         }).then(async (response) => {
             const responseText = await response.text();
             if (!response.ok) {
-                const error = new Error(`HTTP ${response.status}`);
+                const detail = responseText.trim().slice(0, 500);
+                const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
                 error.status = response.status;
+                error.responseText = responseText;
                 throw error;
             }
             return { status: response.status, responseText };
@@ -3553,11 +3636,123 @@
         }
     }
 
-    function mapMicrosoftTranslationLanguage(language = "") {
+    function mapBingTranslationLanguage(language = "") {
         const value = String(language || "");
         if (value === "zh-CN") return "zh-Hans";
         if (value === "zh-TW") return "zh-Hant";
         return value;
+    }
+
+    function createPackedTranslationBatch(texts = []) {
+        const timePart = String(Date.now() % 10000000000).padStart(10, "0");
+        const randomPart = Math.floor(Math.random() * 1000000000000)
+        .toString()
+        .padStart(12, "0");
+        const nonce = `${timePart}${randomPart}`;
+        const items = texts.map((text, index) => {
+            const itemId = String(index).padStart(3, "0");
+            return {
+                startId: `${nonce}${itemId}1`,
+                endId: `${nonce}${itemId}2`,
+                text: String(text || ""),
+            };
+        });
+        return {
+            items,
+            text: items.map((item) => (
+                `${item.startId}\n` +
+                `${item.text}\n` +
+                `${item.endId}`
+            )).join("\n\n"),
+        };
+    }
+
+    function estimatePackedTranslationBatchLength(texts = []) {
+        const boundaryIdLength = 10 + 12 + 3 + 1;
+        const itemOverhead = boundaryIdLength * 2 + 2;
+        return texts.reduce(
+            (sum, text) => sum + String(text || "").length + itemOverhead,
+            Math.max(0, texts.length - 1) * 2,
+        );
+    }
+
+    function parsePackedTranslationBatch(translatedText = "", payload = {}) {
+        const value = String(translatedText || "");
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        if (!value || !items.length) return items.map(() => null);
+
+        return items.map((item) => {
+            const startPosition = value.indexOf(item.startId);
+            if (startPosition < 0) return null;
+            const start = startPosition + item.startId.length;
+            const end = value.indexOf(item.endId, start);
+            if (end < 0 || end <= start) return null;
+            return value.slice(start, end).trim() || null;
+        });
+    }
+
+    function normalizeTranslationComparisonText(text = "") {
+        const value = String(text || "");
+        return (typeof value.normalize === "function" ? value.normalize("NFKC") : value)
+            .replace(/\s+/gu, " ")
+            .trim();
+    }
+
+    function getTranslationClassificationText(text = "") {
+        const value = String(text || "");
+        const normalized = typeof value.normalize === "function" ? value.normalize("NFC") : value;
+        return normalized
+            .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
+            .replace(/\b(?:https?:\/\/|www\.)\S+/giu, " ")
+            .replace(/@[\p{L}\p{M}\p{N}_.-]+/gu, " ")
+            .trim();
+    }
+
+    function isVietnameseLikeLatinText(text = "") {
+        const value = String(text || "");
+        const normalized = typeof value.normalize === "function" ? value.normalize("NFD") : value;
+        return /[đĐ]/u.test(value) || /[\u031B\u0309\u0323]/u.test(normalized);
+    }
+
+    function classifyTranslationText(text = "") {
+        const value = getTranslationClassificationText(text);
+        const counts = { latin: 0, han: 0, kana: 0, hangul: 0, other: 0 };
+        for (const character of value) {
+            if (!/\p{L}/u.test(character)) continue;
+            if (/\p{Script=Latin}/u.test(character)) counts.latin += 1;
+            else if (/\p{Script=Han}/u.test(character)) counts.han += 1;
+            else if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(character)) counts.kana += 1;
+            else if (/\p{Script=Hangul}/u.test(character)) counts.hangul += 1;
+            else counts.other += 1;
+        }
+
+        const total = counts.latin + counts.han + counts.kana + counts.hangul + counts.other;
+        if (!total) return "neutral";
+        if (counts.kana > 0 && counts.hangul === 0 && counts.other === 0) return "japanese";
+        if (counts.hangul > 0 && counts.kana === 0 && counts.han === 0 && counts.other === 0) return "hangul";
+        if (counts.han > 0 && counts.latin === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) return "han";
+        if (counts.latin > 0 && counts.han === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) {
+            return isVietnameseLikeLatinText(value) ? "vietnamese-like" : "latin";
+        }
+        if (counts.other === total) return "other";
+        return "mixed";
+    }
+
+    function isBatchableTranslationBucket(bucket = "") {
+        return ["latin", "vietnamese-like", "japanese", "hangul", "han"].includes(String(bucket || ""));
+    }
+
+    function normalizeTranslationLanguageCode(language = "") {
+        const value = String(language || "").trim().toLowerCase().replace(/_/g, "-");
+        if (!value) return "";
+        if (value === "zh" || value.startsWith("zh-")) return "zh";
+        return value.split("-")[0];
+    }
+
+    function translationLanguageMatchesTarget(detectedLanguage = "", targetLanguage = "") {
+        const detected = normalizeTranslationLanguageCode(detectedLanguage);
+        const target = normalizeTranslationLanguageCode(targetLanguage);
+        return Boolean(detected && target && detected === target);
     }
 
     class TranslationProvider {
@@ -3565,81 +3760,64 @@
             this.request = request;
         }
 
-        async translate(_text, _options = {}) {
+        getBatchLimits() {
+            return { maxItems: 20, maxPayloadChars: 5000 };
+        }
+
+        async translateBatch(_texts, _options = {}) {
+            throw new Error("Translation provider is not implemented");
+        }
+
+        async translateSingle(_text, _options = {}) {
             throw new Error("Translation provider is not implemented");
         }
     }
 
     class GoogleFreeTranslationProvider extends TranslationProvider {
-        async translate(text, options = {}) {
+        async translateBatch(texts = [], options = {}) {
+            if (!texts.length) return [];
+            const payload = createPackedTranslationBatch(texts);
             const url = new URL("https://translate.googleapis.com/translate_a/single");
             url.searchParams.set("client", "gtx");
             url.searchParams.set("sl", options.source || "auto");
             url.searchParams.set("tl", options.target || DEFAULT_CONFIG.comment_translation_target);
             url.searchParams.set("dt", "t");
-            url.searchParams.set("q", text);
-            const response = await this.request({ url: url.toString(), timeout: 15000 });
-            const data = parseTranslationJson(response.responseText, "Google Translate");
-            const result = Array.isArray(data?.[0])
-            ? data[0].map((item) => String(item?.[0] || "")).join("")
-            : "";
-            if (!result) throw new Error("Google Translate returned an empty result");
-            return result;
-        }
-    }
-
-    class MicrosoftFreeTranslationProvider extends TranslationProvider {
-        constructor(request = userscriptHttpRequest) {
-            super(request);
-            this.authToken = "";
-            this.authExpiresAt = 0;
-        }
-
-        async getAuthToken(force = false) {
-            if (!force && this.authToken && Date.now() < this.authExpiresAt) return this.authToken;
-            const response = await this.request({
-                url: "https://edge.microsoft.com/translate/auth",
-                timeout: 15000,
-            });
-            const token = String(response.responseText || "").trim().replace(/^"|"$/g, "");
-            if (!token) throw new Error("Microsoft Translator authorization failed");
-            this.authToken = token;
-            this.authExpiresAt = Date.now() + 8 * 60 * 1000;
-            return token;
-        }
-
-        async requestTranslation(text, options = {}, forceAuth = false) {
-            const token = await this.getAuthToken(forceAuth);
-            const target = mapMicrosoftTranslationLanguage(
-                options.target || DEFAULT_CONFIG.comment_translation_target,
-            );
-            const url = new URL("https://api-edge.cognitive.microsofttranslator.com/translate");
-            url.searchParams.set("api-version", "3.0");
-            url.searchParams.set("to", target);
             const response = await this.request({
                 method: "POST",
                 url: url.toString(),
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                data: JSON.stringify([{ Text: text }]),
+                headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                data: new URLSearchParams({ q: payload.text }).toString(),
                 timeout: 18000,
             });
-            const data = parseTranslationJson(response.responseText, "Microsoft Translator");
-            const result = String(data?.[0]?.translations?.[0]?.text || "");
-            if (!result) throw new Error("Microsoft Translator returned an empty result");
-            return result;
+            const data = parseTranslationJson(response.responseText, "Google Translate");
+            const translated = Array.isArray(data?.[0])
+            ? data[0].map((item) => String(item?.[0] || "")).join("")
+            : "";
+            if (!translated) throw new Error("Google Translate returned an empty result");
+            return parsePackedTranslationBatch(translated, payload);
         }
 
-        async translate(text, options = {}) {
-            try {
-                return await this.requestTranslation(text, options, false);
-            } catch (error) {
-                if (![401, 403].includes(Number(error?.status || 0))) throw error;
-                this.authToken = "";
-                return this.requestTranslation(text, options, true);
-            }
+        async translateSingle(text = "", options = {}) {
+            const sourceText = String(text || "").trim();
+            if (!sourceText) return { text: "", detectedLanguage: "" };
+            const url = new URL("https://translate.googleapis.com/translate_a/single");
+            url.searchParams.set("client", "gtx");
+            url.searchParams.set("sl", options.source || "auto");
+            url.searchParams.set("tl", options.target || DEFAULT_CONFIG.comment_translation_target);
+            url.searchParams.set("dt", "t");
+            const response = await this.request({
+                method: "POST",
+                url: url.toString(),
+                headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                data: new URLSearchParams({ q: sourceText }).toString(),
+                timeout: 18000,
+            });
+            const data = parseTranslationJson(response.responseText, "Google Translate");
+            const translated = Array.isArray(data?.[0])
+            ? data[0].map((item) => String(item?.[0] || "")).join("").trim()
+            : "";
+            if (!translated) throw new Error("Google Translate returned an empty result");
+            return { text: translated, detectedLanguage: String(data?.[2] || "") };
         }
     }
 
@@ -3648,6 +3826,10 @@
             super(request);
             this.credentials = null;
             this.credentialsExpireAt = 0;
+        }
+
+        getBatchLimits() {
+            return { maxItems: 5, maxPayloadChars: 1000 };
         }
 
         async getCredentials(force = false) {
@@ -3675,9 +3857,10 @@
             return this.credentials;
         }
 
-        async requestTranslation(text, options = {}, forceCredentials = false) {
+        async requestPackedBatch(texts = [], options = {}, forceCredentials = false) {
             const credentials = await this.getCredentials(forceCredentials);
-            const target = mapMicrosoftTranslationLanguage(
+            const payload = createPackedTranslationBatch(texts);
+            const target = mapBingTranslationLanguage(
                 options.target || DEFAULT_CONFIG.comment_translation_target,
             );
             const url = new URL("https://www.bing.com/ttranslatev3");
@@ -3686,7 +3869,7 @@
             url.searchParams.set("IID", credentials.iid);
             const body = new URLSearchParams({
                 fromLang: options.source || "auto-detect",
-                text,
+                text: payload.text,
                 to: target,
                 token: credentials.token,
                 key: credentials.key,
@@ -3699,32 +3882,78 @@
                 timeout: 18000,
             });
             const data = parseTranslationJson(response.responseText, "Bing Translator");
-            const result = String(data?.[0]?.translations?.[0]?.text || "");
-            if (!result) throw new Error("Bing Translator returned an empty result");
-            return result;
+            const translated = String(data?.[0]?.translations?.[0]?.text || "");
+            if (!translated) throw new Error("Bing Translator returned an empty result");
+            return parsePackedTranslationBatch(translated, payload);
         }
 
-        async translate(text, options = {}) {
+        async translateBatch(texts = [], options = {}) {
+            if (!texts.length) return [];
             try {
-                return await this.requestTranslation(text, options, false);
+                return await this.requestPackedBatch(texts, options, false);
             } catch (error) {
                 if (![401, 403, 429].includes(Number(error?.status || 0))) throw error;
                 this.credentials = null;
-                return this.requestTranslation(text, options, true);
+                this.credentialsExpireAt = 0;
+                return this.requestPackedBatch(texts, options, true);
+            }
+        }
+
+        async requestSingle(text = "", options = {}, forceCredentials = false) {
+            const sourceText = String(text || "").trim();
+            if (!sourceText) return { text: "", detectedLanguage: "" };
+            const credentials = await this.getCredentials(forceCredentials);
+            const target = mapBingTranslationLanguage(
+                options.target || DEFAULT_CONFIG.comment_translation_target,
+            );
+            const url = new URL("https://www.bing.com/ttranslatev3");
+            url.searchParams.set("isVertical", "1");
+            url.searchParams.set("IG", credentials.ig);
+            url.searchParams.set("IID", credentials.iid);
+            const body = new URLSearchParams({
+                fromLang: options.source || "auto-detect",
+                text: sourceText,
+                to: target,
+                token: credentials.token,
+                key: credentials.key,
+            });
+            const response = await this.request({
+                method: "POST",
+                url: url.toString(),
+                headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                data: body.toString(),
+                timeout: 18000,
+            });
+            const data = parseTranslationJson(response.responseText, "Bing Translator");
+            const translated = String(data?.[0]?.translations?.[0]?.text || "").trim();
+            if (!translated) throw new Error("Bing Translator returned an empty result");
+            return {
+                text: translated,
+                detectedLanguage: String(data?.[0]?.detectedLanguage?.language || ""),
+            };
+        }
+
+        async translateSingle(text = "", options = {}) {
+            try {
+                return await this.requestSingle(text, options, false);
+            } catch (error) {
+                if (![401, 403, 429].includes(Number(error?.status || 0))) throw error;
+                this.credentials = null;
+                this.credentialsExpireAt = 0;
+                return this.requestSingle(text, options, true);
             }
         }
     }
 
     class TranslationService {
         constructor(request = userscriptHttpRequest) {
-            this.request = request;
             this.providerFactories = new Map();
             this.providers = new Map();
             this.cache = new Map();
-            this.pending = new Map();
-            this.registerProvider("google", () => new GoogleFreeTranslationProvider(this.request));
-            this.registerProvider("microsoft", () => new MicrosoftFreeTranslationProvider(this.request));
-            this.registerProvider("bing", () => new BingFreeTranslationProvider(this.request));
+            this.confirmedSameCache = new Map();
+            this.untranslatedCache = new Map();
+            this.registerProvider("google", () => new GoogleFreeTranslationProvider(request));
+            this.registerProvider("bing", () => new BingFreeTranslationProvider(request));
         }
 
         registerProvider(name, factory) {
@@ -3739,34 +3968,181 @@
             return this.providers.get(key);
         }
 
-        getConcurrency(name) {
-            return COMMENT_TRANSLATION_PROVIDERS.find(({ value }) => value === name)?.concurrency || 2;
+        getBatchLimits(providerName = "") {
+            return this.getProvider(providerName).getBatchLimits();
         }
 
-        async translate(text, options = {}) {
+        canTranslateBatch(providerName = "", texts = []) {
+            const limits = this.getBatchLimits(providerName);
+            const maxItems = Math.max(1, Number(limits.maxItems || 20));
+            const maxPayloadChars = Math.max(1, Number(limits.maxPayloadChars || 5000));
+            return (
+                texts.length > 0 &&
+                texts.length <= maxItems &&
+                estimatePackedTranslationBatchLength(texts) <= maxPayloadChars
+            );
+        }
+
+        canTranslateSingle(providerName = "", text = "") {
+            const limits = this.getBatchLimits(providerName);
+            const maxPayloadChars = Math.max(1, Number(limits.maxPayloadChars || 5000));
+            const sourceText = String(text || "");
+            return Boolean(sourceText && sourceText.length <= maxPayloadChars);
+        }
+
+        getCacheKey(providerName, target, sourceText, cacheScope = "") {
+            return `${providerName}\n${target}\n${cacheScope}\n${sourceText}`;
+        }
+
+        setCachedResult(cacheKey, result) {
+            this.cache.set(cacheKey, result);
+            if (this.cache.size > 1200) this.cache.delete(this.cache.keys().next().value);
+            return result;
+        }
+
+        setConfirmedSame(cacheKey, result) {
+            this.confirmedSameCache.set(cacheKey, result);
+            if (this.confirmedSameCache.size > 1200) {
+                this.confirmedSameCache.delete(this.confirmedSameCache.keys().next().value);
+            }
+            return result;
+        }
+
+        setUntranslated(cacheKey, result) {
+            this.untranslatedCache.set(cacheKey, result);
+            if (this.untranslatedCache.size > 1200) {
+                this.untranslatedCache.delete(this.untranslatedCache.keys().next().value);
+            }
+            return result;
+        }
+
+        async translateBatch(texts = [], options = {}) {
+            const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
+            const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
+            const sourceTexts = texts.map((text) => String(text || "").trim());
+            const cacheScope = String(options.cacheScope || "");
+            const results = new Array(sourceTexts.length).fill(null);
+            const uniqueEntries = new Map();
+
+            sourceTexts.forEach((sourceText, index) => {
+                if (!sourceText) return;
+                const cacheKey = this.getCacheKey(providerName, target, sourceText, cacheScope);
+                let entry = uniqueEntries.get(cacheKey);
+                if (!entry) {
+                    entry = { cacheKey, sourceText, indices: [] };
+                    uniqueEntries.set(cacheKey, entry);
+                }
+                entry.indices.push(index);
+            });
+
+            const freshEntries = [];
+            const assignResult = (entry, result) => {
+                for (const index of entry.indices) results[index] = result;
+            };
+
+            for (const entry of uniqueEntries.values()) {
+                if (this.cache.has(entry.cacheKey)) {
+                    assignResult(entry, this.cache.get(entry.cacheKey));
+                } else if (this.confirmedSameCache.has(entry.cacheKey)) {
+                    assignResult(entry, entry.sourceText);
+                } else if (this.untranslatedCache.has(entry.cacheKey)) {
+                    assignResult(entry, null);
+                } else {
+                    freshEntries.push(entry);
+                }
+            }
+
+            if (freshEntries.length) {
+                if (!this.canTranslateBatch(
+                    providerName,
+                    freshEntries.map((entry) => entry.sourceText),
+                )) {
+                    throw new Error("Translation batch exceeds provider limits");
+                }
+                const batchResults = await this.getProvider(providerName).translateBatch(
+                    freshEntries.map((entry) => entry.sourceText),
+                    { source: "auto", target },
+                );
+                if (!Array.isArray(batchResults) || batchResults.length !== freshEntries.length) {
+                    throw new Error("Translation provider returned an invalid batch size");
+                }
+                freshEntries.forEach((entry, index) => {
+                    const value = typeof batchResults[index] === "string"
+                    ? batchResults[index].trim()
+                    : "";
+                    if (!value) return;
+                    if (
+                        normalizeTranslationComparisonText(value) ===
+                        normalizeTranslationComparisonText(entry.sourceText)
+                    ) {
+                        assignResult(entry, value);
+                        return;
+                    }
+                    assignResult(entry, this.setCachedResult(entry.cacheKey, value));
+                });
+            }
+
+            return results;
+        }
+
+        async translateSingle(text = "", options = {}) {
             const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
             const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
             const sourceText = String(text || "").trim();
-            if (!sourceText) return "";
-            const cacheKey = `${providerName}\n${target}\n${sourceText}`;
-            if (this.cache.has(cacheKey)) return this.cache.get(cacheKey);
-            if (this.pending.has(cacheKey)) return this.pending.get(cacheKey);
-            const request = this.getProvider(providerName).translate(sourceText, {
-                source: "auto",
-                target,
-            }).then((result) => {
-                this.cache.set(cacheKey, result);
-                if (this.cache.size > 1200) this.cache.delete(this.cache.keys().next().value);
-                return result;
-            }).finally(() => {
-                this.pending.delete(cacheKey);
+            const cacheScope = String(options.cacheScope || "");
+            if (!sourceText) return { status: "unchanged", text: "", detectedLanguage: "", fromCache: true };
+            if (!this.canTranslateSingle(providerName, sourceText)) {
+                throw new Error("Translation text exceeds provider limits");
+            }
+
+            const cacheKey = this.getCacheKey(providerName, target, sourceText, cacheScope);
+            if (this.cache.has(cacheKey)) {
+                return { status: "translated", text: this.cache.get(cacheKey), detectedLanguage: "", fromCache: true };
+            }
+            if (this.confirmedSameCache.has(cacheKey)) {
+                return { ...this.confirmedSameCache.get(cacheKey), fromCache: true };
+            }
+            if (this.untranslatedCache.has(cacheKey)) {
+                return { ...this.untranslatedCache.get(cacheKey), fromCache: true };
+            }
+
+            const provider = this.getProvider(providerName);
+            let lastDetectedLanguage = "";
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const result = await provider.translateSingle(sourceText, { source: "auto", target });
+                const translated = String(result?.text || "").trim();
+                const detectedLanguage = String(result?.detectedLanguage || "");
+                lastDetectedLanguage = detectedLanguage || lastDetectedLanguage;
+                if (!translated) throw new Error("Translation provider returned an empty single result");
+                if (
+                    normalizeTranslationComparisonText(translated) !==
+                    normalizeTranslationComparisonText(sourceText)
+                ) {
+                    this.setCachedResult(cacheKey, translated);
+                    return { status: "translated", text: translated, detectedLanguage, fromCache: false };
+                }
+                if (translationLanguageMatchesTarget(detectedLanguage, target)) {
+                    return this.setConfirmedSame(cacheKey, {
+                        status: "unchanged",
+                        text: sourceText,
+                        detectedLanguage,
+                        fromCache: false,
+                    });
+                }
+            }
+
+            return this.setUntranslated(cacheKey, {
+                status: "untranslated",
+                text: sourceText,
+                detectedLanguage: lastDetectedLanguage,
+                fromCache: false,
+                reason: "source-returned-unchanged",
             });
-            this.pending.set(cacheKey, request);
-            return request;
         }
     }
 
     const COMMENT_TEXT_SELECTOR = '[data-e2e="comment-level-1"], [data-e2e="comment-level-2"]';
+    const MAX_SCRIPT_TRANSLATION_BATCH_ITEMS = 10;
 
     class CommentTranslationController {
         constructor(app, service = new TranslationService()) {
@@ -3778,26 +4154,81 @@
             this.displayMode = "original";
             this.records = new WeakMap();
             this.queue = [];
-            this.activeCount = 0;
+            this.batchInFlight = false;
             this.generation = 0;
             this.observer = null;
+            this.observerRoot = null;
+            this.discoveryObserver = null;
+            this.discoveryRoot = null;
             this.scanTimer = null;
             this.button = null;
             this.buttonHost = null;
             this.buttonTooltip = null;
             this.currentVideoKey = null;
+            this.mediaElementKeys = new WeakMap();
+            this.mediaElementIdentities = new WeakMap();
+            this.nextMediaElementKey = 1;
             this.lastErrorToastAt = 0;
+            this.retryTimer = null;
+            this.retryAt = 0;
         }
 
         start() {
             this.scheduleScan(0);
-            if (typeof this.window.MutationObserver !== "function" || !this.document.body) return;
-            this.observer = new this.window.MutationObserver((records) => {
+            this.syncMutationObservers(null);
+        }
+
+        disconnectMutationObservers() {
+            this.observer?.disconnect?.();
+            this.discoveryObserver?.disconnect?.();
+            this.observer = null;
+            this.observerRoot = null;
+            this.discoveryObserver = null;
+            this.discoveryRoot = null;
+        }
+
+        syncMutationObservers(panelRoot = null) {
+            const MutationObserverCtor = this.window.MutationObserver;
+            const body = this.document.body;
+            if (typeof MutationObserverCtor !== "function" || !body) return;
+
+            const nextRoot = panelRoot?.isConnected ? panelRoot : null;
+            const nextDiscoveryRoot = nextRoot?.parentElement || (!nextRoot ? body : null);
+            if (this.observerRoot === nextRoot && this.discoveryRoot === nextDiscoveryRoot) return;
+
+            this.disconnectMutationObservers();
+
+            if (nextRoot) {
+                this.observerRoot = nextRoot;
+                this.observer = new MutationObserverCtor((records) => {
+                    if (records.some((record) => (
+                        record.type === "characterData" ||
+                        (record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))
+                    ))) {
+                        this.scheduleScan(80);
+                    }
+                });
+                this.observer.observe(nextRoot, { childList: true, characterData: true, subtree: true });
+
+                if (nextDiscoveryRoot) {
+                    this.discoveryRoot = nextDiscoveryRoot;
+                    this.discoveryObserver = new MutationObserverCtor((records) => {
+                        if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
+                            this.scheduleScan(80);
+                        }
+                    });
+                    this.discoveryObserver.observe(nextDiscoveryRoot, { childList: true, subtree: false });
+                }
+                return;
+            }
+
+            this.discoveryRoot = body;
+            this.discoveryObserver = new MutationObserverCtor((records) => {
                 if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
                     this.scheduleScan(80);
                 }
             });
-            this.observer.observe(this.document.body, { childList: true, subtree: true });
+            this.discoveryObserver.observe(body, { childList: true, subtree: true });
         }
 
         scheduleScan(delay = 80) {
@@ -3827,8 +4258,11 @@
                 );
                 if (!hiddenByTranslation && !this.isRendered(element)) return false;
                 if (hiddenByTranslation) {
-                    const translatedElement = this.records.get(element)?.translatedElement;
-                    if (!translatedElement?.isConnected || !this.isRendered(translatedElement)) return false;
+                    const record = this.records.get(element);
+                    if (!record?.translated) {
+                        element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
+                        if (!this.isRendered(element)) return false;
+                    }
                 }
                 if (element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')) return false;
                 return true;
@@ -3915,23 +4349,64 @@
             return null;
         }
 
+        getCommentLoginRow(context = null) {
+            const selector = ".comment-login-bar";
+            const scoped = context?.root?.querySelectorAll?.(selector) || [];
+            const candidates = scoped.length ? Array.from(scoped) : Array.from(this.document.querySelectorAll(selector));
+            const loginBar = candidates.find((element) => (
+                this.isRendered(element) &&
+                !element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')
+            )) || null;
+            const loginButton = loginBar?.parentElement || null;
+            const loginWrapper = loginButton?.parentElement || null;
+            return loginWrapper && this.isRendered(loginWrapper) ? loginWrapper : null;
+        }
+
         getCurrentVideoKey() {
             const pathname = String(this.window.location?.pathname || "");
             const mediaMatch = pathname.match(/\/(?:video|photo)\/(\d+)/i);
             if (mediaMatch) return `media:${mediaMatch[1]}`;
 
-            // Feed routes such as /foryou can keep the same pathname while TikTok
-            // replaces the active card.  Resolve the identity from the visible
-            // media card so translation never leaks into the next video's comments.
             const visibleMedia = this.app.extractor?.getVisibleMediaElement?.() || null;
+            const stableElement =
+                  this.app.extractor?.getMediaContextElement?.(visibleMedia) ||
+                  visibleMedia;
             const visibleUrl = this.app.extractor?.getVisibleMediaContextUrls?.(visibleMedia)?.[0] || "";
             const visibleId = getVideoIdFromUrl(visibleUrl);
-            return visibleId ? `media:${visibleId}` : `page:${pathname}`;
+
+            if (stableElement) {
+                let identity = this.mediaElementIdentities.get(stableElement);
+                if (!identity) {
+                    let elementKey = this.mediaElementKeys.get(stableElement);
+                    if (!elementKey) {
+                        elementKey = this.nextMediaElementKey;
+                        this.nextMediaElementKey += 1;
+                        this.mediaElementKeys.set(stableElement, elementKey);
+                    }
+                    identity = {
+                        key: visibleId ? `media:${visibleId}` : `media-element:${pathname}:${elementKey}`,
+                        mediaId: visibleId || "",
+                    };
+                    this.mediaElementIdentities.set(stableElement, identity);
+                    return identity.key;
+                }
+
+                if (visibleId && identity.mediaId && visibleId !== identity.mediaId) {
+                    identity = { key: `media:${visibleId}`, mediaId: visibleId };
+                    this.mediaElementIdentities.set(stableElement, identity);
+                    return identity.key;
+                }
+                if (visibleId && !identity.mediaId) identity.mediaId = visibleId;
+                return identity.key;
+            }
+            return visibleId ? `media:${visibleId}` : null;
         }
 
         resetForVideo(nextVideoKey) {
             this.generation += 1;
             this.queue.length = 0;
+            this.batchInFlight = false;
+            this.clearRetryTimer();
             for (const element of this.document.querySelectorAll(COMMENT_TEXT_SELECTOR)) {
                 const record = this.records.get(element);
                 record?.translatedElement?.remove?.();
@@ -3981,8 +4456,11 @@
         mountButton(commentElements = [], suppliedContext = null) {
             const context = suppliedContext || this.getPanelContext(commentElements);
             const commentInput = this.getCommentInput(context);
-            const actionRow = this.getCommentActionRow(commentInput);
-            if (!commentInput || !actionRow) {
+            const inputActionRow = this.getCommentActionRow(commentInput);
+            const actionRow = inputActionRow || this.getCommentLoginRow(context);
+            const placement = inputActionRow ? "input" : "login";
+            if (!actionRow) {
+                this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
                 this.buttonHost?.remove?.();
                 this.button = null;
                 this.buttonHost = null;
@@ -3992,16 +4470,20 @@
             if (
                 !this.button?.isConnected ||
                 !this.buttonHost?.isConnected ||
-                this.buttonHost.parentElement !== actionRow
+                this.buttonHost.parentElement !== actionRow ||
+                this.buttonHost.dataset.placement !== placement
             ) {
+                this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
                 this.buttonHost?.remove?.();
                 const host = createElement(
                     this.document,
                     "div",
                     `TUXTooltip-reference ${SCRIPT_PREFIX}-comment-translation-host`,
                 );
-                const referenceButton = commentInput.querySelector?.('[data-e2e="comment-emoji-icon"]');
-                const colorScheme = referenceButton
+                host.dataset.placement = placement;
+                if (placement === "login") actionRow.classList?.add?.(`${SCRIPT_PREFIX}-comment-login-row`);
+                const referenceButton = commentInput?.querySelector?.('[data-e2e="comment-emoji-icon"]');
+                const colorScheme = (referenceButton || actionRow)
                 ?.closest?.('[data-tux-color-scheme]')
                 ?.getAttribute?.("data-tux-color-scheme");
                 if (colorScheme) host.setAttribute("data-tux-color-scheme", colorScheme);
@@ -4024,9 +4506,6 @@
                 button.addEventListener("click", (event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    // TikTok's own comment-action tooltips disappear as soon as their
-                    // button is activated. Keep this tooltip hidden until the pointer
-                    // leaves, otherwise :hover would immediately reveal it again.
                     host.dataset.tooltipSuppressed = "true";
                     button.blur?.();
                     this.toggleDisplay();
@@ -4054,7 +4533,7 @@
 
         updateButton() {
             if (!this.button) return;
-            const busy = this.enabled && this.displayMode === "translated" && (this.activeCount > 0 || this.queue.length > 0);
+            const busy = this.enabled && this.displayMode === "translated" && (this.batchInFlight || this.queue.length > 0);
             const comparison = this.app.configStore.get().comment_translation_display_mode === "comparison";
             const label = !this.enabled
             ? this.app.t("translate_comments")
@@ -4064,7 +4543,7 @@
             ? this.app.t(comparison ? "hide_translated_comments" : "show_original_comments")
             : this.app.t("show_translated_comments");
             this.button.setAttribute("aria-label", label);
-            if (this.buttonTooltip) this.buttonTooltip.textContent = label;
+            if (this.buttonTooltip && this.buttonTooltip.textContent !== label) this.buttonTooltip.textContent = label;
             this.button.dataset.state = busy ? "busy" : this.displayMode;
             this.button.setAttribute("aria-pressed", String(this.enabled && this.displayMode === "translated"));
         }
@@ -4082,14 +4561,68 @@
         }
         getTranslationSourceText(text = "") {
             const value = String(text || "").trim();
-
             return value
-                .replace(/^\[\p{L}[\p{L}\p{M}]*\]\s*/u, "")
+                .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
                 .trim();
         }
 
+        normalizeTranslationComparison(text = "") {
+            return normalizeTranslationComparisonText(text);
+        }
+
+        getCommentText(element) {
+            const nodes = Array.from(element?.childNodes || []);
+            if (!nodes.length) return String(element?.textContent || "").trim();
+
+            const inlineTags = new Set(["SPAN", "A", "STRONG", "EM", "B", "I", "S", "U"]);
+            const isExcludedElement = (node) => Boolean(
+                node?.matches?.(COMMENT_TEXT_SELECTOR) ||
+                node?.querySelector?.(COMMENT_TEXT_SELECTOR) ||
+                node?.matches?.('button, [role="button"], svg, [aria-hidden="true"]') ||
+                node?.querySelector?.('button, [role="button"]')
+            );
+
+            const parts = [];
+            const safeContainers = [];
+            for (const node of nodes) {
+                if (node?.nodeType === 3) {
+                    parts.push(String(node.textContent || ""));
+                    continue;
+                }
+                if (node?.nodeType !== 1 || isExcludedElement(node)) continue;
+                if (inlineTags.has(String(node.tagName || "").toUpperCase())) {
+                    parts.push(String(node.textContent || ""));
+                } else {
+                    safeContainers.push(node);
+                }
+            }
+            const directText = parts.join("").trim();
+            if (directText) return directText;
+            if (safeContainers.length === 1) return String(safeContainers[0]?.textContent || "").trim();
+            return "";
+        }
+
+        clearRetryTimer() {
+            if (this.retryTimer !== null) this.window.clearTimeout?.(this.retryTimer);
+            this.retryTimer = null;
+            this.retryAt = 0;
+        }
+
+        scheduleRetry(delayMs = 30000) {
+            if (!this.enabled) return;
+            const runAt = Date.now() + Math.max(0, Number(delayMs) || 0);
+            if (this.retryTimer !== null && this.retryAt && this.retryAt <= runAt) return;
+            this.clearRetryTimer();
+            this.retryAt = runAt;
+            this.retryTimer = this.window.setTimeout?.(() => {
+                this.retryTimer = null;
+                this.retryAt = 0;
+                if (this.enabled) this.scan();
+            }, Math.max(0, runAt - Date.now())) ?? null;
+        }
+
         getRecord(element) {
-            const currentText = String(element?.textContent || "").trim();
+            const currentText = this.getCommentText(element);
             let record = this.records.get(element);
             if (record && record.original === currentText) return record;
             record?.translatedElement?.remove?.();
@@ -4104,37 +4637,12 @@
             return record;
         }
 
-        isEmojiOnly(text = "") {
-            const value = String(text || "").trim();
-            if (!value) return false;
-
-            const remaining = value
-            // 普通 Emoji、人物、动物、物体等
-            .replace(/\p{Extended_Pictographic}/gu, "")
-            // 国旗 Emoji，例如 🇨🇳 🇺🇸
-            .replace(/\p{Regional_Indicator}/gu, "")
-            // 肤色修饰符
-            .replace(/\p{Emoji_Modifier}/gu, "")
-            // 键帽 Emoji，例如 1️⃣ #️⃣ *️⃣
-            .replace(/[0-9#*]\uFE0F?\u20E3/gu, "")
-            // Emoji 组合中使用的 ZWJ、变体选择符
-            .replace(/[\u200D\uFE0E\uFE0F]/gu, "")
-            // 部分旗帜 Emoji 使用的 Unicode Tag 字符
-            .replace(/[\u{E0020}-\u{E007F}]/gu, "")
-            // 忽略空白
-            .replace(/\s/gu, "");
-
-            return remaining.length === 0;
+        getTranslationBucket(text = "") {
+            return classifyTranslationText(this.getTranslationSourceText(text));
         }
 
         isTranslatableText(text = "") {
-            const value = this.getTranslationSourceText(text);
-
-            return Boolean(
-                value &&
-                value.length <= 5000 &&
-                !this.isEmojiOnly(value)
-            );
+            return this.getTranslationBucket(text) !== "neutral";
         }
 
         renderRecord(element, record) {
@@ -4148,7 +4656,7 @@
                 );
                 element.insertAdjacentElement?.("afterend", translatedElement);
                 record.translatedElement = translatedElement;
-            } else {
+            } else if (record.translatedElement.textContent !== record.translated) {
                 record.translatedElement.textContent = record.translated;
             }
             const showTranslation = this.enabled && this.displayMode === "translated";
@@ -4170,77 +4678,224 @@
             }
         }
 
-        enqueue(element, record, config) {
-            if (record.status === "pending") return;
-            if (record.status === "failed" && Date.now() - record.failedAt < 30000) return;
+        enqueue(element, record, config, options = {}) {
+            if (["pending", "blocked", "unchanged", "untranslated"].includes(record.status)) return;
+            if (record.status === "failed") {
+                const remaining = 30000 - (Date.now() - record.failedAt);
+                if (remaining > 0) {
+                    this.scheduleRetry(remaining);
+                    return;
+                }
+            }
 
             const sourceText = this.getTranslationSourceText(record.original);
             if (!sourceText) return;
+            const bucket = classifyTranslationText(sourceText);
+            if (bucket === "neutral") {
+                record.status = "unchanged";
+                return;
+            }
 
             record.status = "pending";
             this.queue.push({
                 element,
                 record,
                 sourceText,
+                bucket,
+                forceSingle: Boolean(options.forceSingle),
                 provider: config.comment_translation_provider,
                 target: config.comment_translation_target,
                 generation: this.generation,
             });
         }
 
+        queueSingleFallback(task) {
+            if (
+                task.generation !== this.generation ||
+                !task.element?.isConnected ||
+                this.records.get(task.element) !== task.record
+            ) return;
+            task.record.translated = "";
+            task.record.status = "pending";
+            this.queue.push({ ...task, forceSingle: true });
+        }
+
         drainQueue() {
-            const config = this.app.configStore.get();
-            const limit = this.service.getConcurrency(config.comment_translation_provider);
-            while (this.activeCount < limit && this.queue.length) {
-                const task = this.queue.shift();
-                if (!task.element?.isConnected || task.generation !== this.generation) {
-                    task.record.status = "idle";
+            if (this.batchInFlight || !this.queue.length) {
+                this.updateButton();
+                return;
+            }
+
+            let firstTask = null;
+            while (this.queue.length && !firstTask) {
+                const candidate = this.queue.shift();
+                if (!candidate.element?.isConnected || candidate.generation !== this.generation) {
+                    candidate.record.status = "idle";
                     continue;
                 }
-                this.activeCount += 1;
+                firstTask = candidate;
+            }
+            if (!firstTask) {
                 this.updateButton();
-                this.service.translate(task.sourceText, {
-                    provider: task.provider,
-                    target: task.target,
-                }).then((translated) => {
-                    if (
-                        task.generation !== this.generation ||
-                        !task.element?.isConnected ||
-                        this.records.get(task.element) !== task.record
-                    ) return;
-                    task.record.translated = translated;
-                    task.record.status = "done";
-                    this.renderRecord(task.element, task.record);
-                }).catch((error) => {
-                    if (
-                        task.generation !== this.generation ||
-                        !task.element?.isConnected ||
-                        this.records.get(task.element) !== task.record
-                    ) return;
-                    task.record.status = "failed";
-                    task.record.failedAt = Date.now();
-                    if (Date.now() - this.lastErrorToastAt > 8000) {
-                        this.lastErrorToastAt = Date.now();
-                        this.app.notifications.toast(this.app.t("comment_translation_failed"), {
-                            type: "error",
-                            detail: error?.message || String(error),
-                        });
+                return;
+            }
+
+            const canBatchBucket = !firstTask.forceSingle && isBatchableTranslationBucket(firstTask.bucket);
+            const limits = this.service.getBatchLimits(firstTask.provider);
+            const providerMaxItems = Math.max(1, Number(limits.maxItems || 20));
+            const maxItems = Math.min(MAX_SCRIPT_TRANSLATION_BATCH_ITEMS, providerMaxItems);
+            const batch = [firstTask];
+
+            if (canBatchBucket) {
+                for (let index = 0; index < this.queue.length;) {
+                    const task = this.queue[index];
+                    if (!task.element?.isConnected || task.generation !== this.generation) {
+                        task.record.status = "idle";
+                        this.queue.splice(index, 1);
+                        continue;
                     }
-                }).finally(() => {
-                    this.activeCount = Math.max(0, this.activeCount - 1);
-                    this.updateButton();
-                    this.drainQueue();
+                    const sameBucket =
+                          !task.forceSingle &&
+                          task.generation === firstTask.generation &&
+                          task.provider === firstTask.provider &&
+                          task.target === firstTask.target &&
+                          task.bucket === firstTask.bucket;
+                    if (
+                        sameBucket &&
+                        batch.length < maxItems &&
+                        this.service.canTranslateBatch(
+                            firstTask.provider,
+                            [...batch.map((entry) => entry.sourceText), task.sourceText],
+                        )
+                    ) {
+                        batch.push(task);
+                        this.queue.splice(index, 1);
+                        continue;
+                    }
+                    index += 1;
+                }
+            }
+
+            const usePackedBatch = canBatchBucket && batch.length >= 2;
+            const requestSingle = !usePackedBatch;
+
+            if (requestSingle && !this.service.canTranslateSingle(firstTask.provider, firstTask.sourceText)) {
+                firstTask.record.status = "blocked";
+                firstTask.record.failedAt = Date.now();
+                if (Date.now() - this.lastErrorToastAt > 8000) {
+                    this.lastErrorToastAt = Date.now();
+                    this.app.notifications.toast(this.app.t("comment_translation_failed"), {
+                        type: "error",
+                        detail: "Comment is too long for the selected translation provider",
+                    });
+                }
+                this.updateButton();
+                this.drainQueue();
+                return;
+            }
+
+            const batchGeneration = firstTask.generation;
+            this.batchInFlight = true;
+            this.updateButton();
+
+            const applyTranslatedItem = (task, translatedValue) => {
+                if (
+                    task.generation !== this.generation ||
+                    !task.element?.isConnected ||
+                    this.records.get(task.element) !== task.record
+                ) return;
+                task.record.translated = String(translatedValue || "").trim();
+                task.record.status = "done";
+                this.renderRecord(task.element, task.record);
+            };
+
+            const markTaskFailed = (task, error) => {
+                if (
+                    task.generation !== this.generation ||
+                    !task.element?.isConnected ||
+                    this.records.get(task.element) !== task.record
+                ) return false;
+                task.record.status = "failed";
+                task.record.failedAt = Date.now();
+                this.scheduleRetry(30000);
+                if (Date.now() - this.lastErrorToastAt > 8000) {
+                    this.lastErrorToastAt = Date.now();
+                    this.app.notifications.toast(this.app.t("comment_translation_failed"), {
+                        type: "error",
+                        detail: error?.message || String(error),
+                    });
+                }
+                return true;
+            };
+
+            let work;
+            if (requestSingle) {
+                work = this.service.translateSingle(firstTask.sourceText, {
+                    provider: firstTask.provider,
+                    target: firstTask.target,
+                    cacheScope: String(firstTask.generation),
+                }).then((result) => {
+                    if (
+                        firstTask.generation !== this.generation ||
+                        !firstTask.element?.isConnected ||
+                        this.records.get(firstTask.element) !== firstTask.record
+                    ) return;
+                    if (result?.status === "translated" && String(result.text || "").trim()) {
+                        applyTranslatedItem(firstTask, result.text);
+                    } else if (result?.status === "unchanged" || result?.status === "untranslated") {
+                        firstTask.record.translated = "";
+                        firstTask.record.status = result.status;
+                    } else {
+                        markTaskFailed(firstTask, new Error("Single translation returned an invalid result"));
+                    }
+                }).catch((error) => {
+                    markTaskFailed(firstTask, error);
+                });
+            } else {
+                work = this.service.translateBatch(batch.map((task) => task.sourceText), {
+                    provider: firstTask.provider,
+                    target: firstTask.target,
+                    cacheScope: String(firstTask.generation),
+                }).then((translatedItems) => {
+                    if (!Array.isArray(translatedItems) || translatedItems.length !== batch.length) {
+                        throw new Error("Translation service returned an invalid batch size");
+                    }
+                    batch.forEach((task, index) => {
+                        const translated = typeof translatedItems[index] === "string"
+                        ? translatedItems[index].trim()
+                        : "";
+                        if (
+                            translated &&
+                            this.normalizeTranslationComparison(translated) !==
+                            this.normalizeTranslationComparison(task.sourceText)
+                        ) {
+                            applyTranslatedItem(task, translated);
+                        } else {
+                            this.queueSingleFallback(task);
+                        }
+                    });
+                }).catch((error) => {
+                    for (const task of batch) markTaskFailed(task, error);
                 });
             }
+
+            work.finally(() => {
+                if (batchGeneration === this.generation) this.batchInFlight = false;
+                this.updateButton();
+                this.drainQueue();
+            });
             this.updateButton();
         }
 
         scan() {
             const videoKey = this.getCurrentVideoKey();
-            if (this.currentVideoKey === null) this.currentVideoKey = videoKey;
-            else if (videoKey !== this.currentVideoKey) this.resetForVideo(videoKey);
+            if (videoKey !== null) {
+                if (this.currentVideoKey === null) this.currentVideoKey = videoKey;
+                else if (videoKey !== this.currentVideoKey) this.resetForVideo(videoKey);
+            }
             const allCommentElements = this.getCommentElements();
             const context = this.getPanelContext(allCommentElements);
+            this.syncMutationObservers(context.root);
             const commentElements = context.root
             ? allCommentElements.filter((element) => context.root.contains?.(element))
             : allCommentElements;
@@ -4250,6 +4905,7 @@
             for (const element of commentElements) {
                 const record = this.getRecord(element);
                 if (!this.isTranslatableText(record.original)) continue;
+                if (["unchanged", "untranslated", "blocked"].includes(record.status)) continue;
                 if (record.translated) {
                     this.renderRecord(element, record);
                     continue;
@@ -4274,6 +4930,8 @@
             if (!serviceChanged) return;
             this.generation += 1;
             this.queue.length = 0;
+            this.batchInFlight = false;
+            this.clearRetryTimer();
             for (const element of this.getCommentElements()) {
                 const record = this.records.get(element);
                 if (!record) continue;
@@ -4498,11 +5156,33 @@
         }
     }
 
+    function createDownloadCancelledError() {
+        const error = new Error("Download cancelled");
+        error.name = "AbortError";
+        error.code = "download-cancelled";
+        return error;
+    }
+
+    function isDownloadCancelledError(error) {
+        return error?.code === "download-cancelled" || error?.name === "AbortError";
+    }
+
+    function throwIfDownloadAborted(signal) {
+        if (signal?.aborted) throw createDownloadCancelledError();
+    }
+
     class Downloader {
         constructor(win, gmRequest = null, gmDownloadFn = null) {
             this.window = win;
             this.gmRequest = gmRequest;
             this.gmDownload = gmDownloadFn;
+            this.lastResult = null;
+        }
+
+        getDebugSnapshot() {
+            return {
+                lastResult: this.lastResult ? { ...this.lastResult } : null,
+            };
         }
 
         normalizeFetchHeaders(headers = {}) {
@@ -4516,68 +5196,157 @@
             return result;
         }
 
-        async fetchBlob(url, headers = {}) {
+        async fetchBlob(url, headers = {}, signal = null) {
+            throwIfDownloadAborted(signal);
             try {
                 const response = await this.window.fetch(url, {
                     credentials: "include",
                     headers: this.normalizeFetchHeaders(headers),
                     referrer: this.window.location?.href || "https://www.tiktok.com/",
+                    signal: signal || undefined,
                 });
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
-                return response.blob();
+                const blob = await response.blob();
+                throwIfDownloadAborted(signal);
+                return {
+                    blob,
+                    requestedUrl: url,
+                    url: response.url || url,
+                    method: "fetch-blob",
+                };
             } catch (err) {
+                if (signal?.aborted || isDownloadCancelledError(err)) {
+                    throw createDownloadCancelledError();
+                }
                 if (!this.gmRequest) throw err;
-                return this.fetchBlobWithGm(url, headers);
+                return this.fetchBlobWithGm(url, headers, signal);
             }
         }
 
-        fetchBlobWithGm(url, headers = {}) {
+        fetchBlobWithGm(url, headers = {}, signal = null) {
             return new Promise((resolve, reject) => {
-                this.gmRequest({
-                    method: "GET",
-                    url,
-                    headers: normalizeHeaders(headers),
-                    responseType: "blob",
-                    onload: (response) => {
-                        const status = Number(response.status || 0);
-                        if (status >= 200 && status < 300 && response.response) {
-                            resolve(response.response);
-                            return;
-                        }
-                        reject(new Error(`HTTP ${status || "unknown"}`));
-                    },
-                    onerror: (error) => reject(error),
-                    ontimeout: () => reject(new Error("Request timeout")),
-                });
+                if (signal?.aborted) {
+                    reject(createDownloadCancelledError());
+                    return;
+                }
+                let request = null;
+                let settled = false;
+                const cleanup = () => signal?.removeEventListener?.("abort", onAbort);
+                const settle = (callback, value) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    callback(value);
+                };
+                const onAbort = () => {
+                    try {
+                        request?.abort?.();
+                    } catch (_err) {
+                    }
+                    settle(reject, createDownloadCancelledError());
+                };
+                signal?.addEventListener?.("abort", onAbort, { once: true });
+                try {
+                    request = this.gmRequest({
+                        method: "GET",
+                        url,
+                        headers: normalizeHeaders(headers),
+                        responseType: "blob",
+                        onload: (response) => {
+                            const status = Number(response.status || 0);
+                            if (status >= 200 && status < 300 && response.response) {
+                                settle(resolve, {
+                                    blob: response.response,
+                                    requestedUrl: url,
+                                    url: response.finalUrl || url,
+                                    method: "gm-xhr-blob",
+                                });
+                                return;
+                            }
+                            settle(reject, new Error(`HTTP ${status || "unknown"}`));
+                        },
+                        onabort: () => settle(reject, createDownloadCancelledError()),
+                        onerror: (error) => settle(
+                            reject,
+                            signal?.aborted
+                            ? createDownloadCancelledError()
+                            : error,
+                        ),
+                        ontimeout: () => settle(reject, new Error("Request timeout")),
+                    });
+                    if (signal?.aborted) onAbort();
+                } catch (err) {
+                    settle(
+                        reject,
+                        signal?.aborted ? createDownloadCancelledError() : err,
+                    );
+                }
             });
         }
 
-        downloadWithGm(url, filename, headers = {}) {
+        downloadWithGm(url, filename, headers = {}, signal = null) {
             if (typeof this.gmDownload !== "function") {
                 return Promise.reject(new Error("GM_download unavailable"));
             }
 
             return new Promise((resolve, reject) => {
+                if (signal?.aborted) {
+                    reject(createDownloadCancelledError());
+                    return;
+                }
+                let download = null;
+                let settled = false;
+                const cleanup = () => signal?.removeEventListener?.("abort", onAbort);
+                const settle = (callback, value) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    callback(value);
+                };
+                const onAbort = () => {
+                    try {
+                        download?.abort?.();
+                    } catch (_err) {
+                    }
+                    settle(reject, createDownloadCancelledError());
+                };
+                signal?.addEventListener?.("abort", onAbort, { once: true });
                 try {
-                    this.gmDownload({
+                    download = this.gmDownload({
                         url,
                         name: filename,
                         headers: normalizeHeaders(headers),
                         saveAs: false,
-                        onload: () => resolve(true),
-                        onerror: (error) => reject(error?.error ? new Error(error.error) : error),
-                        ontimeout: () => reject(new Error("Download timeout")),
+                        onload: () => settle(resolve, {
+                            requestedUrl: url,
+                            url,
+                            method: "gm-download",
+                        }),
+                        onerror: (error) => settle(
+                            reject,
+                            signal?.aborted
+                            ? createDownloadCancelledError()
+                            : error?.error
+                            ? new Error(error.error)
+                            : error,
+                        ),
+                        ontimeout: () => settle(reject, new Error("Download timeout")),
                     });
+                    if (signal?.aborted) onAbort();
                 } catch (err) {
-                    reject(err);
+                    settle(
+                        reject,
+                        signal?.aborted ? createDownloadCancelledError() : err,
+                    );
                 }
             });
         }
 
-        async downloadUrl(urls, filename, headers = {}) {
+        async downloadUrl(urls, filename, headers = {}, signal = null) {
             let lastError = null;
+            this.lastResult = null;
             const allUrls = unique(ensureArray(urls))
             .map((url) => {
                 try {
@@ -4596,19 +5365,43 @@
                 throw lastError || new Error("No safe download URL");
             }
 
-            for (const url of allUrls) {
+            for (let candidateIndex = 0; candidateIndex < allUrls.length; candidateIndex += 1) {
+                const url = allUrls[candidateIndex];
+                throwIfDownloadAborted(signal);
                 try {
-                    await this.downloadWithGm(url, filename, headers);
-                    return true;
+                    const result = await this.downloadWithGm(url, filename, headers, signal);
+                    const fact = {
+                        ...result,
+                        candidateIndex,
+                        fallbackUsed: candidateIndex > 0,
+                    };
+                    this.lastResult = { ...fact, filename };
+                    return fact;
                 } catch (err) {
+                    if (signal?.aborted || isDownloadCancelledError(err)) {
+                        throw createDownloadCancelledError();
+                    }
                     lastError = err;
                 }
 
+                throwIfDownloadAborted(signal);
                 try {
-                    const blob = await this.fetchBlob(url, headers);
-                    this.downloadBlob(blob, filename);
-                    return true;
+                    const result = await this.fetchBlob(url, headers, signal);
+                    throwIfDownloadAborted(signal);
+                    this.downloadBlob(result.blob, filename);
+                    const fact = {
+                        requestedUrl: result.requestedUrl || url,
+                        url: result.url || url,
+                        method: result.method || "fetch-blob",
+                        candidateIndex,
+                        fallbackUsed: candidateIndex > 0,
+                    };
+                    this.lastResult = { ...fact, filename };
+                    return fact;
                 } catch (err) {
+                    if (signal?.aborted || isDownloadCancelledError(err)) {
+                        throw createDownloadCancelledError();
+                    }
                     lastError = err;
                 }
             }
@@ -4734,6 +5527,27 @@
         };
     }
 
+    function clearFixedMenuPlacement(menu) {
+        if (!menu) return;
+        for (const property of ["left", "right", "top", "bottom"]) {
+            menu.style[property] = "";
+        }
+        menu.style.position = "";
+        menu.style.transform = "";
+        delete menu.dataset.placement;
+    }
+
+    function applyFixedMenuPlacement(menu, placement) {
+        if (!menu || !placement) return;
+        menu.style.position = "fixed";
+        menu.style.left = `${Math.round(placement.left)}px`;
+        menu.style.top = `${Math.round(placement.top)}px`;
+        menu.style.right = "auto";
+        menu.style.bottom = "auto";
+        menu.style.transform = "none";
+        menu.dataset.placement = placement.placement;
+    }
+
     const RECOMMEND_ACTION_BAR_SELECTOR = [
         'section[class*="SectionActionBarContainer"]',
         '[class*="SectionActionBarContainer"]',
@@ -4742,7 +5556,8 @@
     ].join(",");
 
     const RECOMMEND_ACTION_METRIC_SELECTOR =
-          '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"]';
+          '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"], ' +
+          '[data-e2e="live-like-icon"], [data-e2e="live-share-icon"]';
 
     const PROFILE_BROWSE_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
     const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
@@ -4967,7 +5782,7 @@
 
     function isOfficialActionMetricElement(element) {
         const value = String(element?.getAttribute?.("data-e2e") || "");
-        return /^(like|comment|favorite|share)-icon$/i.test(value);
+        return /^(?:like|comment|favorite|share|live-like|live-share)-icon$/i.test(value);
     }
 
     function getOfficialActionMetricElement(child) {
@@ -5341,41 +6156,99 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
 }
 .${SCRIPT_PREFIX}-bulk-row {
   display: grid;
-  grid-template-columns: 28px 72px minmax(0, 1fr) 72px;
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--tux-v2-color-ui-shape-neutral-3);
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px;
   background: var(--tux-v2-color-ui-shape-neutral-4);
   cursor: pointer;
   user-select: none;
   transition: background-color 140ms ease, border-color 140ms ease;
 }
+.${SCRIPT_PREFIX}-modal label.${SCRIPT_PREFIX}-bulk-row {
+  display: grid;
+  align-items: stretch;
+  gap: 14px;
+  margin: 0;
+  font-weight: inherit;
+}
 .${SCRIPT_PREFIX}-bulk-row:hover { background: var(--tux-v2-color-ui-shape-neutral-3); }
 .${SCRIPT_PREFIX}-bulk-row.selected { border-color: var(--tux-v2-color-ui-shape-primary-3); background: var(--tux-v2-color-ui-shape-primary-5); }
 .${SCRIPT_PREFIX}-bulk-row.selected:hover { background: var(--tux-v2-color-ui-shape-primary-4); }
-.${SCRIPT_PREFIX}-bulk-row input { width: 18px; height: 18px; accent-color: var(--tux-v2-color-ui-shape-primary); }
 .${SCRIPT_PREFIX}-bulk-cover {
-  width: 72px;
-  height: 96px;
-  border-radius: 8px;
+  width: 88px;
+  height: 116px;
+  border-radius: 9px;
   object-fit: cover;
   background: var(--tux-v2-color-ui-sheet-flat-2);
+}
+.${SCRIPT_PREFIX}-bulk-content {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.${SCRIPT_PREFIX}-bulk-top,
+.${SCRIPT_PREFIX}-bulk-bottom {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.${SCRIPT_PREFIX}-bulk-author {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 800;
+}
+.${SCRIPT_PREFIX}-bulk-badges {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .${SCRIPT_PREFIX}-bulk-desc {
   min-width: 0;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  align-self: center;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
-.${SCRIPT_PREFIX}-bulk-meta { justify-self: end; display: grid; gap: 6px; justify-items: end; }
+.${SCRIPT_PREFIX}-bulk-music {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tux-v2-color-ui-text-3);
+  font-size: 12px;
+}
+.${SCRIPT_PREFIX}-modal .${SCRIPT_PREFIX}-bulk-bottom input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  accent-color: var(--tux-v2-color-ui-shape-primary);
+}
 .${SCRIPT_PREFIX}-bulk-type {
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 5px 9px;
   font-size: 12px;
   font-weight: 700;
   background: var(--tux-v2-color-ui-shape-primary-5);
@@ -5514,6 +6387,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
   align-self: end;
   flex: 0 0 auto;
 }
+.${SCRIPT_PREFIX}-comment-login-row {
+  display: flex !important;
+  align-items: center !important;
+}
+.${SCRIPT_PREFIX}-comment-login-row > :first-child { flex: 1 1 auto; min-width: 0; }
+.${SCRIPT_PREFIX}-comment-translation-host[data-placement="login"] { align-self: center; margin-left: 8px; margin-right: 12px; }
 button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button {
   display: inline-flex !important;
   align-items: center !important;
@@ -5741,9 +6620,7 @@ button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button[data-state="busy"] {
 }
 .${SCRIPT_PREFIX}-modal main { padding: 18px 22px 22px; }
 .${SCRIPT_PREFIX}-modal h2 { margin: 0; font-size: 20px; line-height: 1.2; }
-.${SCRIPT_PREFIX}-modal .${SCRIPT_PREFIX}-subtitle { margin: 5px 0 0; color: var(--tux-v2-color-ui-text-3); font-size: 13px; }
 .${SCRIPT_PREFIX}-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.${SCRIPT_PREFIX}-section { display: grid; gap: 12px; margin-bottom: 18px; }
 .${SCRIPT_PREFIX}-field { position: relative; min-width: 0; }
 .${SCRIPT_PREFIX}-field.full, .${SCRIPT_PREFIX}-settings-grid > .full { grid-column: 1 / -1; }
 .${SCRIPT_PREFIX}-modal label {
@@ -5763,7 +6640,20 @@ button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button[data-state="busy"] {
   padding: 10px 12px;
   font: inherit;
   color: var(--tux-v2-color-ui-text-1);
-  background: var(--tux-v2-color-ui-sheet-flat-2);
+  background-color: var(--tux-v2-color-ui-sheet-flat-2);
+}
+.${SCRIPT_PREFIX}-modal select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 44px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 1px),
+    calc(100% - 13px) calc(50% - 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 .${SCRIPT_PREFIX}-modal input[type="checkbox"] {
   width: auto;
@@ -5803,22 +6693,6 @@ button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button[data-state="busy"] {
 }
 .${SCRIPT_PREFIX}-detail-tab.active { color: var(--tux-v2-color-ui-text-primary); border-bottom-color: var(--tux-v2-color-ui-shape-primary); }
 .${SCRIPT_PREFIX}-detail-panel[hidden] { display: none !important; }
-.${SCRIPT_PREFIX}-kv,
-.${SCRIPT_PREFIX}-stat {
-  min-width: 0;
-  border: 1px solid var(--tux-v2-color-ui-shape-neutral-4);
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: var(--tux-v2-color-ui-shape-neutral-4);
-}
-.${SCRIPT_PREFIX}-kv small,
-.${SCRIPT_PREFIX}-stat small {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--tux-v2-color-ui-text-3);
-  font-size: 11px;
-}
-.${SCRIPT_PREFIX}-kv span, .${SCRIPT_PREFIX}-stat strong { display: block; min-width: 0; overflow-wrap: anywhere; }
 .${SCRIPT_PREFIX}-link { color: var(--tux-v2-color-ui-text-primary); overflow-wrap: anywhere; }
 .${SCRIPT_PREFIX}-json-pre {
   max-height: 360px;
@@ -5850,10 +6724,13 @@ button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button[data-state="busy"] {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--tux-v2-color-ui-shape-neutral-4);
+  overflow: hidden;
+  border-bottom: 0;
   background: var(--tux-v2-color-ui-sheet-flat-2);
+  box-shadow: inset 0 -1px var(--tux-v2-color-ui-shape-neutral-4);
 }
 button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
+  flex: 0 0 1.75rem;
   margin: 0 10px;
 }
 .${SCRIPT_PREFIX}-launcher:focus, .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab:focus, .${SCRIPT_PREFIX}-detail-pill:focus { outline: none; }
@@ -5869,20 +6746,36 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
   display: flex;
   gap: 0;
   margin: 0;
+  border-bottom: 0;
   padding: 0 0 0 12px;
-  overflow-x: auto;
+  overflow: hidden;
 }
 .${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab {
+  position: relative;
+  flex: 0 0 auto;
   min-width: 112px;
+  margin: 0;
   border: 0;
-  border-bottom: 3px solid transparent;
-  padding: 18px 20px 15px;
+  padding: 18px 20px 16px;
   color: var(--tux-v2-color-ui-text-3);
   background: transparent;
   font-size: 16px;
   font-weight: 700;
 }
-.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab.active { color: var(--tux-v2-color-ui-text-primary); border-bottom-color: var(--tux-v2-color-ui-shape-primary); background: var(--tux-v2-color-ui-shape-primary-5); }
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab.active {
+  color: var(--tux-v2-color-ui-text-primary);
+  background: var(--tux-v2-color-ui-shape-primary-5);
+}
+.${SCRIPT_PREFIX}-details-modal .${SCRIPT_PREFIX}-detail-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--tux-v2-color-ui-shape-primary);
+  pointer-events: none;
+}
 .${SCRIPT_PREFIX}-detail-body { flex: 1 1 auto; overflow: auto; padding: 22px 28px 28px; }
 .${SCRIPT_PREFIX}-detail-fieldset {
   min-width: 0;
@@ -6100,6 +6993,21 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
   border-radius: 8px;
   object-fit: contain;
   background: var(--tux-v2-color-ui-sheet-flat-2);
+}
+.${SCRIPT_PREFIX}-modal label.${SCRIPT_PREFIX}-frame-format-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 0 0;
+  font-weight: 700;
+}
+.${SCRIPT_PREFIX}-modal select.${SCRIPT_PREFIX}-frame-format-select {
+  width: auto;
+  min-width: 104px;
+  padding: 8px 36px 8px 12px;
+  background-position:
+    calc(100% - 16px) calc(50% - 1px),
+    calc(100% - 11px) calc(50% - 1px);
 }
 .${SCRIPT_PREFIX}-row {
   display: flex;
@@ -6558,21 +7466,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return hosts[0]?.element || null;
         }
 
-        resolveCurrentActionBarHost() {
-            const freshHost = this.findActionBarHost();
-            if (freshHost) {
-                this.app.currentActionBarHost = freshHost;
-                return freshHost;
-            }
-
-            const currentRect = this.getElementRect(this.app.currentActionBarHost);
-            if (this.isVisibleActionBarRect(currentRect)) {
-                return this.app.currentActionBarHost;
-            }
-
-            this.app.currentActionBarHost = null;
-            return null;
-        }
 
         getNativeActionChildren(host) {
             return Array.from(host?.children || []).filter((child) => !this.app.isOwnUiElement?.(child));
@@ -6675,13 +7568,13 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         suspend() {
             this.closeMenu(true);
-            this.disableSelectionMode(false);
+            this.disableSelectionMode();
             this.unmountButtonOnly();
         }
 
         unmount() {
             this.closeMenu();
-            this.disableSelectionMode(false);
+            this.disableSelectionMode();
             this.unmountButtonOnly();
         }
 
@@ -6795,7 +7688,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         toggleMenu(force = null) {
             const menu = this.ensureMenu();
-            this.menuLifecycle.attach(menu, menu);
             const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
             if (shouldOpen) {
                 this.menuLifecycle.open(() => {
@@ -6814,7 +7706,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         closeMenu(immediate = false) {
             if (!this.menu) return;
-            this.menuLifecycle.attach(this.menu, this.menu);
             if (immediate) {
                 this.menuLifecycle.closeImmediate();
             } else {
@@ -6825,13 +7716,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         clearMenuPosition() {
-            if (!this.menu) return;
-            for (const property of ["left", "right", "top", "bottom"]) {
-                this.menu.style[property] = "";
-            }
-            this.menu.style.position = "";
-            this.menu.style.transform = "";
-            delete this.menu.dataset.placement;
+            clearFixedMenuPlacement(this.menu);
         }
 
         bindOutsideClose() {
@@ -6865,13 +7750,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 viewportWidth: this.window.innerWidth || 0,
                 viewportHeight: this.window.innerHeight || 0,
             });
-            menu.style.position = "fixed";
-            menu.style.left = `${Math.round(placement.left)}px`;
-            menu.style.top = `${Math.round(placement.top)}px`;
-            menu.style.right = "auto";
-            menu.style.bottom = "auto";
-            menu.style.transform = "none";
-            menu.dataset.placement = placement.placement;
+            applyFixedMenuPlacement(menu, placement);
         }
 
         updateMenuLabels() {
@@ -6956,9 +7835,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.scheduleScan();
         }
 
-        disableSelectionMode(clearSelected = false) {
+        disableSelectionMode() {
             this.selectionMode = false;
-            if (clearSelected) this.selectedItems.clear();
             if (this.scanInterval) {
                 this.window.clearInterval?.(this.scanInterval);
                 this.scanInterval = null;
@@ -7216,7 +8094,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.app.notifications.toast(this.app.t("bulk_no_selection"));
                 return;
             }
-            const modal = this.app.createModal(this.app.t("bulk_confirm_title"), "", { closeOnBackdrop: false });
+            const modal = this.app.createModal(this.app.t("bulk_confirm_title"), { closeOnBackdrop: false });
             modal.classList.add(`${SCRIPT_PREFIX}-bulk-confirm-modal`);
             const main = modal.querySelector("main");
             const selected = new Set(
@@ -7237,6 +8115,24 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 modal.close?.();
                 this.app.downloadProfileBulkItems(finalItems);
             }, "primary");
+            const retryItems = items.filter((item) =>
+                                            ["failed", "partial"].includes(item.bulkDownloadResult?.status),
+                                           );
+            const retryFailed = retryItems.length
+            ? this.app.actionButton(this.app.t("bulk_retry_failed"), () => {
+                modal.close?.();
+                this.app.downloadProfileBulkItems(retryItems, { retryFailedOnly: true });
+            }, "secondary")
+            : null;
+            const continueItems = items.filter((item) =>
+                                               ["cancelled", "pending"].includes(item.bulkDownloadResult?.status),
+                                              );
+            const continueDownload = continueItems.length
+            ? this.app.actionButton(this.app.t("bulk_continue_download"), () => {
+                modal.close?.();
+                this.app.downloadProfileBulkItems(continueItems, { resumeCancelled: true });
+            }, "secondary")
+            : null;
             const updateCount = () => {
                 countLabel.textContent = `${this.app.t("bulk_selected_count")} ${selected.size}`;
                 start.disabled = selected.size <= 0;
@@ -7277,13 +8173,31 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 const cover = createElement(this.document, "img", `${SCRIPT_PREFIX}-bulk-cover`);
                 cover.alt = "";
                 if (item.coverUrl) cover.src = item.coverUrl;
-                const desc = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-desc`, item.desc || item.pageUrl || item.id);
-                const type = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-type`, this.getItemTypeLabel(item));
-                const meta = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-meta`);
-                meta.append(type);
+
+                const media = item.exactItem
+                ? normalizeMediaItem(item.exactItem, item.pageUrl || item.href || "", this.app.configStore.get())
+                : null;
+                const authorName = String(
+                    media?.author?.nickname ||
+                    media?.author?.uniqueId ||
+                    this.getProfileKey().replace(/^@/, "") ||
+                    "-",
+                ).trim();
+                const description = String(media?.desc || item.desc || item.pageUrl || item.id || "").trim();
+                const musicTitle = String(media?.music?.title || "").trim();
+                const musicAuthor = String(media?.music?.authorName || "").trim();
+                const musicText = musicTitle
+                ? `♫ ${musicTitle}${musicAuthor ? ` - ${musicAuthor}` : ""}`
+                : "";
+
+                const content = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-content`);
+                const top = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-top`);
+                const author = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-author`, authorName);
+                const badges = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-badges`);
+                badges.append(createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-type`, this.getItemTypeLabel(item)));
                 const result = item.bulkDownloadResult;
                 if (result?.status === "success") {
-                    meta.append(createElement(
+                    badges.append(createElement(
                         this.document,
                         "div",
                         `${SCRIPT_PREFIX}-bulk-type downloaded`,
@@ -7294,19 +8208,40 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     const progress = result.status === "partial"
                     ? ` ${result.successfulAssetCount}/${result.totalAssetCount}`
             : "";
-                    meta.append(createElement(
+                    badges.append(createElement(
                         this.document,
                         "div",
                         `${SCRIPT_PREFIX}-bulk-status`,
                         `${this.app.t("download_failed")}${progress}`,
                     ));
                 }
-                row.append(checkbox, cover, desc, meta);
+                if (result?.status === "cancelled") {
+                    const progress = result.totalAssetCount > 1
+                    ? ` ${result.successfulAssetCount}/${result.totalAssetCount}`
+                    : "";
+                    badges.append(createElement(
+                        this.document,
+                        "div",
+                        `${SCRIPT_PREFIX}-bulk-status`,
+                        `${this.app.t("download_cancelled")}${progress}`,
+                    ));
+                }
+                top.append(author, badges);
+
+                const desc = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-desc`, description);
+                const bottom = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-bottom`);
+                const music = createElement(this.document, "div", `${SCRIPT_PREFIX}-bulk-music`, musicText);
+                bottom.append(music, checkbox);
+                content.append(top, desc, bottom);
+                row.append(cover, content);
                 list.appendChild(row);
             }
             selectionActions.append(selectAll, invertSelection);
             footerLeft.append(selectionActions, countLabel);
-            actions.append(close, start);
+            actions.append(close);
+            if (retryFailed) actions.append(retryFailed);
+            if (continueDownload) actions.append(continueDownload);
+            actions.append(start);
             footer.append(footerLeft, actions);
             main.append(list, footer);
             updateCount();
@@ -7677,10 +8612,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.openImageOverlay = null;
             this.isDownloading = false;
             this.downloadCancelRequested = false;
+            this.downloadAbortController = null;
             this.lastProfileBulkRun = null;
             this.lastProfileBulkResolve = null;
             this.lastExtractionTrace = null;
-            this.isCapturingFrame = false;
             this.notifications = new NotificationCenter(this);
             this.commentTranslation = new CommentTranslationController(this);
             this.menuLifecycle = new MenuLifecycle(win, {
@@ -8026,7 +8961,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         toggleMenu(force = null) {
             if (!this.panel || !this.menu) return;
-            this.menuLifecycle.attach(this.panel, this.menu);
             const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
             if (shouldOpen) {
                 this.currentMedia = null;
@@ -8040,7 +8974,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         closeMenu(immediate = false) {
             if (!this.panel || !this.menu) return;
-            this.menuLifecycle.attach(this.panel, this.menu);
             if (immediate) this.menuLifecycle.closeImmediate();
             else this.menuLifecycle.close();
         }
@@ -8065,13 +8998,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         clearPanelMenuPosition() {
-            if (!this.menu) return;
-            for (const property of ["left", "right", "top", "bottom"]) {
-                this.menu.style[property] = "";
-            }
-            this.menu.style.position = "";
-            this.menu.style.transform = "";
-            delete this.menu.dataset.placement;
+            clearFixedMenuPlacement(this.menu);
         }
 
         updatePanelMenuPosition() {
@@ -8090,13 +9017,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 viewportWidth: this.window.innerWidth || 0,
                 viewportHeight: this.window.innerHeight || 0,
             });
-            this.menu.style.position = "fixed";
-            this.menu.style.left = `${Math.round(placement.left)}px`;
-            this.menu.style.top = `${Math.round(placement.top)}px`;
-            this.menu.style.right = "auto";
-            this.menu.style.bottom = "auto";
-            this.menu.style.transform = "none";
-            this.menu.dataset.placement = placement.placement;
+            applyFixedMenuPlacement(this.menu, placement);
         }
 
         bindMenuOutsideClose() {
@@ -8702,22 +9623,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         getFilename(media, suffix = "mp4") {
-            const base = buildFilename(media, this.configStore.get());
-            const extension = normalizeFileExtension(suffix, "mp4");
-            return extension ? `${base}.${extension}` : base;
+            return buildVideoFilename(media, this.configStore.get(), suffix);
         }
 
         getImageFilename(media, image = {}, index = 0) {
-            const config = this.configStore.get();
-            const base = buildFilename(media, config);
-            const url = String(image.url || "");
-            const extension = normalizeFileExtension(
-                url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1],
-                "jpg",
-            );
-            return normalizeFilename(`${base}_image${formatAlbumIndex(index, config.album_index_format)}.${extension}`, {
-                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 16,
-            });
+            return buildImageFilename(media, image, index, this.configStore.get());
         }
 
         getFilenamePreviewMedia() {
@@ -8854,7 +9764,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         collectDebugInfo() {
             const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
             return {
-                version: "debug-full-v19",
+                version: "debug-full-v20",
                 capturedAt: new Date().toISOString(),
                 url: this.window.location?.href || "",
                 pageType: this.getCurrentPageType(),
@@ -8880,6 +9790,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 identityResolver: this.currentItemResolver?.getDebugSnapshot?.() || null,
                 itemDataProvider: this.itemDataProvider?.getDebugSnapshot?.() || null,
                 profileBulk: this.profilePageBulkAdapter?.getDebugSnapshot?.() || null,
+                downloader: this.downloader?.getDebugSnapshot?.() || null,
                 profileBulkRun: this.lastProfileBulkRun,
                 profileBulkResolve: this.lastProfileBulkResolve,
             };
@@ -8908,13 +9819,27 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
         }
 
+        beginDownloadOperation() {
+            this.downloadCancelRequested = false;
+            const AbortControllerCtor = this.window.AbortController;
+            this.downloadAbortController = typeof AbortControllerCtor === "function"
+                ? new AbortControllerCtor()
+            : null;
+            return this.downloadAbortController?.signal || null;
+        }
+
+        finishDownloadOperation() {
+            this.downloadAbortController = null;
+            this.downloadCancelRequested = false;
+        }
+
         async downloadVideo() {
             if (this.isDownloading) {
                 this.notifications.nudgeDownloadStatus();
                 return;
             }
             this.isDownloading = true;
-            this.downloadCancelRequested = false;
+            const signal = this.beginDownloadOperation();
             this.notifications.showDownloadPreparing();
 
             try {
@@ -8922,11 +9847,16 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     anchorElement: this.getCurrentActionAnchor(),
                 });
                 const images = ensureArray(media?.images).filter((image) => image?.url);
-                if (!media?.video?.primaryUrl && !images.length) {
+                if (
+                    !this.downloadCancelRequested &&
+                    !signal?.aborted &&
+                    !media?.video?.primaryUrl &&
+                    !images.length
+                ) {
                     this.notifications.showDownloadError(this.getLastMediaErrorMessage());
                     return;
                 }
-                const result = await this.downloadResolvedMedia(media);
+                const result = await this.downloadResolvedMedia(media, { signal });
                 const successCount = ensureArray(result?.successfulAssets).length;
                 const failureCount = ensureArray(result?.failedAssets).length;
                 if (result?.status === "cancelled") {
@@ -8948,7 +9878,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 }
             } finally {
                 this.isDownloading = false;
-                this.downloadCancelRequested = false;
+                this.finishDownloadOperation();
             }
         }
 
@@ -8958,7 +9888,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 return;
             }
             this.isDownloading = true;
-            this.downloadCancelRequested = false;
+            const signal = this.beginDownloadOperation();
 
             try {
                 const urls = unique(ensureArray(url));
@@ -8970,14 +9900,22 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 else if (kind === "music") this.notifications.showMusicDownloading(filename);
                 else this.notifications.showImageDownloading(filename);
                 try {
-                    await this.downloader.downloadUrl(urls, filename);
+                    await this.downloader.downloadUrl(urls, filename, {}, signal);
                     this.notifications.showDownloadSuccess(filename);
                 } catch (err) {
-                    this.notifications.showDownloadError(err?.message || String(err));
+                    if (signal?.aborted || isDownloadCancelledError(err)) {
+                        this.notifications.setDownloadStatus({
+                            type: "error",
+                            title: this.t("download_cancelled"),
+                            detail: filename,
+                        });
+                    } else {
+                        this.notifications.showDownloadError(err?.message || String(err));
+                    }
                 }
             } finally {
                 this.isDownloading = false;
-                this.downloadCancelRequested = false;
+                this.finishDownloadOperation();
             }
         }
 
@@ -9001,18 +9939,48 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return this.downloadAsset(imageUrl, filename, "image");
         }
 
-        getFrameFilename(media = {}) {
+        getFrameFilename(media = {}, extension = "png") {
             const config = this.configStore.get();
             const previewMedia = media?.id ? media : this.getFilenamePreviewMedia();
             const base = buildFilename(previewMedia, config) || `tiktok_frame_${Date.now()}`;
-            return normalizeFilename(`${base}_frame.png`, {
+            return normalizeFilename(`${base}_frame.${extension}`, {
                 maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 10,
             });
         }
 
-        captureCurrentFrame() {
+        getLiveFrameAuthorName(video = null) {
+            const context =
+                  this.extractor.getMediaContextElement(video) ||
+                  video?.parentElement ||
+                  null;
+            const nickname = findLiveNicknameInReact([video?.parentElement, context]);
+            if (nickname) return nickname;
+            const authorLink =
+                  context?.querySelector?.('a[data-e2e="video-author-avatar"][href*="/@"][href*="/live"]') ||
+                  context?.querySelector?.('a[href*="/@"][href*="/live"]') ||
+                  null;
+            return getAuthorFromUrl(authorLink?.href || authorLink?.getAttribute?.("href") || "");
+        }
+
+        getCapturedFrameFilename(frame = {}, extension = "png") {
+            if (!frame?.isLive) return this.getFrameFilename(frame?.media || {}, extension);
+            const config = this.configStore.get();
+            const authorName = String(frame.liveAuthorName || "").trim();
+            const timestamp = formatDate(frame.capturedAt, "YYYYMMDDHHmmss").slice(2);
+            const base = authorName
+            ? `${authorName}_live_${timestamp}_frame`
+                : `live_${timestamp}_frame`;
+            return normalizeFilename(`${base}.${normalizeFileExtension(extension, "png")}`, {
+                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 10,
+            });
+        }
+
+        captureCurrentFrame(media = {}, anchorElement = null, options = {}) {
             this.mountPanel();
-            const video = this.extractor.getCurrentVideoElement(this.getCurrentActionAnchor());
+            const anchorContext = this.extractor.getMediaContextElement(anchorElement);
+            const video =
+                  this.extractor.getContextVideoElement(anchorContext) ||
+                  (options.allowVisibleVideo ? this.extractor.getVisibleVideoElement() : null);
             if (!video || !video.videoWidth || !video.videoHeight) {
                 throw new Error(this.t("no_media"));
             }
@@ -9026,22 +9994,25 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             } catch (err) {
                 throw new Error(`Canvas draw failed: ${err?.message || err}`);
             }
-            const media = this.currentMedia || {};
-            return {
+            const frame = {
                 canvas,
-                filename: this.getFrameFilename(media),
+                media,
+                isLive: options.isLive === true,
+                liveAuthorName: options.isLive === true ? this.getLiveFrameAuthorName(video) : "",
+                capturedAt: new Date(),
                 width: canvas.width,
                 height: canvas.height,
-                blob: null,
-                blobPromise: null,
+                blobCache: new Map(),
             };
+            frame.filename = this.getCapturedFrameFilename(frame);
+            return frame;
         }
 
-        getCapturedFrameBlob(frame) {
-            if (frame?.blob) return Promise.resolve(frame.blob);
-            if (frame?.blobPromise) return frame.blobPromise;
+        getCapturedFrameBlob(frame, mimeType = "image/png") {
             if (!frame?.canvas) return Promise.reject(new Error("Canvas is unavailable."));
-            frame.blobPromise = new Promise((resolve, reject) => {
+            frame.blobCache ||= new Map();
+            if (frame.blobCache.has(mimeType)) return frame.blobCache.get(mimeType);
+            const blobPromise = new Promise((resolve, reject) => {
                 try {
                     frame.canvas.toBlob((value) => {
                         if (!value) {
@@ -9052,14 +10023,21 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                             );
                             return;
                         }
-                        frame.blob = value;
+                        if (value.type && value.type !== mimeType) {
+                            reject(new Error(`Canvas export format is unavailable: ${mimeType}`));
+                            return;
+                        }
                         resolve(value);
-                    }, "image/png");
+                    }, mimeType);
                 } catch (err) {
                     reject(err);
                 }
+            }).catch((err) => {
+                frame.blobCache.delete(mimeType);
+                throw err;
             });
-            return frame.blobPromise;
+            frame.blobCache.set(mimeType, blobPromise);
+            return blobPromise;
         }
 
         async copyFrameToClipboard(frame) {
@@ -9067,19 +10045,45 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             if (!ClipboardItem || !this.window.navigator.clipboard?.write) {
                 throw new Error(this.t("frame_copy_unsupported"));
             }
-            const blob = await this.getCapturedFrameBlob(frame);
+            const blob = await this.getCapturedFrameBlob(frame, "image/png");
             await this.window.navigator.clipboard.write([
                 new ClipboardItem({ [blob.type || "image/png"]: blob }),
             ]);
         }
 
         async openFrameCapture() {
-            if (this.isCapturingFrame) return;
-            this.isCapturingFrame = true;
-
             try {
-                const frame = this.captureCurrentFrame();
-                const modal = this.createModal(this.t("frame_title"), "", {
+                const initialAnchor = this.getCurrentActionAnchor();
+                const isLive = this.isCurrentLiveContext(initialAnchor);
+                let frameAnchor = initialAnchor;
+                let media = {};
+                if (isLive) {
+                    this.currentMedia = null;
+                } else {
+                    media = await this.waitForCurrentMedia({ anchorElement: initialAnchor });
+                    if (!hasUsableMedia(media) || media?.isImagePost || ensureArray(media?.images).length) {
+                        throw new Error(this.getLastMediaErrorMessage());
+                    }
+                    frameAnchor = initialAnchor?.isConnected
+                        ? initialAnchor
+                    : this.getCurrentActionAnchor();
+                    const identityResult = this.currentItemResolver.resolve({
+                        anchorElement: frameAnchor,
+                        pageType: this.getCurrentPageType(),
+                        isLive: false,
+                    });
+                    if (
+                        !identityResult?.ok ||
+                        String(identityResult.identity?.id || "") !== String(media.id || "")
+                    ) {
+                        throw new Error(this.t("current_item_not_found"));
+                    }
+                }
+                const frame = this.captureCurrentFrame(media, frameAnchor, {
+                    allowVisibleVideo: isLive,
+                    isLive,
+                });
+                const modal = this.createModal(this.t("frame_title"), {
                     closeOnBackdrop: false,
                 });
                 modal.classList.add(`${SCRIPT_PREFIX}-frame-modal`);
@@ -9095,7 +10099,38 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     `${frame.width}x${frame.height} - ${frame.filename}`,
                 );
                 const actions = createElement(this.document, "div", `${SCRIPT_PREFIX}-row ${SCRIPT_PREFIX}-actions`);
+                const formatControl = createElement(
+                    this.document,
+                    "label",
+                    `${SCRIPT_PREFIX}-frame-format-control`,
+                );
+                formatControl.appendChild(
+                    createElement(this.document, "span", "", this.t("format")),
+                );
+                const formatSelect = createElement(
+                    this.document,
+                    "select",
+                    `${SCRIPT_PREFIX}-frame-format-select`,
+                );
+                for (const format of FRAME_SAVE_FORMATS) {
+                    const option = createElement(this.document, "option", "", format.extension.toUpperCase());
+                    option.value = format.extension;
+                    formatSelect.appendChild(option);
+                }
+                formatSelect.value = FRAME_SAVE_FORMATS[0].extension;
+                const getFrameSaveFormat = () =>
+                FRAME_SAVE_FORMATS.find((format) => format.extension === formatSelect.value) ||
+                      FRAME_SAVE_FORMATS[0];
+                const updateFrameSaveFormat = () => {
+                    const format = getFrameSaveFormat();
+                    frame.filename = this.getCapturedFrameFilename(frame, format.extension);
+                    meta.textContent = `${frame.width}x${frame.height} - ${frame.filename}`;
+                };
+                formatSelect.addEventListener("change", updateFrameSaveFormat);
+                formatControl.appendChild(formatSelect);
+                updateFrameSaveFormat();
                 actions.append(
+                    formatControl,
                     this.actionButton(this.t("copy_frame"), async () => {
                         try {
                             await this.copyFrameToClipboard(frame);
@@ -9106,26 +10141,18 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     }, "primary"),
                     this.actionButton(this.t("save_frame"), async () => {
                         try {
-                            const blob = await this.getCapturedFrameBlob(frame);
-                            this.downloader.downloadBlob(blob, frame.filename);
+                            const format = getFrameSaveFormat();
+                            const filename = this.getCapturedFrameFilename(frame, format.extension);
+                            const blob = await this.getCapturedFrameBlob(frame, format.mimeType);
+                            this.downloader.downloadBlob(blob, filename);
                         } catch (err) {
                             this.notifications.toast(`${this.t("frame_failed")}: ${err?.message || err}`);
                         }
                     }, "secondary"),
                 );
                 main.append(preview, meta, actions);
-                const prepareBlob = () => {
-                    this.getCapturedFrameBlob(frame).catch(() => {});
-                };
-                if (typeof this.window.requestAnimationFrame === "function") {
-                    this.window.requestAnimationFrame(() => this.window.setTimeout?.(prepareBlob, 0));
-                } else {
-                    this.window.setTimeout?.(prepareBlob, 0);
-                }
             } catch (err) {
                 this.notifications.toast(`${this.t("frame_failed")}: ${err?.message || err}`);
-            } finally {
-                this.isCapturingFrame = false;
             }
         }
 
@@ -9304,7 +10331,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 makeActions,
                 makeDownloadPill,
                 makeCopyPill,
-                appendValue,
                 makeRows,
                 makeTable,
                 formatBool,
@@ -9499,7 +10525,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
             const language = resolveLanguage(this.configStore.get(), this.window.navigator);
             const details = buildDetailsModel(media, this.configStore.get(), language);
-            const modal = this.createModal(this.t("details_title"), "", { showHeader: false });
+            const modal = this.createModal(this.t("details_title"), { showHeader: false });
             modal.classList.add(`${SCRIPT_PREFIX}-details-modal`);
             const close = createTuxIconButton(
                 this.document,
@@ -9546,10 +10572,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             body.append(mediaPanel, authorPanel, postPanel, jsonPanel);
             header.append(tabs, close);
             main.append(header, body);
-        }
-
-        getProfileBulkTaskDelayMs() {
-            return 1500 + Math.floor(Math.random() * 501);
         }
 
         showBulkDownloadProgress(index, total, detail = "") {
@@ -9624,15 +10646,50 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         async downloadResolvedMedia(media, context = {}) {
             const bulk = context.bulk === true;
+            const signal = context.signal || this.downloadAbortController?.signal || null;
+            const cancelledResult = (
+                successfulAssets = [],
+                failedAssets = [],
+                retryAssetIndexes = [],
+                totalAssetCount = successfulAssets.length + failedAssets.length,
+            ) => ({
+                status: "cancelled",
+                successfulAssets,
+                failedAssets,
+                retryAssetIndexes,
+                totalAssetCount,
+                message: this.t(bulk ? "bulk_download_cancelled" : "download_cancelled"),
+            });
+            if (this.downloadCancelRequested || signal?.aborted) {
+                return cancelledResult();
+            }
+            const requestedImageIndexes = new Set(
+                ensureArray(context.imageIndexes)
+                .map((value) => Number(value))
+                .filter((value) => Number.isInteger(value) && value > 0),
+            );
             const imageEntries = ensureArray(media?.images)
             .filter((image) => image?.url)
             .map((image, index) => ({
                 image,
                 originalIndex: Math.max(0, Number(image.index || index + 1) - 1),
-            }));
+            }))
+            .filter((entry) =>
+                    !requestedImageIndexes.size || requestedImageIndexes.has(entry.originalIndex + 1),
+                   );
             if (!media?.video?.primaryUrl && imageEntries.length) {
                 const successfulAssets = [];
                 const failedAssets = [];
+                const getRetryAssetIndexes = () => {
+                    const successfulIndexes = new Set(
+                        successfulAssets
+                        .map((asset) => Number(asset?.index))
+                        .filter((value) => Number.isInteger(value) && value > 0),
+                    );
+                    return imageEntries
+                        .map((entry) => entry.originalIndex + 1)
+                        .filter((assetIndex) => !successfulIndexes.has(assetIndex));
+                };
                 for (let index = 0; index < imageEntries.length; index += 1) {
                     const entry = imageEntries[index];
                     const image = entry.image;
@@ -9642,13 +10699,13 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                         image,
                         originalIndex,
                     );
-                    if (this.downloadCancelRequested) {
-                        return {
-                            status: "cancelled",
+                    if (this.downloadCancelRequested || signal?.aborted) {
+                        return cancelledResult(
                             successfulAssets,
                             failedAssets,
-                            message: this.t(bulk ? "bulk_download_cancelled" : "download_cancelled"),
-                        };
+                            getRetryAssetIndexes(),
+                            imageEntries.length,
+                        );
                     }
                     if (bulk) {
                         this.showBulkDownloadProgress(
@@ -9660,16 +10717,29 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                         this.notifications.showAlbumProgress(index + 1, imageEntries.length, filename);
                     }
                     try {
-                        await this.downloader.downloadUrl(
+                        const transfer = await this.downloader.downloadUrl(
                             unique([image.url, ...ensureArray(image.fallbackUrls)]),
                             filename,
+                            {},
+                            signal,
                         );
                         successfulAssets.push({
                             index: originalIndex + 1,
-                            url: image.url,
+                            url: transfer?.url || image.url,
+                            requestedUrl: transfer?.requestedUrl || image.url,
+                            method: transfer?.method || "",
+                            fallbackUsed: transfer?.fallbackUsed === true,
                             filename,
                         });
                     } catch (err) {
+                        if (signal?.aborted || isDownloadCancelledError(err)) {
+                            return cancelledResult(
+                                successfulAssets,
+                                failedAssets,
+                                getRetryAssetIndexes(),
+                                imageEntries.length,
+                            );
+                        }
                         failedAssets.push({
                             index: originalIndex + 1,
                             filename,
@@ -9677,19 +10747,13 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                             stage: "download-image",
                         });
                     }
-                    if (
-                        bulk &&
-                        index < imageEntries.length - 1 &&
-                        !this.downloadCancelRequested
-                    ) {
-                        await this.wait(500);
-                    }
                 }
                 if (!failedAssets.length) {
                     return {
                         status: "success",
                         successfulAssets,
                         failedAssets: [],
+                        totalAssetCount: imageEntries.length,
                         filename: successfulAssets.at(-1)?.filename || "",
                     };
                 }
@@ -9697,6 +10761,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     status: successfulAssets.length ? "partial" : "failed",
                     successfulAssets,
                     failedAssets,
+                    totalAssetCount: imageEntries.length,
                     message: failedAssets[0]?.message || this.t("download_failed"),
                 };
             }
@@ -9708,13 +10773,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     message: this.t("no_media"),
                 };
             }
-            if (this.downloadCancelRequested) {
-                return {
-                    status: "cancelled",
-                    successfulAssets: [],
-                    failedAssets: [],
-                    message: this.t(bulk ? "bulk_download_cancelled" : "download_cancelled"),
-                };
+            if (this.downloadCancelRequested || signal?.aborted) {
+                return cancelledResult([], [], [], 1);
             }
             const filename = this.getFilename(
                 media,
@@ -9722,31 +10782,44 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             );
             if (!bulk) this.notifications.showVideoPreparing(filename);
             try {
-                await this.downloader.downloadUrl(
+                const transfer = await this.downloader.downloadUrl(
                     [
                         media.video.primaryUrl,
                         ...ensureArray(media.video.fallbackUrls),
                     ],
                     filename,
+                    {},
+                    signal,
                 );
                 return {
                     status: "success",
-                    successfulAssets: [{ filename, url: media.video.primaryUrl }],
+                    successfulAssets: [{
+                        filename,
+                        url: transfer?.url || media.video.primaryUrl,
+                        requestedUrl: transfer?.requestedUrl || media.video.primaryUrl,
+                        method: transfer?.method || "",
+                        fallbackUsed: transfer?.fallbackUsed === true,
+                    }],
                     failedAssets: [],
+                    totalAssetCount: 1,
                     filename,
                 };
             } catch (err) {
+                if (signal?.aborted || isDownloadCancelledError(err)) {
+                    return cancelledResult([], [], [], 1);
+                }
                 const message = err?.message || String(err);
                 return {
                     status: "failed",
                     successfulAssets: [],
                     failedAssets: [{ filename, url: media.video.primaryUrl, message }],
+                    totalAssetCount: 1,
                     message,
                 };
             }
         }
 
-        async downloadProfileBulkItems(items = []) {
+        async downloadProfileBulkItems(items = [], options = {}) {
             const queue = ensureArray(items).filter(Boolean);
             if (!queue.length) {
                 this.notifications.toast(this.t("bulk_no_selection"));
@@ -9756,8 +10829,13 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.notifications.nudgeDownloadStatus();
                 return;
             }
+            const retryFailedOnly = options.retryFailedOnly === true;
+            const resumeCancelled = options.resumeCancelled === true;
+            const previousResults = new Map(
+                queue.map((item) => [item.id, item.bulkDownloadResult || null]),
+            );
             this.isDownloading = true;
-            this.downloadCancelRequested = false;
+            const signal = this.beginDownloadOperation();
             queue.forEach((item) => {
                 item.bulkDownloadResult = { status: "pending" };
             });
@@ -9767,17 +10845,14 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const runTrace = {
                 startedAt: new Date().toISOString(),
                 queueSize: queue.length,
+                retryFailedOnly,
+                resumeCancelled,
                 results: [],
             };
             try {
                 for (let index = 0; index < queue.length; index += 1) {
                     const item = queue[index];
-                    if (this.downloadCancelRequested) {
-                        cancelled = true;
-                        break;
-                    }
-                    if (index > 0) await this.wait(this.getProfileBulkTaskDelayMs());
-                    if (this.downloadCancelRequested) {
+                    if (this.downloadCancelRequested || signal?.aborted) {
                         cancelled = true;
                         break;
                     }
@@ -9788,6 +10863,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     );
                     try {
                         const media = await this.resolveProfileBulkMedia(item);
+                        if (this.downloadCancelRequested || signal?.aborted) {
+                            cancelled = true;
+                            break;
+                        }
                         if (!hasUsableMedia(media)) {
                             failed += 1;
                             item.bulkDownloadResult = { status: "failed" };
@@ -9799,25 +10878,108 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                             });
                             continue;
                         }
+                        const previousResult = previousResults.get(item.id);
+                        const retryImageIndexes = retryFailedOnly
+                        ? ensureArray(previousResult?.failedAssetIndexes)
+                        .map((value) => Number(value))
+                        .filter((value) => Number.isInteger(value) && value > 0)
+                        : [];
+                        const resumeImageIndexes = resumeCancelled && previousResult?.status === "cancelled"
+                        ? ensureArray(previousResult?.retryAssetIndexes)
+                        .map((value) => Number(value))
+                        .filter((value) => Number.isInteger(value) && value > 0)
+                        : [];
+                        const retryingAlbumAssets = Boolean(
+                            retryImageIndexes.length &&
+                            !media?.video?.primaryUrl &&
+                            ensureArray(media?.images).length,
+                        );
+                        const resumingAlbumAssets = Boolean(
+                            resumeImageIndexes.length &&
+                            !media?.video?.primaryUrl &&
+                            ensureArray(media?.images).length,
+                        );
+                        const requestedImageIndexes = retryingAlbumAssets
+                        ? retryImageIndexes
+                        : resumingAlbumAssets
+                        ? resumeImageIndexes
+                        : [];
+                        const mergingAlbumAssets = retryingAlbumAssets || resumingAlbumAssets;
                         const result = await this.downloadResolvedMedia(media, {
                             bulk: true,
                             index: index + 1,
                             total: queue.length,
+                            imageIndexes: requestedImageIndexes,
+                            signal,
                         });
-                        const status = result?.status || "failed";
-                        const successfulAssetCount = ensureArray(result?.successfulAssets).length;
-                        const failedAssetCount = ensureArray(result?.failedAssets).length;
+                        const resultSuccessfulAssets = ensureArray(result?.successfulAssets);
+                        const resultFailedAssets = ensureArray(result?.failedAssets);
+                        let status = result?.status || "failed";
+                        let successfulAssetCount = resultSuccessfulAssets.length;
+                        let totalAssetCount = Math.max(
+                            0,
+                            Number(result?.totalAssetCount || 0),
+                        ) || successfulAssetCount + resultFailedAssets.length;
+                        let failedAssetIndexes = resultFailedAssets
+                        .map((asset) => Number(asset?.index))
+                        .filter((value) => Number.isInteger(value) && value > 0);
+                        let retryAssetIndexes = ensureArray(result?.retryAssetIndexes)
+                        .map((value) => Number(value))
+                        .filter((value) => Number.isInteger(value) && value > 0);
+
+                        if (mergingAlbumAssets) {
+                            const successfulIndexes = new Set(
+                                resultSuccessfulAssets
+                                .map((asset) => Number(asset?.index))
+                                .filter((value) => Number.isInteger(value) && value > 0),
+                            );
+                            const remainingAssetIndexes = requestedImageIndexes.filter(
+                                (assetIndex) => !successfulIndexes.has(assetIndex),
+                            );
+                            const previousSuccessfulAssetCount = Math.max(
+                                0,
+                                Number(previousResult?.successfulAssetCount || 0),
+                            );
+                            totalAssetCount = Math.max(
+                                Number(previousResult?.totalAssetCount || 0),
+                                previousSuccessfulAssetCount + requestedImageIndexes.length,
+                            );
+                            successfulAssetCount = Math.min(
+                                totalAssetCount,
+                                previousSuccessfulAssetCount + successfulIndexes.size,
+                            );
+                            if (status === "cancelled") {
+                                retryAssetIndexes = remainingAssetIndexes;
+                            } else {
+                                failedAssetIndexes = remainingAssetIndexes;
+                                retryAssetIndexes = [];
+                                status = failedAssetIndexes.length
+                                    ? successfulAssetCount > 0
+                                    ? "partial"
+                                : "failed"
+                                : "success";
+                            }
+                        }
+
                         item.bulkDownloadResult = {
                             status,
                             successfulAssetCount,
-                            totalAssetCount: successfulAssetCount + failedAssetCount,
+                            totalAssetCount,
+                            failedAssetIndexes,
+                            retryAssetIndexes,
                         };
                         runTrace.results.push({
                             itemId: item.id || media.id || "",
                             mediaSource: media.extraction?.source || "",
                             status,
                             successfulAssetCount,
-                            failedAssetCount,
+                            failedAssetCount: failedAssetIndexes.length || resultFailedAssets.length,
+                            failedAssetIndexes,
+                            retryAssetIndexes,
+                            retryFailedOnly: retryingAlbumAssets,
+                            resumeCancelled: resumingAlbumAssets || (resumeCancelled && previousResult?.status === "pending"),
+                            downloadMethods: unique(resultSuccessfulAssets.map((asset) => asset?.method).filter(Boolean)),
+                            fallbackAssetCount: resultSuccessfulAssets.filter((asset) => asset?.fallbackUsed).length,
                             message: result?.message || "",
                         });
                         if (status === "success") {
@@ -9869,7 +11031,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 }
             } finally {
                 this.isDownloading = false;
-                this.downloadCancelRequested = false;
+                this.finishDownloadOperation();
                 this.profilePageBulkAdapter?.refreshCheckboxStates?.();
             }
             if (cancelled || failed) this.profilePageBulkAdapter?.openConfirmModal?.();
@@ -9878,6 +11040,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         requestDownloadCancel() {
             if (!this.isDownloading) return false;
             this.downloadCancelRequested = true;
+            try {
+                this.downloadAbortController?.abort?.();
+            } catch (_err) {
+            }
             return true;
         }
 
@@ -9889,47 +11055,30 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         buildSettingsAppearanceGrid(config) {
-            const language = this.input(
+            const language = this.selectInput(
                 this.t("language"),
-                "select",
                 "language",
                 config.language,
-                "tooltip_language",
+                LANGUAGE_OPTIONS,
             );
-            LANGUAGE_OPTIONS.forEach(([value, label]) => {
-                const option = createElement(this.document, "option");
-                option.value = value;
-                option.textContent = label;
-                if (value === config.language) option.selected = true;
-                language.appendChild(option);
-            });
-
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
             grid.append(language.wrapper);
             return grid;
         }
 
         buildSettingsDownloadGrid(config) {
-            const quality = this.input(
+            const quality = this.selectInput(
                 this.t("video_resolution"),
-                "select",
                 "video_quality",
                 config.video_quality,
-                "tooltip_video_resolution",
+                VIDEO_QUALITY_OPTIONS.map((value) => [value, this.t(`quality_${value}`)]),
             );
-            VIDEO_QUALITY_OPTIONS.forEach((value) => {
-                const option = createElement(this.document, "option");
-                option.value = value;
-                option.textContent = this.t(`quality_${value}`);
-                if (value === config.video_quality) option.selected = true;
-                quality.appendChild(option);
-            });
 
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
             grid.append(quality.wrapper);
 
             const selectedSourceColumns = new Set(normalizeVideoSourceColumns(config.video_source_columns));
-            const sourceColumns = this.fieldWrapper(this.t("source_columns"), "", "full");
+            const sourceColumns = this.fieldWrapper(this.t("source_columns"), "full");
             const sourceColumnList = createElement(this.document, "div", `${SCRIPT_PREFIX}-chip-list`);
             VIDEO_SOURCE_COLUMN_DEFINITIONS.forEach((definition) => {
                 const chip = createElement(this.document, "label", `${SCRIPT_PREFIX}-check-chip`);
@@ -9953,47 +11102,30 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         buildSettingsCommentTranslationGrid(config) {
-            const provider = this.input(
+            const provider = this.selectInput(
                 this.t("comment_translation_provider"),
-                "select",
                 "comment_translation_provider",
                 config.comment_translation_provider,
+                COMMENT_TRANSLATION_PROVIDERS.map((definition) => [
+                    definition.value,
+                    this.t(definition.messageKey),
+                ]),
             );
-            COMMENT_TRANSLATION_PROVIDERS.forEach((definition) => {
-                const option = createElement(this.document, "option");
-                option.value = definition.value;
-                option.textContent = this.t(definition.messageKey);
-                if (definition.value === config.comment_translation_provider) option.selected = true;
-                provider.appendChild(option);
-            });
-
-            const target = this.input(
+            const target = this.selectInput(
                 this.t("comment_translation_target"),
-                "select",
                 "comment_translation_target",
                 config.comment_translation_target,
+                COMMENT_TRANSLATION_TARGETS,
             );
-            COMMENT_TRANSLATION_TARGETS.forEach(([value, label]) => {
-                const option = createElement(this.document, "option");
-                option.value = value;
-                option.textContent = label;
-                if (value === config.comment_translation_target) option.selected = true;
-                target.appendChild(option);
-            });
-
-            const displayMode = this.input(
+            const displayMode = this.selectInput(
                 this.t("comment_translation_display_mode"),
-                "select",
                 "comment_translation_display_mode",
                 config.comment_translation_display_mode,
+                COMMENT_TRANSLATION_DISPLAY_MODES.map((definition) => [
+                    definition.value,
+                    this.t(definition.messageKey),
+                ]),
             );
-            COMMENT_TRANSLATION_DISPLAY_MODES.forEach((definition) => {
-                const option = createElement(this.document, "option");
-                option.value = definition.value;
-                option.textContent = this.t(definition.messageKey);
-                if (definition.value === config.comment_translation_display_mode) option.selected = true;
-                displayMode.appendChild(option);
-            });
 
             const note = createElement(
                 this.document,
@@ -10002,7 +11134,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.t("comment_translation_note"),
             );
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-            grid.append(provider.wrapper, target.wrapper, displayMode.wrapper, note);
+            grid.append(
+                provider.wrapper,
+                target.wrapper,
+                displayMode.wrapper,
+                note,
+            );
             return grid;
         }
 
@@ -10044,27 +11181,16 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 "number",
                 "filename_max_length",
                 config.filename_max_length,
-                "tooltip_filename_max_length",
             );
-            const albumIndexFormat = this.input(
+            const albumIndexFormat = this.selectInput(
                 this.t("album_index_format"),
-                "select",
                 "album_index_format",
                 normalizeAlbumIndexFormat(config.album_index_format),
-                "tooltip_album_index_format",
+                ALBUM_INDEX_FORMAT_OPTIONS.map((definition) => [definition.value, definition.label]),
             );
-            ALBUM_INDEX_FORMAT_OPTIONS.forEach((definition) => {
-                const option = createElement(this.document, "option");
-                option.value = definition.value;
-                option.textContent = definition.label;
-                if (definition.value === normalizeAlbumIndexFormat(config.album_index_format)) {
-                    option.selected = true;
-                }
-                albumIndexFormat.appendChild(option);
-            });
             const filenameEditor = this.createFilenameTemplateEditor(config, {
                 previewMedia: this.getFilenamePreviewMedia(),
-                getMaxLength: () => Number(maxLength.value || config.filename_max_length || 80),
+                getMaxLength: () => Number(maxLength.value || config.filename_max_length || DEFAULT_CONFIG.filename_max_length),
             });
             maxLength.addEventListener("input", () => filenameEditor.updatePreview());
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
@@ -10147,7 +11273,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         openSettings() {
             const config = this.configStore.get();
-            const modal = this.createModal(this.t("settings"), "", {
+            const modal = this.createModal(this.t("settings"), {
                 closeOnBackdrop: false,
                 showHeader: false,
             });
@@ -10189,7 +11315,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     });
                     formValues.show_test_notification_menu = Boolean(showTestMenu.checked);
                     formValues.show_debug_info_menu = Boolean(showDebugInfoMenu.checked);
-                    formValues.filename_max_length = Number(formValues.filename_max_length || 80);
+                    formValues.filename_max_length = Number(formValues.filename_max_length || DEFAULT_CONFIG.filename_max_length);
                     formValues.profile_bulk_checkbox_size = clampNumber(
                         Number(formValues.profile_bulk_checkbox_size),
                         18,
@@ -10199,6 +11325,23 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     formValues.video_source_columns = Array.from(
                         modal.querySelectorAll("[data-source-column]:checked"),
                     ).map((input) => input.dataset.sourceColumn);
+                    const shortcutConflict = findShortcutConflict(formValues);
+                    if (shortcutConflict) {
+                        const labels = {
+                            shortcut_download: this.t("shortcut_download"),
+                            shortcut_frame: this.t("shortcut_frame"),
+                            shortcut_details: this.t("shortcut_details"),
+                            shortcut_settings: this.t("shortcut_settings"),
+                        };
+                        this.notifications.toast(
+                            this.t("shortcut_conflict")
+                            .replace("${first}", labels[shortcutConflict.firstKey] || shortcutConflict.firstKey)
+                            .replace("${second}", labels[shortcutConflict.secondKey] || shortcutConflict.secondKey)
+                            .replace("${hotkey}", shortcutConflict.hotkey),
+                            { type: "error" },
+                        );
+                        return;
+                    }
                     const savedConfig = this.configStore.save({ ...formValues, ...filenameEditor.getValues() });
                     this.commentTranslation.handleSettingsChanged(config, savedConfig);
                     this.applyPanelState();
@@ -10222,10 +11365,9 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 "textarea",
                 "",
                 getFilenameTemplate(config),
-                "tooltip_custom_template",
             );
             delete templateInput.dataset.configKey;
-            const previewBlock = this.fieldWrapper(this.t("filename_preview"), "", "full");
+            const previewBlock = this.fieldWrapper(this.t("filename_preview"), "full");
             const previewValue = createElement(this.document, "div", `${SCRIPT_PREFIX}-filename-preview`);
             previewBlock.appendChild(previewValue);
             const renderPreview = () => {
@@ -10233,7 +11375,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     ...config,
                     filename_template: getFilenameTemplate({ filename_template: templateInput.value }),
                     filename_max_length:
-                    Number(options.getMaxLength?.() || config.filename_max_length || 80) || 80,
+                    Number(options.getMaxLength?.() || config.filename_max_length || DEFAULT_CONFIG.filename_max_length) || DEFAULT_CONFIG.filename_max_length,
                 };
                 previewValue.textContent = buildFilename(
                     options.previewMedia || this.getFilenamePreviewMedia(),
@@ -10256,7 +11398,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
             const availableBlock = this.fieldWrapper(
                 this.t("available_fields"),
-                "tooltip_available_fields",
                 "full",
             );
             const availableList = createElement(this.document, "div", `${SCRIPT_PREFIX}-chip-list`);
@@ -10283,7 +11424,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 );
                 chip.type = "button";
                 chip.dataset.field = field;
-                chip.innerHTML = `<span>${escapeHtml(field)}</span><small>${escapeHtml(this.fieldLabel(metadata))}</small>`;
+                chip.innerHTML = `<span>${escapeHtml(field)}</span><small>${escapeHtml(this.localizedMetadataLabel(metadata))}</small>`;
                 return chip;
             };
 
@@ -10295,7 +11436,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 );
                 chip.type = "button";
                 chip.dataset.separator = separator.value;
-                chip.innerHTML = `<span>${escapeHtml(separator.display)}</span><small>${escapeHtml(this.separatorLabel(separator))}</small>`;
+                chip.innerHTML = `<span>${escapeHtml(separator.display)}</span><small>${escapeHtml(this.localizedMetadataLabel(separator))}</small>`;
                 return chip;
             };
 
@@ -10330,19 +11471,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
         }
 
-        fieldLabel(field) {
+        localizedMetadataLabel(item) {
             const language = resolveLanguage(this.configStore.get(), this.window.navigator);
-            return language === "zh" ? field?.zh || field?.en || "" : field?.en || field?.zh || "";
+            return language === "zh" ? item?.zh || item?.en || "" : item?.en || item?.zh || "";
         }
 
-        separatorLabel(separator) {
-            const language = resolveLanguage(this.configStore.get(), this.window.navigator);
-            return language === "zh"
-                ? separator?.zh || separator?.en || ""
-            : separator?.en || separator?.zh || "";
-        }
-
-        fieldWrapper(labelText, tooltipKey = "", className = "") {
+        fieldWrapper(labelText, className = "") {
             const wrapper = createElement(
                 this.document,
                 "div",
@@ -10354,8 +11488,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return wrapper;
         }
 
-        input(labelText, type, key, value, tooltipKey = "", className = "") {
-            const wrapper = this.fieldWrapper(labelText, tooltipKey, className);
+        input(labelText, type, key, value, className = "") {
+            const wrapper = this.fieldWrapper(labelText, className);
             let input;
             if (type === "select") {
                 input = createElement(this.document, "select");
@@ -10370,6 +11504,17 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             wrapper.appendChild(input);
             input.wrapper = wrapper;
             return input;
+        }
+        selectInput(labelText, key, value, options = []) {
+            const select = this.input(labelText, "select", key, "");
+            options.forEach(([optionValue, optionLabel]) => {
+                const option = createElement(this.document, "option", "", optionLabel);
+                option.value = optionValue;
+                select.appendChild(option);
+            });
+            select.value = value ?? "";
+            if (select.selectedIndex < 0 && select.options.length) select.selectedIndex = 0;
+            return select;
         }
         actionButton(text, onClick, className = "") {
             const classes = className.split(/\s+/).filter(Boolean);
@@ -10392,7 +11537,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return button;
         }
 
-        createModal(title, subtitle = "", options = {}) {
+        createModal(title, options = {}) {
             const backdrop = createElement(
                 this.document,
                 "div",
@@ -10410,21 +11555,9 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             let close = null;
             if (options.showHeader !== false) {
                 const header = createElement(this.document, "header");
-                const titleGroup = createElement(this.document, "div");
                 const heading = createElement(this.document, "h2", "", title);
-                titleGroup.appendChild(heading);
-                if (subtitle) {
-                    titleGroup.appendChild(
-                        createElement(
-                            this.document,
-                            "p",
-                            `${SCRIPT_PREFIX}-subtitle`,
-                            subtitle,
-                        ),
-                    );
-                }
                 close = createTuxIconButton(this.document, this.t("close"));
-                header.append(titleGroup, close);
+                header.append(heading, close);
                 modal.append(header, main);
             } else {
                 modal.appendChild(main);
@@ -10434,20 +11567,14 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const previousActiveElement = this.document.activeElement;
             let closed = false;
             const handleEscape = (event) => {
-                if (event.key === "Escape" || event.key === "Esc") {
-                    closeModal("escape");
-                }
+                if (event.key === "Escape" || event.key === "Esc") closeModal();
             };
-            const closeModal = (reason = "programmatic") => {
+            const closeModal = () => {
                 if (closed) return;
                 closed = true;
                 this.document.removeEventListener("keydown", handleEscape, true);
                 backdrop.remove();
-                try {
-                    options.onClose?.(reason);
-                } catch (_err) {}
                 if (
-                    options.restoreFocus !== false &&
                     previousActiveElement?.isConnected &&
                     typeof previousActiveElement.focus === "function"
                 ) {
@@ -10456,11 +11583,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
 
             modal.close = closeModal;
-            backdrop.closeModal = closeModal;
-            close?.addEventListener("click", () => closeModal("close-button"));
+            close?.addEventListener("click", closeModal);
             if (options.closeOnBackdrop !== false) {
                 backdrop.addEventListener("click", (event) => {
-                    if (event.target === backdrop) closeModal("backdrop");
+                    if (event.target === backdrop) closeModal();
                 });
             }
             this.document.addEventListener("keydown", handleEscape, true);
