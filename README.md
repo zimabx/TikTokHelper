@@ -39,7 +39,15 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 ## Release Notes
 
 <details>
-<summary>1.1.0</summary>
+  <summary>1.1.1</summary>
+<ul>
+  <li>Adjusted the download button position in fullscreen mode. It now appears below the More button.</li>
+  <li>Added a dark startup page that changes the initial white loading background to black.</li>
+</ul>
+</details>
+
+<details>
+  <summary>1.1.0</summary>
 <ul>
   <li>Added PNG / JPG / WEBP formats for frame saving, with an improved frame copy and save workflow.</li>
   <li>Added retry support for failed profile bulk downloads, retrying only failed posts or album images.</li>
