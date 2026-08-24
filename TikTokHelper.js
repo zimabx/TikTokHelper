@@ -5,7 +5,7 @@
 // @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译、自定义文件名和个人主页批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.1.0
+// @version			1.1.1
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -31,7 +31,7 @@
 // @connect         *.muscdn.com
 // @connect         translate.googleapis.com
 // @connect         www.bing.com
-// @run-at          document-end
+// @run-at          document-start
 // ==/UserScript==
 
 (function (root) {
@@ -81,6 +81,7 @@
         video_quality: "highest_resolution",
         video_source_columns: [...DEFAULT_VIDEO_SOURCE_COLUMNS],
         language: "auto",
+        dark_boot_screen: true,
         shortcut_download: "M",
         shortcut_frame: "",
         shortcut_details: "",
@@ -303,6 +304,7 @@
             settings_saved: "Settings saved.",
             details_title: "TikTok Helper Details",
             appearance_section: "Appearance",
+            dark_boot_screen: "Dark startup page",
             comment_translation_section: "Comment translation",
             comment_translation_provider: "Translation service",
             comment_translation_target: "Target language",
@@ -483,6 +485,7 @@
             settings_saved: "设置已保存。",
             details_title: "TikTok Helper 详情",
             appearance_section: "外观",
+            dark_boot_screen: "黑色启动页",
             comment_translation_section: "评论翻译",
             comment_translation_provider: "翻译服务",
             comment_translation_target: "目标语言",
@@ -805,6 +808,10 @@
         if (!LANGUAGE_OPTIONS.some(([value]) => value === next.language)) {
             next.language = DEFAULT_CONFIG.language;
         }
+        next.dark_boot_screen = normalizeConfigBoolean(
+            next.dark_boot_screen,
+            DEFAULT_CONFIG.dark_boot_screen,
+        );
         next.video_source_columns = normalizeVideoSourceColumns(next.video_source_columns);
         next.profile_bulk_checkbox_size = clampNumber(
             Number(next.profile_bulk_checkbox_size),
@@ -4506,6 +4513,9 @@
                 button.addEventListener("click", (event) => {
                     event.preventDefault();
                     event.stopPropagation();
+
+
+
                     host.dataset.tooltipSuppressed = "true";
                     button.blur?.();
                     this.toggleDisplay();
@@ -9208,15 +9218,21 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const rect = anchor.getBoundingClientRect?.();
             if (!rect || rect.width <= 0 || rect.height <= 0) return false;
             const size = Math.round(clampNumber(Math.max(rect.width, rect.height), 32, 56, 40));
-            const margin = 8;
+            const margin = 12;
             const viewportWidth = this.window.innerWidth || 0;
             const viewportHeight = this.window.innerHeight || 0;
+            const cinemaPlacement = placementMode === "cinema";
             const preferredLeft = rect.left - size - margin;
             const fallbackLeft = rect.right + margin;
-            const left = preferredLeft >= margin
+            const left = cinemaPlacement
+            ? clampNumber(rect.left + rect.width / 2 - size / 2, margin, Math.max(margin, viewportWidth - size - margin), rect.left)
+            : preferredLeft >= margin
             ? preferredLeft
             : Math.min(Math.max(fallbackLeft, margin), Math.max(margin, viewportWidth - size - margin));
-            const top = clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top);
+            const top = cinemaPlacement
+            ? clampNumber(rect.bottom + margin, margin, Math.max(margin, viewportHeight - size - margin), rect.bottom + margin)
+            : clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top);
+
 
             this.currentPlacementMode = placementMode;
             this.currentActionBarHost = null;
@@ -11061,9 +11077,25 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 config.language,
                 LANGUAGE_OPTIONS,
             );
+            const darkBootWrapper = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-check-left`,
+            );
+            const darkBootLabel = createElement(this.document, "label");
+            const darkBootScreen = createElement(this.document, "input");
+            darkBootScreen.type = "checkbox";
+            darkBootScreen.dataset.configKey = "dark_boot_screen";
+            darkBootScreen.checked = Boolean(config.dark_boot_screen);
+            darkBootLabel.append(
+                darkBootScreen,
+                createElement(this.document, "span", "", this.t("dark_boot_screen")),
+            );
+            darkBootWrapper.appendChild(darkBootLabel);
+
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
-            grid.append(language.wrapper);
-            return grid;
+            grid.append(language.wrapper, darkBootWrapper);
+            return { grid, darkBootScreen };
         }
 
         buildSettingsDownloadGrid(config) {
@@ -11288,7 +11320,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             header.appendChild(headerActions);
             modal.insertBefore(header, main);
 
-            const appearanceGrid = this.buildSettingsAppearanceGrid(config);
+            const { grid: appearanceGrid, darkBootScreen } = this.buildSettingsAppearanceGrid(config);
             const commentTranslationGrid = this.buildSettingsCommentTranslationGrid(config);
             const downloadGrid = this.buildSettingsDownloadGrid(config);
             const profileBulkGrid = this.buildSettingsProfileBulkGrid(config);
@@ -11313,6 +11345,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     modal.querySelectorAll("[data-config-key]").forEach((input) => {
                         formValues[input.dataset.configKey] = input.value;
                     });
+                    formValues.dark_boot_screen = Boolean(darkBootScreen.checked);
                     formValues.show_test_notification_menu = Boolean(showTestMenu.checked);
                     formValues.show_debug_info_menu = Boolean(showDebugInfoMenu.checked);
                     formValues.filename_max_length = Number(formValues.filename_max_length || DEFAULT_CONFIG.filename_max_length);
@@ -11802,6 +11835,117 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             .replace(/'/g, "&#39;");
     }
 
+    function isDarkBootScreenEnabled(storage = null) {
+        try {
+            const targetStorage = storage || root?.localStorage;
+            const raw = targetStorage?.getItem(CONFIG_KEY);
+            if (!raw) return DEFAULT_CONFIG.dark_boot_screen;
+            const stored = JSON.parse(raw);
+            return normalizeConfigBoolean(
+                stored?.dark_boot_screen,
+                DEFAULT_CONFIG.dark_boot_screen,
+            );
+        } catch (_err) {
+            return DEFAULT_CONFIG.dark_boot_screen;
+        }
+    }
+
+    function installDarkBootScreen() {
+        const doc = root?.document;
+        if (!doc || !isDarkBootScreenEnabled()) return;
+
+        const STYLE_ID = `${SCRIPT_PREFIX}-dark-boot-style`;
+        const OVERLAY_ID = `${SCRIPT_PREFIX}-dark-boot-overlay`;
+        const MAX_HOLD_MS = 6000;
+        const REMOVE_DELAY_MS = 180;
+        const FADE_MS = 140;
+        let removed = false;
+        let removeTimer = 0;
+        let failSafeTimer = 0;
+        let rootObserver = null;
+
+        const clearTimer = (timer) => {
+            if (timer) root.clearTimeout?.(timer);
+        };
+        const removeArtifacts = () => {
+            doc.getElementById(OVERLAY_ID)?.remove?.();
+            doc.getElementById(STYLE_ID)?.remove?.();
+        };
+        const removeOverlay = () => {
+            if (removed) return;
+            removed = true;
+            clearTimer(removeTimer);
+            clearTimer(failSafeTimer);
+            rootObserver?.disconnect?.();
+
+            const overlay = doc.getElementById(OVERLAY_ID);
+            if (!overlay) {
+                removeArtifacts();
+                return;
+            }
+            overlay.dataset.leaving = "true";
+            root.setTimeout?.(removeArtifacts, FADE_MS + 40);
+        };
+        const scheduleRemoval = (delay = REMOVE_DELAY_MS) => {
+            clearTimer(removeTimer);
+            removeTimer = root.setTimeout?.(removeOverlay, delay) || 0;
+        };
+        const initialize = () => {
+            const documentElement = doc.documentElement;
+            if (!documentElement) return false;
+
+            if (!doc.getElementById(STYLE_ID)) {
+                const style = doc.createElement("style");
+                style.id = STYLE_ID;
+                style.textContent = `
+html, body {
+  background: #000 !important;
+}
+#${OVERLAY_ID} {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  margin: 0;
+  padding: 0;
+  background: #000;
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity ${FADE_MS}ms linear;
+  contain: strict;
+}
+#${OVERLAY_ID}[data-leaving="true"] {
+  opacity: 0;
+}
+`;
+                (doc.head || documentElement).appendChild(style);
+            }
+
+            if (!doc.getElementById(OVERLAY_ID)) {
+                const overlay = doc.createElement("div");
+                overlay.id = OVERLAY_ID;
+                overlay.setAttribute("aria-hidden", "true");
+                documentElement.appendChild(overlay);
+            }
+
+            if (doc.readyState === "loading") {
+                doc.addEventListener("DOMContentLoaded", () => scheduleRemoval(), { once: true });
+            } else {
+                scheduleRemoval();
+            }
+            failSafeTimer = root.setTimeout?.(removeOverlay, MAX_HOLD_MS) || 0;
+            return true;
+        };
+
+        if (initialize()) return;
+        const MutationObserverCtor = root?.MutationObserver;
+        if (typeof MutationObserverCtor !== "function") return;
+        rootObserver = new MutationObserverCtor(() => {
+            if (!initialize()) return;
+            rootObserver?.disconnect?.();
+        });
+        rootObserver.observe(doc, { childList: true, subtree: true });
+    }
+
     const INSTALL_FLAG = "__tthelperInstalled__";
 
     if (root?.document && !root[INSTALL_FLAG]) {
@@ -11811,6 +11955,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             enumerable: false,
             writable: false,
         });
+
+        try {
+            installDarkBootScreen();
+        } catch (_err) {
+        }
 
         const start = () => {
             const app = new TikTokDlApp(root);
