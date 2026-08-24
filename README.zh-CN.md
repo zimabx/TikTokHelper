@@ -40,6 +40,14 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 ## 更新说明
 
 <details>
+  <summary>1.1.1</summary>
+<ul>
+  <li>调整全屏显示模式下的下载按钮位置，现在显示在“更多”按钮下方。</li>
+  <li>新增黑色启动页，将加载初期白色背景变成黑色。</li>
+</ul>
+</details>
+
+<details>
 <summary>1.1.0</summary>
 <ul>
   <li>新增视频帧 PNG / JPG / WEBP 多格式保存，并优化视频帧复制与保存流程。</li>
