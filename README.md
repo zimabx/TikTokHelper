@@ -47,32 +47,40 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 ## Release Notes
 
 <details>
-  <summary>1.1.1</summary>
+  <summary>1.1.X</summary>
+  
+<h3>1.1.2 Upcoming</h3>
 <ul>
-  <li>Adjusted the download button position in fullscreen mode. It now appears below the More button.</li>
-  <li>Added a dark startup page that changes the initial white loading background to black.</li>
+<li>Added settings for comment translation activation, supporting manual and automatic activation.</li>
+<li>The startup page settings have been changed to a drop-down menu, supporting the original and dark startup pages.</li>
+<li>Unified the “Batch Download” button on user profiles with the download icon on video pages.</li>
+<li>Added a feature to download comment stickers; tapping a sticker allows you to download the original file directly.</li>
+<li>Fixed an issue where live stream content was not recognized on the Recommendations page.</li>
 </ul>
-</details>
-
-<details>
-  <summary>1.1.0</summary>
+<h3>1.1.1</h3>
 <ul>
-  <li>Added PNG / JPG / WEBP formats for frame saving, with an improved frame copy and save workflow.</li>
-  <li>Added retry support for failed profile bulk downloads, retrying only failed posts or album images.</li>
-  <li>Added --Continue Download-  <li>after cancelling a profile bulk download, automatically skipping completed posts and images.</li>
-  <li>Downloads can now abort the active network transfer instead of only stopping subsequent tasks.</li>
-  <li>Improved comment translation with batch translation and better caching, reducing duplicate requests and improving performance for large comment sections.</li> 
-  <li>Improved translation result detection and caching for unchanged or untranslated text.</li> 
-  <li>Improved album download and retry logic so only failed or unfinished images are downloaded again.</li>
-  <li>Improved profile post resolution by reusing available local page data before performing additional scans.</li>
-  <li>Fixed frame capture occasionally targeting a neighboring video instead of the current post.</li>
-  <li>Fixed incorrect Live frame filenames and the accidental use of regular post metadata for Live captures.</li>
-  <li>Fixed inconsistent file extensions between main downloads and downloads from the details panel.</li>
-  <li>Fixed incorrect fallback handling for some image file extensions.</li>
-  <li>Fixed duplicate shortcut conflicts and added clear conflict warnings.</li>
-  <li>Improved status and progress feedback for downloads, cancellations, partial failures, retries, and resumed downloads.</li>
-  <li>Improved filename generation, album numbering, and multiple UI interaction details.</li>
-  <li>Removed redundant code and unnecessary work to improve overall performance and stability.</li>
+<li>Adjusted the download button position in fullscreen mode. It now appears below the More button.</li>
+<li>Added a dark startup page that changes the initial white loading background to black.</li>
+</ul>
+<h3>1.1.0</h3>
+<ul>
+<li>Added PNG / JPG / WEBP formats for frame saving, with an improved frame copy and save workflow.</li>
+<li>Added retry support for failed profile bulk downloads, retrying only failed posts or album images.</li>
+<li>Added --Continue Download-</li>
+<li>after cancelling a profile bulk download, automatically skipping completed posts and images.</li>
+<li>Downloads can now abort the active network transfer instead of only stopping subsequent tasks.</li>
+<li>Improved comment translation with batch translation and better caching, reducing duplicate requests and improving performance for large comment sections.</li>
+<li>Improved translation result detection and caching for unchanged or untranslated text.</li>
+<li>Improved album download and retry logic so only failed or unfinished images are downloaded again.</li>
+<li>Improved profile post resolution by reusing available local page data before performing additional scans.</li>
+<li>Fixed frame capture occasionally targeting a neighboring video instead of the current post.</li>
+<li>Fixed incorrect Live frame filenames and the accidental use of regular post metadata for Live captures.</li>
+<li>Fixed inconsistent file extensions between main downloads and downloads from the details panel.</li>
+<li>Fixed incorrect fallback handling for some image file extensions.</li>
+<li>Fixed duplicate shortcut conflicts and added clear conflict warnings.</li>
+<li>Improved status and progress feedback for downloads, cancellations, partial failures, retries, and resumed downloads.</li>
+<li>Improved filename generation, album numbering, and multiple UI interaction details.</li>
+<li>Removed redundant code and unnecessary work to improve overall performance and stability.</li>
 </ul>
 </details>
 
