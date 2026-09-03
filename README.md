@@ -48,8 +48,13 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 
 <details>
   <summary>1.1.X</summary>
-  
-<h3>1.1.2 Upcoming</h3>
+
+<h3>1.1.3 Upcoming</h3>
+<ul>
+<li>Optimized the black splash screen to reduce white flickering during loading. </li>
+<li>Relaxed the download host restrictions to prevent download failures caused by newly added or switched CDN domains. </li>
+</ul>
+<h3>1.1.2</h3>
 <ul>
 <li>Added settings for comment translation activation, supporting manual and automatic activation.</li>
 <li>The startup page settings have been changed to a drop-down menu, supporting the original and dark startup pages.</li>
