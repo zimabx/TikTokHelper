@@ -5,7 +5,7 @@
 // @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译、自定义文件名和个人主页批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.1.2
+// @version			1.2.0
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -13,26 +13,8 @@
 // @grant           GM_xmlhttpRequest
 // @grant           GM_download
 // @grant           GM_registerMenuCommand
-// @connect         tiktok.com
-// @connect         *.tiktok.com
-// @connect         tiktokcdn.com
-// @connect         *.tiktokcdn.com
-// @connect         tiktokcdn-us.com
-// @connect         *.tiktokcdn-us.com
-// @connect         tiktokv.com
-// @connect         *.tiktokv.com
-// @connect         byteoversea.com
-// @connect         *.byteoversea.com
-// @connect         ibytedtos.com
-// @connect         *.ibytedtos.com
-// @connect         bytefcdn-oversea.com
-// @connect         *.bytefcdn-oversea.com
-// @connect         muscdn.com
-// @connect         *.muscdn.com
-// @connect         ibyteimg.com
-// @connect         *.ibyteimg.com
-// @connect         translate.googleapis.com
-// @connect         www.bing.com
+// @connect         *
+// @noframes
 // @run-at          document-start
 // ==/UserScript==
 
@@ -41,6 +23,117 @@
 
     const SCRIPT_PREFIX = "tthelper";
     const CONFIG_KEY = "__tthelper-user-js__";
+
+    function installEarlyDarkBootGate() {
+        const doc = root?.document;
+        if (!doc) return;
+
+        try {
+            const raw = root.localStorage?.getItem(CONFIG_KEY);
+            const value = raw ? JSON.parse(raw)?.dark_boot_screen : undefined;
+            const normalized = String(value ?? "").trim().toLowerCase();
+            if (value !== true && !["dark", "true", "1", "yes", "on"].includes(normalized)) {
+                return;
+            }
+        } catch (_err) {
+            return;
+        }
+
+        const ATTR = `data-${SCRIPT_PREFIX}-black-gate`;
+        const STYLE_ID = `${SCRIPT_PREFIX}-black-gate-style`;
+        const CHECK_MS = 80;
+        const FAILSAFE_MS = 8000;
+        const MEDIA_RATIO = 0.06;
+
+        let checkTimer = 0;
+        let failSafeTimer = 0;
+        let released = false;
+
+        const hold = () => {
+            const html = doc.documentElement;
+            if (!html) return false;
+
+            html.setAttribute(ATTR, "");
+
+            if (!doc.getElementById(STYLE_ID)) {
+                const style = doc.createElement("style");
+                style.id = STYLE_ID;
+                style.textContent = `
+ html[${ATTR}], html[${ATTR}] body { background: #000 !important; }
+ html[${ATTR}] { color-scheme: dark; }
+ html[${ATTR}] body { visibility: hidden !important; }
+`;
+                html.appendChild(style);
+            }
+            return true;
+        };
+
+        const visibleArea = (element) => {
+            const rect = element.getBoundingClientRect();
+            const width = Math.max(0, Math.min(rect.right, root.innerWidth) - Math.max(rect.left, 0));
+            const height = Math.max(0, Math.min(rect.bottom, root.innerHeight) - Math.max(rect.top, 0));
+            return width * height;
+        };
+
+        const ready = () => {
+            const viewportArea = root.innerWidth * root.innerHeight;
+            if (!doc.body || !viewportArea) return false;
+
+            let largeMedia = false;
+            for (const media of doc.querySelectorAll("video, img")) {
+                if (visibleArea(media) < viewportArea * MEDIA_RATIO) continue;
+                largeMedia = true;
+
+                if (media.tagName === "VIDEO") {
+                    if (media.readyState >= 2 && media.videoWidth && media.videoHeight) return true;
+                } else if (media.complete && media.naturalWidth && media.naturalHeight) {
+                    return true;
+                }
+            }
+
+            if (largeMedia) return false;
+
+            const content = doc.querySelector(
+                'main,[role="main"],[data-e2e="user-post-item-list"],[data-e2e="feed-video"]'
+            );
+            if (!content || visibleArea(content) < viewportArea * 0.15) return false;
+
+            return content.childElementCount > 0 || content.textContent.trim().length > 20;
+        };
+
+        const release = (reason) => {
+            if (released) return;
+            released = true;
+            root.clearInterval(checkTimer);
+            root.clearTimeout(failSafeTimer);
+
+            root.requestAnimationFrame(() => root.requestAnimationFrame(() => {
+                doc.documentElement?.removeAttribute(ATTR);
+                root.console?.info?.(`[TTH Black Gate] ${reason}`);
+            }));
+        };
+
+        const start = () => {
+            if (!hold()) {
+                root.setTimeout(start, 0);
+                return;
+            }
+
+            checkTimer = root.setInterval(() => {
+                if (ready()) release("ready");
+            }, CHECK_MS);
+            failSafeTimer = root.setTimeout(() => release("failsafe"), FAILSAFE_MS);
+        };
+
+        root.addEventListener("beforeunload", hold, true);
+        root.addEventListener("pagehide", (event) => {
+            if (!event.persisted) hold();
+        }, true);
+
+        start();
+    }
+
+    installEarlyDarkBootGate();
     const gmXmlHttpRequest =
           typeof GM_xmlhttpRequest !== "undefined"
     ? GM_xmlhttpRequest
@@ -53,7 +146,8 @@
           typeof GM_registerMenuCommand !== "undefined"
     ? GM_registerMenuCommand
     : root?.GM_registerMenuCommand;
-    const PANEL_POSITION_CHECK_THROTTLE_MS = 32;
+    const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+    const PANEL_POSITION_CHECK_THROTTLE_MS = 250;
     const FRAME_SAVE_FORMATS = [
         { extension: "png", mimeType: "image/png" },
         { extension: "jpg", mimeType: "image/jpeg" },
@@ -83,8 +177,8 @@
         video_quality: "highest_resolution",
         video_source_columns: [...DEFAULT_VIDEO_SOURCE_COLUMNS],
         language: "auto",
-        dark_boot_screen: "dark",
-        shortcut_download: "M",
+        dark_boot_screen: "original",
+        shortcut_download: "",
         shortcut_frame: "",
         shortcut_details: "",
         shortcut_settings: "",
@@ -131,25 +225,6 @@
         { value: "manual", messageKey: "translation_activation_manual" },
         { value: "auto", messageKey: "translation_activation_auto" },
     ];
-    const ALLOWED_DOWNLOAD_HOST_SUFFIXES = [
-        "tiktok.com",
-        "tiktokcdn.com",
-        "tiktokcdn-us.com",
-        "tiktokv.com",
-        "byteoversea.com",
-        "ibytedtos.com",
-        "bytefcdn-oversea.com",
-        "muscdn.com",
-        "ibyteimg.com",
-    ];
-
-    function isAllowedDownloadHost(hostname = "") {
-        const host = String(hostname || "").toLowerCase();
-        return ALLOWED_DOWNLOAD_HOST_SUFFIXES.some(
-            (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-        );
-    }
-
     function normalizeSafeDownloadUrl(rawUrl = "", baseUrl = "https://www.tiktok.com/") {
         const value = String(rawUrl || "").trim();
         if (!value) throw new Error("Empty download URL");
@@ -157,9 +232,6 @@
         const parsed = new URL(value, baseUrl);
         if (parsed.protocol !== "https:") {
             throw new Error(`Blocked non-HTTPS download URL: ${parsed.protocol}`);
-        }
-        if (!isAllowedDownloadHost(parsed.hostname)) {
-            throw new Error(`Blocked download host: ${parsed.hostname}`);
         }
         return parsed.href;
     }
@@ -338,6 +410,7 @@
             hide_translated_comments: "Hide translation",
             translating_comments: "Translating…",
             comment_translation_failed: "Comment translation failed",
+            comment_translation_rate_limited: "The translation service is rate-limiting requests. Automatic translation has stopped; try again later or switch providers in Settings.",
             download_section: "Download",
             filename_section: "Filename",
             language: "Language",
@@ -436,6 +509,7 @@
             shortcut_settings: "Settings shortcut",
             shortcut_hint: "Focus a shortcut field and press a key combination. Backspace clears it.",
             shortcut_conflict: "Shortcut conflict: ${first} and ${second} both use ${hotkey}.",
+            shortcut_reserved_m: "M is reserved for TikTok mute. Choose a modified shortcut such as Shift+M.",
             gear_name: "Gear name",
             quality_type: "Quality type",
             width: "Width",
@@ -525,6 +599,7 @@
             hide_translated_comments: "隐藏译文",
             translating_comments: "翻译中…",
             comment_translation_failed: "评论翻译失败",
+            comment_translation_rate_limited: "翻译服务请求过于频繁，已停止自动翻译。请稍后重试，或在设置中切换翻译服务。",
             download_section: "下载",
             filename_section: "文件名",
             language: "语言",
@@ -623,6 +698,7 @@
             shortcut_settings: "设置快捷键",
             shortcut_hint: "聚焦快捷键输入框后按组合键。Backspace 可清空。",
             shortcut_conflict: "快捷键冲突：${first} 和 ${second} 都使用了 ${hotkey}。",
+            shortcut_reserved_m: "M 是 TikTok 的静音快捷键，请改用 Shift+M 等带修饰键的组合。",
             gear_name: "档位名",
             quality_type: "清晰度类型",
             width: "宽度",
@@ -843,9 +919,8 @@
         }
         next.filename_template = getFilenameTemplate(next);
         const filenameMaxLength = Number(next.filename_max_length);
-        next.filename_max_length =
-            Number.isFinite(filenameMaxLength) && filenameMaxLength > 0
-            ? Math.floor(filenameMaxLength)
+        next.filename_max_length = Number.isFinite(filenameMaxLength)
+            ? Math.floor(Math.max(8, Math.min(255, filenameMaxLength)))
         : DEFAULT_CONFIG.filename_max_length;
         next.album_index_format = normalizeAlbumIndexFormat(next.album_index_format);
         if (!VIDEO_QUALITY_OPTIONS.includes(next.video_quality)) {
@@ -855,9 +930,6 @@
             next.language = DEFAULT_CONFIG.language;
         }
         next.dark_boot_screen = normalizeDarkBootScreenMode(next.dark_boot_screen);
-
-
-
         next.video_source_columns = normalizeVideoSourceColumns(next.video_source_columns);
         next.profile_bulk_checkbox_size = clampNumber(
             Number(next.profile_bulk_checkbox_size),
@@ -866,6 +938,7 @@
             DEFAULT_CONFIG.profile_bulk_checkbox_size,
         );
         next.shortcut_download = normalizeHotkey(next.shortcut_download);
+        if (next.shortcut_download === "M") next.shortcut_download = "";
         next.shortcut_frame = normalizeHotkey(next.shortcut_frame);
         next.shortcut_details = normalizeHotkey(next.shortcut_details);
         next.shortcut_settings = normalizeHotkey(next.shortcut_settings);
@@ -1138,7 +1211,6 @@
             return true;
         }
         return /^LIVE\d*$/i.test(compactAction);
-
     }
 
     function hasStrongLiveContextStructure(context = null) {
@@ -1984,6 +2056,14 @@
         return match ? match[1] : "";
     }
 
+    function safeDecodeURIComponent(value) {
+        try {
+            return decodeURIComponent(String(value || ""));
+        } catch (_err) {
+            return "";
+        }
+    }
+
     function pickVideoElementSource(videoElement) {
         const currentSrc = videoElement?.currentSrc || "";
         if (currentSrc && !currentSrc.startsWith("blob:")) return currentSrc;
@@ -1995,7 +2075,7 @@
 
     function getAuthorFromUrl(url) {
         const match = String(url || "").match(/tiktok\.com\/@([^/?#]+)/);
-        return match ? decodeURIComponent(match[1]) : "";
+        return match ? safeDecodeURIComponent(match[1]) : "";
     }
 
     function toShortId(value) {
@@ -2037,32 +2117,37 @@
     }
 
     function normalizeFilename(name, options = {}) {
-        const maxLength = Number(options.maxLength || 255);
-        const replacementChar = options.replacementChar || "_";
+        const requestedMaxLength = Number(options.maxLength || 255);
+        const maxLength = Number.isFinite(requestedMaxLength)
+        ? Math.floor(Math.max(1, Math.min(255, requestedMaxLength)))
+        : 255;
+        const replacementChar = String(options.replacementChar || "_")
+        .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, "_")
+        .slice(0, 1) || "_";
         if (typeof name !== "string") return "";
 
-        const lastDotIndex = name.lastIndexOf(".");
-        let baseName = name;
-        let extension = "";
-        if (lastDotIndex > 0 && lastDotIndex < name.length - 1) {
-            baseName = name.slice(0, lastDotIndex);
-            extension = name.slice(lastDotIndex);
-        }
-
-        let cleanBase = baseName
+        const cleanName = name
         .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, replacementChar)
         .trim()
         .replace(/^\.+/, "")
-        .replace(/\.+$/, "");
+        .replace(/[. ]+$/, "");
+        const extensionMatch = options.preserveExtension === true
+        ? cleanName.match(/\.[a-z0-9]{2,5}$/i)
+        : null;
+        let extension = extensionMatch?.[0] || "";
+        let cleanBase = (extension ? cleanName.slice(0, -extension.length) : cleanName)
+        .trim()
+        .replace(/[. ]+$/, "");
         if (/^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(\..*)?$/i.test(cleanBase)) {
             cleanBase = replacementChar + cleanBase;
         }
         if (!cleanBase) cleanBase = "download";
 
+        if (extension.length >= maxLength) extension = "";
         const allowedBaseLength = Math.max(1, maxLength - extension.length);
         if (cleanBase.length > allowedBaseLength) {
             cleanBase = truncateAtUtf16Boundary(cleanBase, allowedBaseLength).trim();
-            if (!cleanBase) cleanBase = "download";
+            if (!cleanBase) cleanBase = truncateAtUtf16Boundary("download", allowedBaseLength);
         }
         return cleanBase + extension;
     }
@@ -2099,7 +2184,8 @@
     function getFilenameContext(media = {}) {
         const createDate = media.createTime
         ? new Date(Number(media.createTime) * 1000)
-        : new Date();
+        : null;
+        const hasCreateDate = createDate instanceof Date && !Number.isNaN(createDate.getTime());
         const now = new Date();
         return {
             id: media.id || "",
@@ -2110,8 +2196,8 @@
             desc: media.desc || "",
             tags: ensureArray(media.hashtags).join("-"),
             music_name: media.music?.title || "",
-            create_date_YYYYMMDD: formatDate(createDate, "YYYYMMDD"),
-            create_date_YYYY_MM_DD: formatDate(createDate, "YYYY-MM-DD"),
+            create_date_YYYYMMDD: hasCreateDate ? formatDate(createDate, "YYYYMMDD") : "",
+            create_date_YYYY_MM_DD: hasCreateDate ? formatDate(createDate, "YYYY-MM-DD") : "",
             now_YYYYMMDD_HHmmss: formatDate(now, "YYYYMMDD_HHmmss"),
             media,
         };
@@ -2123,13 +2209,18 @@
         const value = renderFilenameTemplate(getFilenameTemplate(merged), context);
         return normalizeFilename(String(value), {
             maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+            preserveExtension: false,
         });
     }
 
     function buildVideoFilename(media = {}, config = {}, format = "mp4") {
+        const merged = { ...DEFAULT_CONFIG, ...config };
         const base = buildFilename(media, config);
         const extension = normalizeFileExtension(format, "mp4");
-        return extension ? `${base}.${extension}` : base;
+        return normalizeFilename(extension ? `${base}.${extension}` : base, {
+            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+            preserveExtension: true,
+        });
     }
 
     function buildImageFilename(media = {}, image = {}, index = 0, config = {}) {
@@ -2141,7 +2232,8 @@
             "jpg",
         );
         return normalizeFilename(`${base}_image${formatAlbumIndex(index, merged.album_index_format)}.${extension}`, {
-            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 16,
+            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+            preserveExtension: true,
         });
     }
 
@@ -2229,9 +2321,13 @@
         });
         const baseName = buildFilename(media, merged);
         const videoName = buildVideoFilename(media, merged, media.video?.format || "mp4");
-        const coverName = `${baseName}_cover.jpg`;
-        const dynamicName = `${baseName}_dynamic.webp`;
-        const musicName = `${baseName}_music.mp3`;
+        const filenameOptions = {
+            maxLength: Number(merged.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+            preserveExtension: true,
+        };
+        const coverName = normalizeFilename(`${baseName}_cover.jpg`, filenameOptions);
+        const dynamicName = normalizeFilename(`${baseName}_dynamic.webp`, filenameOptions);
+        const musicName = normalizeFilename(`${baseName}_music.mp3`, filenameOptions);
         const videoSources = ensureArray(media.video?.sources)
         .filter((source) => source?.url)
         .map((source, index) => ({
@@ -2484,7 +2580,7 @@
             /^\/@([^/]+)\/(video|photo)\/(\d+)(?:\/|$)/i,
         );
         if (!match) return null;
-        const username = decodeURIComponent(match[1] || "").replace(/^@/, "").trim();
+        const username = safeDecodeURIComponent(match[1]).replace(/^@/, "").trim();
         const type = String(match[2] || "").toLowerCase();
         const id = String(match[3] || "");
         if (!username || !/^[0-9]{10,}$/.test(id)) return null;
@@ -2508,7 +2604,7 @@
         try {
             const parsed = new URL(String(rawUrl || ""), "https://www.tiktok.com/");
             const match = parsed.pathname.match(/^\/@([^/]+)(?:\/|$)/);
-            return match ? decodeURIComponent(match[1] || "").replace(/^@/, "") : "";
+            return match ? safeDecodeURIComponent(match[1]).replace(/^@/, "") : "";
         } catch (_err) {
             return "";
         }
@@ -3641,11 +3737,40 @@
         }
     }
 
+    function formatHttpErrorMessage(status, responseText = "") {
+        const statusText = status || "error";
+        const detail = String(responseText || "").trim();
+        if (!detail || /^\s*</.test(detail)) return `HTTP ${statusText}`;
+        return `HTTP ${statusText}: ${detail.slice(0, 500)}`;
+    }
+
+    function createRequestAbortError() {
+        const error = new Error("Network request aborted");
+        error.name = "AbortError";
+        error.nonRetryable = true;
+        return error;
+    }
+
     function userscriptHttpRequest(options = {}) {
         const method = String(options.method || "GET").toUpperCase();
+        const signal = options.signal;
+        if (signal?.aborted) return Promise.reject(createRequestAbortError());
         if (typeof gmXmlHttpRequest === "function") {
             return new Promise((resolve, reject) => {
-                gmXmlHttpRequest({
+                let settled = false;
+                let requestHandle = null;
+                const finish = (callback, value) => {
+                    if (settled) return;
+                    settled = true;
+                    signal?.removeEventListener?.("abort", onAbort);
+                    callback(value);
+                };
+                const onAbort = () => {
+                    requestHandle?.abort?.();
+                    finish(reject, createRequestAbortError());
+                };
+                signal?.addEventListener?.("abort", onAbort, { once: true });
+                requestHandle = gmXmlHttpRequest({
                     method,
                     url: options.url,
                     headers: options.headers || {},
@@ -3655,47 +3780,73 @@
                     onload(response) {
                         const status = Number(response?.status || 0);
                         if (status >= 200 && status < 300) {
-                            resolve({
+                            finish(resolve, {
                                 status,
                                 responseText: String(response?.responseText ?? response?.response ?? ""),
+                                finalUrl: String(response?.finalUrl || options.url || ""),
                             });
                             return;
                         }
                         const responseText = String(response?.responseText ?? response?.response ?? "");
-                        const detail = responseText.trim().slice(0, 500);
-                        const error = new Error(`HTTP ${status || "error"}${detail ? `: ${detail}` : ""}`);
+                        const error = new Error(formatHttpErrorMessage(status, responseText));
                         error.status = status;
                         error.responseText = responseText;
-                        reject(error);
+                        finish(reject, error);
                     },
                     onerror(error) {
-                        reject(error instanceof Error ? error : new Error("Network request failed"));
+                        finish(reject, error instanceof Error ? error : new Error("Network request failed"));
                     },
                     ontimeout() {
-                        reject(new Error("Network request timed out"));
+                        finish(reject, new Error("Network request timed out"));
+                    },
+                    onabort() {
+                        finish(reject, createRequestAbortError());
                     },
                 });
+                if (signal?.aborted) onAbort();
             });
         }
 
         if (typeof root?.fetch !== "function") {
             return Promise.reject(new Error("No cross-origin request API is available"));
         }
-        return root.fetch(options.url, {
+        const AbortControllerCtor = root?.AbortController;
+        const controller = typeof AbortControllerCtor === "function" ? new AbortControllerCtor() : null;
+        let timedOut = false;
+        let rejectTimeout;
+        const onAbort = () => controller?.abort?.();
+        signal?.addEventListener?.("abort", onAbort, { once: true });
+        const timeoutPromise = new Promise((_resolve, reject) => {
+            rejectTimeout = reject;
+        });
+        const timeoutId = root.setTimeout?.(() => {
+            timedOut = true;
+            controller?.abort?.();
+            rejectTimeout?.(new Error("Network request timed out"));
+        }, Number(options.timeout || 15000));
+        const fetchPromise = root.fetch(options.url, {
             method,
             headers: options.headers || {},
             body: options.data,
             credentials: "include",
+            signal: controller?.signal || signal,
         }).then(async (response) => {
             const responseText = await response.text();
             if (!response.ok) {
-                const detail = responseText.trim().slice(0, 500);
-                const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+                const error = new Error(formatHttpErrorMessage(response.status, responseText));
                 error.status = response.status;
                 error.responseText = responseText;
                 throw error;
             }
-            return { status: response.status, responseText };
+            return { status: response.status, responseText, finalUrl: response.url || options.url };
+        });
+        return Promise.race([fetchPromise, timeoutPromise]).catch((error) => {
+            if (timedOut) throw new Error("Network request timed out");
+            if (signal?.aborted || error?.name === "AbortError") throw createRequestAbortError();
+            throw error;
+        }).finally(() => {
+            if (timeoutId !== undefined) root.clearTimeout?.(timeoutId);
+            signal?.removeEventListener?.("abort", onAbort);
         });
     }
 
@@ -3707,11 +3858,70 @@
         }
     }
 
+    function createTranslationResponseError(data, fallbackMessage) {
+        const first = Array.isArray(data) ? data[0] : null;
+        const captchaRequested = Boolean(data?.ShowCaptcha || first?.ShowCaptcha);
+        const message = String(
+            (captchaRequested ? "Translation service requested CAPTCHA" : "") ||
+            data?.error?.message ||
+            data?.errorMessage ||
+            data?.message ||
+            first?.error?.message ||
+            first?.errorMessage ||
+            first?.message ||
+            fallbackMessage,
+        ).trim();
+        const error = new Error(message);
+        const status = Number(
+            data?.statusCode || data?.StatusCode || data?.status || data?.error?.code ||
+            first?.statusCode || first?.StatusCode || first?.status || first?.error?.code || 0,
+        );
+        if (
+            captchaRequested ||
+            status === 429 ||
+            /(?:\b429\b|rate.?limit|too many requests|quota|throttl|exceeded .*allowed translations)/i.test(message)
+        ) {
+            error.status = 429;
+        } else if (status >= 400) {
+            error.status = status;
+        }
+        return error;
+    }
+
     function mapBingTranslationLanguage(language = "") {
         const value = String(language || "");
         if (value === "zh-CN") return "zh-Hans";
         if (value === "zh-TW") return "zh-Hant";
         return value;
+    }
+
+    function getBingTranslationResult(data) {
+        const value = data?.data ?? data;
+        const items = Array.isArray(value) ? value : [value];
+        return items.find((item) => Array.isArray(item?.translations)) || items[0];
+    }
+
+    function generateGoogleTranslateToken(text = "") {
+        const seed = 406644;
+        const salt = 3293161072;
+        const transform = (value, pattern) => {
+            for (let index = 0; index < pattern.length - 2; index += 3) {
+                const character = pattern.charAt(index + 2);
+                const shift = character >= "a" ? character.charCodeAt(0) - 87 : Number(character);
+                const shifted = pattern.charAt(index + 1) === "+" ? value >>> shift : value << shift;
+                value = pattern.charAt(index) === "+"
+                    ? (value + shifted) & 4294967295
+                : value ^ shifted;
+            }
+            return value;
+        };
+        const bytes = Array.from(new TextEncoder().encode(String(text || "")));
+        let value = seed;
+        for (const byte of bytes) value = transform(value + byte, "+-a^+6");
+        value = transform(value, "+-3^+b+-f") ^ salt;
+        if (value < 0) value = (value & 2147483647) + 2147483648;
+        value %= 1000000;
+        return `${value}.${value ^ seed}`;
     }
 
     function createPackedTranslationBatch(texts = []) {
@@ -3738,2190 +3948,2427 @@
         };
     }
 
-function estimatePackedTranslationBatchLength(texts = []) {
-    const boundaryIdLength = 10 + 12 + 3 + 1;
-    const itemOverhead = boundaryIdLength * 2 + 2;
-    return texts.reduce(
-        (sum, text) => sum + String(text || "").length + itemOverhead,
-        Math.max(0, texts.length - 1) * 2,
-    );
-}
-
-function parsePackedTranslationBatch(translatedText = "", payload = {}) {
-    const value = String(translatedText || "");
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    if (!value || !items.length) return items.map(() => null);
-
-    return items.map((item) => {
-        const startPosition = value.indexOf(item.startId);
-        if (startPosition < 0) return null;
-        const start = startPosition + item.startId.length;
-        const end = value.indexOf(item.endId, start);
-        if (end < 0 || end <= start) return null;
-        return value.slice(start, end).trim() || null;
-    });
-}
-
-function normalizeTranslationComparisonText(text = "") {
-    const value = String(text || "");
-    return (typeof value.normalize === "function" ? value.normalize("NFKC") : value)
-        .replace(/\s+/gu, " ")
-        .trim();
-}
-
-function getTranslationClassificationText(text = "") {
-    const value = String(text || "");
-    const normalized = typeof value.normalize === "function" ? value.normalize("NFC") : value;
-    return normalized
-        .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
-        .replace(/\b(?:https?:\/\/|www\.)\S+/giu, " ")
-        .replace(/@[\p{L}\p{M}\p{N}_.-]+/gu, " ")
-        .trim();
-}
-
-function isVietnameseLikeLatinText(text = "") {
-    const value = String(text || "");
-    const normalized = typeof value.normalize === "function" ? value.normalize("NFD") : value;
-    return /[đĐ]/u.test(value) || /[\u031B\u0309\u0323]/u.test(normalized);
-}
-
-function classifyTranslationText(text = "") {
-    const value = getTranslationClassificationText(text);
-    const counts = { latin: 0, han: 0, kana: 0, hangul: 0, other: 0 };
-    for (const character of value) {
-        if (!/\p{L}/u.test(character)) continue;
-        if (/\p{Script=Latin}/u.test(character)) counts.latin += 1;
-        else if (/\p{Script=Han}/u.test(character)) counts.han += 1;
-        else if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(character)) counts.kana += 1;
-        else if (/\p{Script=Hangul}/u.test(character)) counts.hangul += 1;
-        else counts.other += 1;
-    }
-
-    const total = counts.latin + counts.han + counts.kana + counts.hangul + counts.other;
-    if (!total) return "neutral";
-    if (counts.kana > 0 && counts.hangul === 0 && counts.other === 0) return "japanese";
-    if (counts.hangul > 0 && counts.kana === 0 && counts.han === 0 && counts.other === 0) return "hangul";
-    if (counts.han > 0 && counts.latin === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) return "han";
-    if (counts.latin > 0 && counts.han === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) {
-        return isVietnameseLikeLatinText(value) ? "vietnamese-like" : "latin";
-    }
-    if (counts.other === total) return "other";
-    return "mixed";
-}
-
-function isBatchableTranslationBucket(bucket = "") {
-    return ["latin", "vietnamese-like", "japanese", "hangul", "han"].includes(String(bucket || ""));
-}
-
-function normalizeTranslationLanguageCode(language = "") {
-    const value = String(language || "").trim().toLowerCase().replace(/_/g, "-");
-    if (!value) return "";
-    if (value === "zh" || value.startsWith("zh-")) return "zh";
-    return value.split("-")[0];
-}
-
-function translationLanguageMatchesTarget(detectedLanguage = "", targetLanguage = "") {
-    const detected = normalizeTranslationLanguageCode(detectedLanguage);
-    const target = normalizeTranslationLanguageCode(targetLanguage);
-    return Boolean(detected && target && detected === target);
-}
-
-class TranslationProvider {
-    constructor(request = userscriptHttpRequest) {
-        this.request = request;
-    }
-
-    getBatchLimits() {
-        return { maxItems: 20, maxPayloadChars: 5000 };
-    }
-
-    async translateBatch(_texts, _options = {}) {
-        throw new Error("Translation provider is not implemented");
-    }
-
-    async translateSingle(_text, _options = {}) {
-        throw new Error("Translation provider is not implemented");
-    }
-}
-
-class GoogleFreeTranslationProvider extends TranslationProvider {
-    async translateBatch(texts = [], options = {}) {
-        if (!texts.length) return [];
-        const payload = createPackedTranslationBatch(texts);
-        const url = new URL("https://translate.googleapis.com/translate_a/single");
-        url.searchParams.set("client", "gtx");
-        url.searchParams.set("sl", options.source || "auto");
-        url.searchParams.set("tl", options.target || DEFAULT_CONFIG.comment_translation_target);
-        url.searchParams.set("dt", "t");
-        const response = await this.request({
-            method: "POST",
-            url: url.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-            data: new URLSearchParams({ q: payload.text }).toString(),
-            timeout: 18000,
-        });
-        const data = parseTranslationJson(response.responseText, "Google Translate");
-        const translated = Array.isArray(data?.[0])
-        ? data[0].map((item) => String(item?.[0] || "")).join("")
-        : "";
-        if (!translated) throw new Error("Google Translate returned an empty result");
-        return parsePackedTranslationBatch(translated, payload);
-    }
-
-    async translateSingle(text = "", options = {}) {
-        const sourceText = String(text || "").trim();
-        if (!sourceText) return { text: "", detectedLanguage: "" };
-        const url = new URL("https://translate.googleapis.com/translate_a/single");
-        url.searchParams.set("client", "gtx");
-        url.searchParams.set("sl", options.source || "auto");
-        url.searchParams.set("tl", options.target || DEFAULT_CONFIG.comment_translation_target);
-        url.searchParams.set("dt", "t");
-        const response = await this.request({
-            method: "POST",
-            url: url.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-            data: new URLSearchParams({ q: sourceText }).toString(),
-            timeout: 18000,
-        });
-        const data = parseTranslationJson(response.responseText, "Google Translate");
-        const translated = Array.isArray(data?.[0])
-        ? data[0].map((item) => String(item?.[0] || "")).join("").trim()
-        : "";
-        if (!translated) throw new Error("Google Translate returned an empty result");
-        return { text: translated, detectedLanguage: String(data?.[2] || "") };
-    }
-}
-
-class BingFreeTranslationProvider extends TranslationProvider {
-    constructor(request = userscriptHttpRequest) {
-        super(request);
-        this.credentials = null;
-        this.credentialsExpireAt = 0;
-    }
-
-    getBatchLimits() {
-        return { maxItems: 5, maxPayloadChars: 1000 };
-    }
-
-    async getCredentials(force = false) {
-        if (!force && this.credentials && Date.now() < this.credentialsExpireAt) {
-            return this.credentials;
-        }
-        const response = await this.request({
-            url: "https://www.bing.com/translator",
-            timeout: 18000,
-        });
-        const page = String(response.responseText || "");
-        const tokenMatch = page.match(/params_AbusePreventionHelper\s*=\s*\[(\d+),"([^"]+)"/);
-        const igMatch = page.match(/IG:"([^"]+)"/);
-        const iidMatch = page.match(/data-iid="([^"]+)"/);
-        if (!tokenMatch || !igMatch || !iidMatch) {
-            throw new Error("Bing Translator bootstrap data was not found");
-        }
-        this.credentials = {
-            key: tokenMatch[1],
-            token: tokenMatch[2],
-            ig: igMatch[1],
-            iid: iidMatch[1],
-        };
-        this.credentialsExpireAt = Date.now() + 15 * 60 * 1000;
-        return this.credentials;
-    }
-
-    async requestPackedBatch(texts = [], options = {}, forceCredentials = false) {
-        const credentials = await this.getCredentials(forceCredentials);
-        const payload = createPackedTranslationBatch(texts);
-        const target = mapBingTranslationLanguage(
-            options.target || DEFAULT_CONFIG.comment_translation_target,
-        );
-        const url = new URL("https://www.bing.com/ttranslatev3");
-        url.searchParams.set("isVertical", "1");
-        url.searchParams.set("IG", credentials.ig);
-        url.searchParams.set("IID", credentials.iid);
-        const body = new URLSearchParams({
-            fromLang: options.source || "auto-detect",
-            text: payload.text,
-            to: target,
-            token: credentials.token,
-            key: credentials.key,
-        });
-        const response = await this.request({
-            method: "POST",
-            url: url.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-            data: body.toString(),
-            timeout: 18000,
-        });
-        const data = parseTranslationJson(response.responseText, "Bing Translator");
-        const translated = String(data?.[0]?.translations?.[0]?.text || "");
-        if (!translated) throw new Error("Bing Translator returned an empty result");
-        return parsePackedTranslationBatch(translated, payload);
-    }
-
-    async translateBatch(texts = [], options = {}) {
-        if (!texts.length) return [];
-        try {
-            return await this.requestPackedBatch(texts, options, false);
-        } catch (error) {
-            if (![401, 403, 429].includes(Number(error?.status || 0))) throw error;
-            this.credentials = null;
-            this.credentialsExpireAt = 0;
-            return this.requestPackedBatch(texts, options, true);
-        }
-    }
-
-    async requestSingle(text = "", options = {}, forceCredentials = false) {
-        const sourceText = String(text || "").trim();
-        if (!sourceText) return { text: "", detectedLanguage: "" };
-        const credentials = await this.getCredentials(forceCredentials);
-        const target = mapBingTranslationLanguage(
-            options.target || DEFAULT_CONFIG.comment_translation_target,
-        );
-        const url = new URL("https://www.bing.com/ttranslatev3");
-        url.searchParams.set("isVertical", "1");
-        url.searchParams.set("IG", credentials.ig);
-        url.searchParams.set("IID", credentials.iid);
-        const body = new URLSearchParams({
-            fromLang: options.source || "auto-detect",
-            text: sourceText,
-            to: target,
-            token: credentials.token,
-            key: credentials.key,
-        });
-        const response = await this.request({
-            method: "POST",
-            url: url.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-            data: body.toString(),
-            timeout: 18000,
-        });
-        const data = parseTranslationJson(response.responseText, "Bing Translator");
-        const translated = String(data?.[0]?.translations?.[0]?.text || "").trim();
-        if (!translated) throw new Error("Bing Translator returned an empty result");
-        return {
-            text: translated,
-            detectedLanguage: String(data?.[0]?.detectedLanguage?.language || ""),
-        };
-    }
-
-    async translateSingle(text = "", options = {}) {
-        try {
-            return await this.requestSingle(text, options, false);
-        } catch (error) {
-            if (![401, 403, 429].includes(Number(error?.status || 0))) throw error;
-            this.credentials = null;
-            this.credentialsExpireAt = 0;
-            return this.requestSingle(text, options, true);
-        }
-    }
-}
-
-class TranslationService {
-    constructor(request = userscriptHttpRequest) {
-        this.providerFactories = new Map();
-        this.providers = new Map();
-        this.cache = new Map();
-        this.confirmedSameCache = new Map();
-        this.untranslatedCache = new Map();
-        this.registerProvider("google", () => new GoogleFreeTranslationProvider(request));
-        this.registerProvider("bing", () => new BingFreeTranslationProvider(request));
-    }
-
-    registerProvider(name, factory) {
-        this.providerFactories.set(String(name), factory);
-        this.providers.delete(String(name));
-    }
-
-    getProvider(name) {
-        const key = String(name || DEFAULT_CONFIG.comment_translation_provider);
-        if (!this.providerFactories.has(key)) throw new Error(`Unknown translation provider: ${key}`);
-        if (!this.providers.has(key)) this.providers.set(key, this.providerFactories.get(key)());
-        return this.providers.get(key);
-    }
-
-    getBatchLimits(providerName = "") {
-        return this.getProvider(providerName).getBatchLimits();
-    }
-
-    canTranslateBatch(providerName = "", texts = []) {
-        const limits = this.getBatchLimits(providerName);
-        const maxItems = Math.max(1, Number(limits.maxItems || 20));
-        const maxPayloadChars = Math.max(1, Number(limits.maxPayloadChars || 5000));
-        return (
-            texts.length > 0 &&
-            texts.length <= maxItems &&
-            estimatePackedTranslationBatchLength(texts) <= maxPayloadChars
+    function estimatePackedTranslationBatchLength(texts = []) {
+        const boundaryIdLength = 10 + 12 + 3 + 1;
+        const itemOverhead = boundaryIdLength * 2 + 2;
+        return texts.reduce(
+            (sum, text) => sum + String(text || "").length + itemOverhead,
+            Math.max(0, texts.length - 1) * 2,
         );
     }
 
-    canTranslateSingle(providerName = "", text = "") {
-        const limits = this.getBatchLimits(providerName);
-        const maxPayloadChars = Math.max(1, Number(limits.maxPayloadChars || 5000));
-        const sourceText = String(text || "");
-        return Boolean(sourceText && sourceText.length <= maxPayloadChars);
-    }
+    function parsePackedTranslationBatch(translatedText = "", payload = {}) {
+        const value = String(translatedText || "");
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        if (!value || !items.length) return items.map(() => null);
 
-    getCacheKey(providerName, target, sourceText, cacheScope = "") {
-        return `${providerName}\n${target}\n${cacheScope}\n${sourceText}`;
-    }
-
-    setCachedResult(cacheKey, result) {
-        this.cache.set(cacheKey, result);
-        if (this.cache.size > 1200) this.cache.delete(this.cache.keys().next().value);
-        return result;
-    }
-
-    setConfirmedSame(cacheKey, result) {
-        this.confirmedSameCache.set(cacheKey, result);
-        if (this.confirmedSameCache.size > 1200) {
-            this.confirmedSameCache.delete(this.confirmedSameCache.keys().next().value);
-        }
-        return result;
-    }
-
-    setUntranslated(cacheKey, result) {
-        this.untranslatedCache.set(cacheKey, result);
-        if (this.untranslatedCache.size > 1200) {
-            this.untranslatedCache.delete(this.untranslatedCache.keys().next().value);
-        }
-        return result;
-    }
-
-    async translateBatch(texts = [], options = {}) {
-        const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
-        const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
-        const sourceTexts = texts.map((text) => String(text || "").trim());
-        const cacheScope = String(options.cacheScope || "");
-        const results = new Array(sourceTexts.length).fill(null);
-        const uniqueEntries = new Map();
-
-        sourceTexts.forEach((sourceText, index) => {
-            if (!sourceText) return;
-            const cacheKey = this.getCacheKey(providerName, target, sourceText, cacheScope);
-            let entry = uniqueEntries.get(cacheKey);
-            if (!entry) {
-                entry = { cacheKey, sourceText, indices: [] };
-                uniqueEntries.set(cacheKey, entry);
-            }
-            entry.indices.push(index);
-        });
-
-        const freshEntries = [];
-        const assignResult = (entry, result) => {
-            for (const index of entry.indices) results[index] = result;
-        };
-
-        for (const entry of uniqueEntries.values()) {
-            if (this.cache.has(entry.cacheKey)) {
-                assignResult(entry, this.cache.get(entry.cacheKey));
-            } else if (this.confirmedSameCache.has(entry.cacheKey)) {
-                assignResult(entry, entry.sourceText);
-            } else if (this.untranslatedCache.has(entry.cacheKey)) {
-                assignResult(entry, null);
-            } else {
-                freshEntries.push(entry);
-            }
-        }
-
-        if (freshEntries.length) {
-            if (!this.canTranslateBatch(
-                providerName,
-                freshEntries.map((entry) => entry.sourceText),
-            )) {
-                throw new Error("Translation batch exceeds provider limits");
-            }
-            const batchResults = await this.getProvider(providerName).translateBatch(
-                freshEntries.map((entry) => entry.sourceText),
-                { source: "auto", target },
-            );
-            if (!Array.isArray(batchResults) || batchResults.length !== freshEntries.length) {
-                throw new Error("Translation provider returned an invalid batch size");
-            }
-            freshEntries.forEach((entry, index) => {
-                const value = typeof batchResults[index] === "string"
-                ? batchResults[index].trim()
-                : "";
-                if (!value) return;
-                if (
-                    normalizeTranslationComparisonText(value) ===
-                    normalizeTranslationComparisonText(entry.sourceText)
-                ) {
-                    assignResult(entry, value);
-                    return;
-                }
-                assignResult(entry, this.setCachedResult(entry.cacheKey, value));
-            });
-        }
-
-        return results;
-    }
-
-    async translateSingle(text = "", options = {}) {
-        const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
-        const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
-        const sourceText = String(text || "").trim();
-        const cacheScope = String(options.cacheScope || "");
-        if (!sourceText) return { status: "unchanged", text: "", detectedLanguage: "", fromCache: true };
-        if (!this.canTranslateSingle(providerName, sourceText)) {
-            throw new Error("Translation text exceeds provider limits");
-        }
-
-        const cacheKey = this.getCacheKey(providerName, target, sourceText, cacheScope);
-        if (this.cache.has(cacheKey)) {
-            return { status: "translated", text: this.cache.get(cacheKey), detectedLanguage: "", fromCache: true };
-        }
-        if (this.confirmedSameCache.has(cacheKey)) {
-            return { ...this.confirmedSameCache.get(cacheKey), fromCache: true };
-        }
-        if (this.untranslatedCache.has(cacheKey)) {
-            return { ...this.untranslatedCache.get(cacheKey), fromCache: true };
-        }
-
-        const provider = this.getProvider(providerName);
-        let lastDetectedLanguage = "";
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            const result = await provider.translateSingle(sourceText, { source: "auto", target });
-            const translated = String(result?.text || "").trim();
-            const detectedLanguage = String(result?.detectedLanguage || "");
-            lastDetectedLanguage = detectedLanguage || lastDetectedLanguage;
-            if (!translated) throw new Error("Translation provider returned an empty single result");
-            if (
-                normalizeTranslationComparisonText(translated) !==
-                normalizeTranslationComparisonText(sourceText)
-            ) {
-                this.setCachedResult(cacheKey, translated);
-                return { status: "translated", text: translated, detectedLanguage, fromCache: false };
-            }
-            if (translationLanguageMatchesTarget(detectedLanguage, target)) {
-                return this.setConfirmedSame(cacheKey, {
-                    status: "unchanged",
-                    text: sourceText,
-                    detectedLanguage,
-                    fromCache: false,
-                });
-            }
-        }
-
-        return this.setUntranslated(cacheKey, {
-            status: "untranslated",
-            text: sourceText,
-            detectedLanguage: lastDetectedLanguage,
-            fromCache: false,
-            reason: "source-returned-unchanged",
-        });
-    }
-}
-
-const COMMENT_TEXT_SELECTOR = '[data-e2e="comment-level-1"], [data-e2e="comment-level-2"]';
-const MAX_SCRIPT_TRANSLATION_BATCH_ITEMS = 10;
-
-class CommentTranslationController {
-    constructor(app, service = new TranslationService()) {
-        this.app = app;
-        this.window = app.window;
-        this.document = app.document;
-        this.service = service;
-        this.enabled = false;
-        this.displayMode = "original";
-        this.records = new WeakMap();
-        this.queue = [];
-        this.batchInFlight = false;
-        this.generation = 0;
-        this.observer = null;
-        this.observerRoot = null;
-        this.discoveryObserver = null;
-        this.discoveryRoot = null;
-        this.scanTimer = null;
-        this.button = null;
-        this.buttonHost = null;
-        this.buttonTooltip = null;
-        this.currentVideoKey = null;
-        this.mediaElementKeys = new WeakMap();
-        this.mediaElementIdentities = new WeakMap();
-        this.nextMediaElementKey = 1;
-        this.lastErrorToastAt = 0;
-        this.retryTimer = null;
-        this.retryAt = 0;
-    }
-
-    start() {
-        if (this.app.configStore.get().comment_translation_auto_open === "auto") {
-            this.enabled = true;
-            this.displayMode = "translated";
-        }
-        this.scheduleScan(0);
-        this.syncMutationObservers(null);
-    }
-
-    disconnectMutationObservers() {
-        this.observer?.disconnect?.();
-        this.discoveryObserver?.disconnect?.();
-        this.observer = null;
-        this.observerRoot = null;
-        this.discoveryObserver = null;
-        this.discoveryRoot = null;
-    }
-
-    syncMutationObservers(panelRoot = null) {
-        const MutationObserverCtor = this.window.MutationObserver;
-        const body = this.document.body;
-        if (typeof MutationObserverCtor !== "function" || !body) return;
-
-        const nextRoot = panelRoot?.isConnected ? panelRoot : null;
-        const nextDiscoveryRoot = nextRoot?.parentElement || (!nextRoot ? body : null);
-        if (this.observerRoot === nextRoot && this.discoveryRoot === nextDiscoveryRoot) return;
-
-        this.disconnectMutationObservers();
-
-        if (nextRoot) {
-            this.observerRoot = nextRoot;
-            this.observer = new MutationObserverCtor((records) => {
-                if (records.some((record) => (
-                    record.type === "characterData" ||
-                    (record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))
-                ))) {
-                    this.scheduleScan(80);
-                }
-            });
-            this.observer.observe(nextRoot, { childList: true, characterData: true, subtree: true });
-
-            if (nextDiscoveryRoot) {
-                this.discoveryRoot = nextDiscoveryRoot;
-                this.discoveryObserver = new MutationObserverCtor((records) => {
-                    if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
-                        this.scheduleScan(80);
-                    }
-                });
-                this.discoveryObserver.observe(nextDiscoveryRoot, { childList: true, subtree: false });
-            }
-            return;
-        }
-
-        this.discoveryRoot = body;
-        this.discoveryObserver = new MutationObserverCtor((records) => {
-            if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
-                this.scheduleScan(80);
-            }
-        });
-        this.discoveryObserver.observe(body, { childList: true, subtree: true });
-    }
-
-    scheduleScan(delay = 80) {
-
-
-
-        if (this.scanTimer !== null) return;
-        this.scanTimer = this.window.setTimeout?.(() => {
-            this.scanTimer = null;
-            this.scan();
-        }, delay) || null;
-    }
-
-    isRendered(element) {
-        if (!element?.isConnected) return false;
-        const style = this.window.getComputedStyle?.(element);
-        if (style?.display === "none" || style?.visibility === "hidden") return false;
-        const rect = element.getBoundingClientRect?.();
-        return !rect || (rect.width > 0 && rect.height > 0);
-    }
-
-    getCommentElements() {
-        if (/\/live(?:\/|$)/i.test(this.window.location?.pathname || "")) return [];
-        return Array.from(this.document.querySelectorAll(COMMENT_TEXT_SELECTOR)).filter((element) => {
-            const hiddenByTranslation = element.classList.contains(
-                `${SCRIPT_PREFIX}-comment-original-hidden`,
-            );
-            if (!hiddenByTranslation && !this.isRendered(element)) return false;
-            if (hiddenByTranslation) {
-                const record = this.records.get(element);
-                if (!record?.translated) {
-                    element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
-                    if (!this.isRendered(element)) return false;
-                }
-            }
-            if (element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')) return false;
-            return true;
+        return items.map((item) => {
+            const startPosition = value.indexOf(item.startId);
+            if (startPosition < 0) return null;
+            const start = startPosition + item.startId.length;
+            const end = value.indexOf(item.endId, start);
+            if (end < 0 || end <= start) return null;
+            return value.slice(start, end).trim() || null;
         });
     }
 
-    getPanelContext(commentElements = []) {
-        const profilePanel = Array.from(
-            this.document.querySelectorAll('[data-e2e="search-comment-container"]'),
-        ).find((element) => this.isRendered(element)) || null;
-        if (profilePanel) {
-            const profileComment = commentElements.find((element) => profilePanel.contains?.(element)) || null;
-            let profileList =
-                profileComment?.closest?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"], [class*="CommentListContainer"]') ||
-                profilePanel.querySelector?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"], [class*="CommentListContainer"]') ||
-                null;
-            if (!profileList && profileComment) {
-                let candidate = profileComment.parentElement;
-                for (let depth = 0; candidate && candidate !== profilePanel && depth < 8; depth += 1) {
-                    if (candidate.querySelectorAll?.(COMMENT_TEXT_SELECTOR).length >= 2) {
-                        profileList = candidate;
-                        break;
-                    }
-                    candidate = candidate.parentElement;
-                }
-            }
-            return {
-                list: profileList || profilePanel,
-                root: profilePanel,
-                placement: "profile",
-            };
-        }
-
-        const cinemaPanel = Array.from(
-            this.document.querySelectorAll('[aria-label="cinema-side-panel-comment-panel"]'),
-        ).find((element) => this.isRendered(element)) || null;
-        if (cinemaPanel) {
-            return {
-                list: cinemaPanel,
-                root: cinemaPanel.parentElement || cinemaPanel,
-                placement: "title",
-            };
-        }
-
-        const first = commentElements.find((element) => this.isRendered(element)) || null;
-        const list =
-              first?.closest?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"]') ||
-              Array.from(this.document.querySelectorAll('[data-e2e="comment-list"]')).find((element) => this.isRendered(element)) ||
-              null;
-        let rootElement =
-            first?.closest?.('section, [role="complementary"], aside, [class*="CommentSidebarContainer"], [class*="DivCommentContainer"]') ||
-            list?.parentElement ||
-            null;
-        if (!rootElement && first) {
-            rootElement = first.parentElement;
-            const wantedCount = Math.min(2, commentElements.length);
-            for (let depth = 0; rootElement && depth < 8; depth += 1) {
-                if (rootElement.querySelectorAll?.(COMMENT_TEXT_SELECTOR).length >= wantedCount) break;
-                rootElement = rootElement.parentElement;
-            }
-        }
-        return { list: list || rootElement, root: rootElement || list, placement: "title" };
-    }
-
-    getCommentInput(context = null) {
-        const selector = '[data-e2e="comment-input"]';
-        const scoped = context?.root?.querySelectorAll?.(selector) || [];
-        const candidates = scoped.length ? Array.from(scoped) : Array.from(this.document.querySelectorAll(selector));
-        return candidates.find((element) => (
-            this.isRendered(element) &&
-            !element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')
-        )) || null;
-    }
-
-    getCommentActionRow(commentInput) {
-        const mentionButton = commentInput?.querySelector?.('[data-e2e="comment-at-icon"]');
-        const emojiButton = commentInput?.querySelector?.('[data-e2e="comment-emoji-icon"]');
-        if (!mentionButton || !emojiButton) return null;
-        let candidate = emojiButton.parentElement;
-        while (candidate && candidate !== commentInput) {
-            if (candidate.contains?.(mentionButton) && candidate.contains?.(emojiButton)) return candidate;
-            candidate = candidate.parentElement;
-        }
-        return null;
-    }
-
-    getCommentLoginRow(context = null) {
-        const selector = ".comment-login-bar";
-        const scoped = context?.root?.querySelectorAll?.(selector) || [];
-        const candidates = scoped.length ? Array.from(scoped) : Array.from(this.document.querySelectorAll(selector));
-        const loginBar = candidates.find((element) => (
-            this.isRendered(element) &&
-            !element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')
-        )) || null;
-        const loginButton = loginBar?.parentElement || null;
-        const loginWrapper = loginButton?.parentElement || null;
-        return loginWrapper && this.isRendered(loginWrapper) ? loginWrapper : null;
-    }
-
-    getCurrentVideoKey() {
-        const pathname = String(this.window.location?.pathname || "");
-        const mediaMatch = pathname.match(/\/(?:video|photo)\/(\d+)/i);
-        if (mediaMatch) return `media:${mediaMatch[1]}`;
-
-        const visibleMedia = this.app.extractor?.getVisibleMediaElement?.() || null;
-        const stableElement =
-              this.app.extractor?.getMediaContextElement?.(visibleMedia) ||
-              visibleMedia;
-        const visibleUrl = this.app.extractor?.getVisibleMediaContextUrls?.(visibleMedia)?.[0] || "";
-        const visibleId = getVideoIdFromUrl(visibleUrl);
-
-        if (stableElement) {
-            let identity = this.mediaElementIdentities.get(stableElement);
-            if (!identity) {
-                let elementKey = this.mediaElementKeys.get(stableElement);
-                if (!elementKey) {
-                    elementKey = this.nextMediaElementKey;
-                    this.nextMediaElementKey += 1;
-                    this.mediaElementKeys.set(stableElement, elementKey);
-                }
-                identity = {
-                    key: visibleId ? `media:${visibleId}` : `media-element:${pathname}:${elementKey}`,
-                    mediaId: visibleId || "",
-                };
-                this.mediaElementIdentities.set(stableElement, identity);
-                return identity.key;
-            }
-
-            if (visibleId && identity.mediaId && visibleId !== identity.mediaId) {
-                identity = { key: `media:${visibleId}`, mediaId: visibleId };
-                this.mediaElementIdentities.set(stableElement, identity);
-                return identity.key;
-            }
-            if (visibleId && !identity.mediaId) identity.mediaId = visibleId;
-            return identity.key;
-        }
-        return visibleId ? `media:${visibleId}` : null;
-    }
-
-    resetForVideo(nextVideoKey) {
-        this.generation += 1;
-        this.queue.length = 0;
-        this.batchInFlight = false;
-        this.clearRetryTimer();
-        for (const element of this.document.querySelectorAll(COMMENT_TEXT_SELECTOR)) {
-            const record = this.records.get(element);
-            record?.translatedElement?.remove?.();
-            element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
-        }
-        this.records = new WeakMap();
-        const autoOpen = this.app.configStore.get().comment_translation_auto_open === "auto";
-        this.enabled = autoOpen;
-        this.displayMode = autoOpen ? "translated" : "original";
-        this.currentVideoKey = nextVideoKey;
-        this.updateButton();
-    }
-
-    createTranslationIcon() {
-        const svg = this.document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("fill", "none");
-        svg.setAttribute("stroke", "currentColor");
-        svg.setAttribute("stroke-width", "1.8");
-        svg.setAttribute("stroke-linecap", "round");
-        svg.setAttribute("stroke-linejoin", "round");
-        svg.setAttribute("viewBox", "0 0 24 24");
-        svg.setAttribute("width", "1em");
-        svg.setAttribute("height", "1em");
-        svg.setAttribute("aria-hidden", "true");
-        const circle = this.document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.setAttribute("cx", "12");
-        circle.setAttribute("cy", "12");
-        circle.setAttribute("r", "10.25");
-        const glyph = this.document.createElementNS("http://www.w3.org/2000/svg", "g");
-        glyph.setAttribute("transform", "translate(3.6 3.6) scale(0.7)");
-        [
-            "m5 8 6 6",
-            "m4 14 6-6 2-3",
-            "M2 5h12",
-            "M7 2h1",
-            "m22 22-5-10-5 10",
-            "M14 18h6",
-        ].forEach((pathData) => {
-            const path = this.document.createElementNS("http://www.w3.org/2000/svg", "path");
-            path.setAttribute("d", pathData);
-            path.setAttribute("vector-effect", "non-scaling-stroke");
-            glyph.appendChild(path);
-        });
-        svg.append(circle, glyph);
-        return svg;
-    }
-
-    mountButton(commentElements = [], suppliedContext = null) {
-        const context = suppliedContext || this.getPanelContext(commentElements);
-        const commentInput = this.getCommentInput(context);
-        const inputActionRow = this.getCommentActionRow(commentInput);
-        const actionRow = inputActionRow || this.getCommentLoginRow(context);
-        const placement = inputActionRow ? "input" : "login";
-        if (!actionRow) {
-            this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
-            this.buttonHost?.remove?.();
-            this.button = null;
-            this.buttonHost = null;
-            this.buttonTooltip = null;
-            return;
-        }
-        if (
-            !this.button?.isConnected ||
-            !this.buttonHost?.isConnected ||
-            this.buttonHost.parentElement !== actionRow ||
-            this.buttonHost.dataset.placement !== placement
-        ) {
-            this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
-            this.buttonHost?.remove?.();
-            const host = createElement(
-                this.document,
-                "div",
-                `TUXTooltip-reference ${SCRIPT_PREFIX}-comment-translation-host`,
-            );
-            host.dataset.placement = placement;
-            if (placement === "login") actionRow.classList?.add?.(`${SCRIPT_PREFIX}-comment-login-row`);
-            const referenceButton = commentInput?.querySelector?.('[data-e2e="comment-emoji-icon"]');
-            const colorScheme = (referenceButton || actionRow)
-            ?.closest?.('[data-tux-color-scheme]')
-            ?.getAttribute?.("data-tux-color-scheme");
-            if (colorScheme) host.setAttribute("data-tux-color-scheme", colorScheme);
-            const referenceClasses = String(referenceButton?.className || "").trim();
-            const button = createElement(
-                this.document,
-                "button",
-                `${referenceClasses || "TUXButton TUXButton--default TUXButton--medium TUXButton--secondary"} ${SCRIPT_PREFIX}-comment-translate-button`,
-            );
-            button.type = "button";
-            button.dataset.e2e = `${SCRIPT_PREFIX}-comment-translate-icon`;
-            button.setAttribute("aria-disabled", "false");
-            button.setAttribute("aria-expanded", "false");
-            button.tabIndex = 0;
-            const content = createElement(this.document, "div", "TUXButton-content");
-            const iconContainer = createElement(this.document, "div", "TUXButton-iconContainer");
-            iconContainer.appendChild(this.createTranslationIcon());
-            content.appendChild(iconContainer);
-            button.appendChild(content);
-            button.addEventListener("click", (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-
-
-
-                host.dataset.tooltipSuppressed = "true";
-                button.blur?.();
-                this.toggleDisplay();
-            });
-            host.addEventListener("pointerleave", () => {
-                delete host.dataset.tooltipSuppressed;
-            });
-            host.appendChild(button);
-            const tooltip = createElement(
-                this.document,
-                "div",
-                `${SCRIPT_PREFIX}-comment-translation-tooltip`,
-            );
-            tooltip.id = `${SCRIPT_PREFIX}-comment-translation-tooltip`;
-            tooltip.setAttribute("role", "tooltip");
-            button.setAttribute("aria-describedby", tooltip.id);
-            host.appendChild(tooltip);
-            actionRow.appendChild(host);
-            this.buttonHost = host;
-            this.button = button;
-            this.buttonTooltip = tooltip;
-        }
-        this.updateButton();
-    }
-
-    updateButton() {
-        if (!this.button) return;
-        const busy = this.enabled && this.displayMode === "translated" && (this.batchInFlight || this.queue.length > 0);
-        const comparison = this.app.configStore.get().comment_translation_display_mode === "comparison";
-        const label = !this.enabled
-        ? this.app.t("translate_comments")
-        : busy
-        ? this.app.t("translating_comments")
-        : this.displayMode === "translated"
-        ? this.app.t(comparison ? "hide_translated_comments" : "show_original_comments")
-        : this.app.t("show_translated_comments");
-        this.button.setAttribute("aria-label", label);
-        if (this.buttonTooltip && this.buttonTooltip.textContent !== label) this.buttonTooltip.textContent = label;
-        this.button.dataset.state = busy ? "busy" : this.displayMode;
-        this.button.setAttribute("aria-pressed", String(this.enabled && this.displayMode === "translated"));
-    }
-
-    toggleDisplay() {
-        if (!this.enabled) {
-            this.enabled = true;
-            this.displayMode = "translated";
-        } else {
-            this.displayMode = this.displayMode === "translated" ? "original" : "translated";
-        }
-        this.applyDisplayMode();
-        this.updateButton();
-        this.scan();
-    }
-    getTranslationSourceText(text = "") {
-        const value = String(text || "").trim();
-        return value
-            .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
+    function normalizeTranslationComparisonText(text = "") {
+        const value = String(text || "");
+        return (typeof value.normalize === "function" ? value.normalize("NFKC") : value)
+            .replace(/\s+/gu, " ")
             .trim();
     }
 
-    normalizeTranslationComparison(text = "") {
-        return normalizeTranslationComparisonText(text);
+    function getTranslationClassificationText(text = "") {
+        const value = String(text || "");
+        const normalized = typeof value.normalize === "function" ? value.normalize("NFC") : value;
+        return normalized
+            .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
+            .replace(/\b(?:https?:\/\/|www\.)\S+/giu, " ")
+            .replace(/@[\p{L}\p{M}\p{N}_.-]+/gu, " ")
+            .trim();
     }
 
-    getCommentText(element) {
-        const nodes = Array.from(element?.childNodes || []);
-        if (!nodes.length) return String(element?.textContent || "").trim();
+    function isVietnameseLikeLatinText(text = "") {
+        const value = String(text || "");
+        const normalized = typeof value.normalize === "function" ? value.normalize("NFD") : value;
+        return /[đĐ]/u.test(value) || /[\u031B\u0309\u0323]/u.test(normalized);
+    }
 
-        const inlineTags = new Set(["SPAN", "A", "STRONG", "EM", "B", "I", "S", "U"]);
-        const isExcludedElement = (node) => Boolean(
-            node?.matches?.(COMMENT_TEXT_SELECTOR) ||
-            node?.querySelector?.(COMMENT_TEXT_SELECTOR) ||
-            node?.matches?.('button, [role="button"], svg, [aria-hidden="true"]') ||
-            node?.querySelector?.('button, [role="button"]')
-        );
+    function classifyTranslationText(text = "") {
+        const value = getTranslationClassificationText(text);
+        const counts = { latin: 0, han: 0, kana: 0, hangul: 0, other: 0 };
+        for (const character of value) {
+            if (!/\p{L}/u.test(character)) continue;
+            if (/\p{Script=Latin}/u.test(character)) counts.latin += 1;
+            else if (/\p{Script=Han}/u.test(character)) counts.han += 1;
+            else if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(character)) counts.kana += 1;
+            else if (/\p{Script=Hangul}/u.test(character)) counts.hangul += 1;
+            else counts.other += 1;
+        }
 
-        const parts = [];
-        const safeContainers = [];
-        for (const node of nodes) {
-            if (node?.nodeType === 3) {
-                parts.push(String(node.textContent || ""));
-                continue;
+        const total = counts.latin + counts.han + counts.kana + counts.hangul + counts.other;
+        if (!total) return "neutral";
+        if (counts.kana > 0 && counts.hangul === 0 && counts.other === 0) return "japanese";
+        if (counts.hangul > 0 && counts.kana === 0 && counts.han === 0 && counts.other === 0) return "hangul";
+        if (counts.han > 0 && counts.latin === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) return "han";
+        if (counts.latin > 0 && counts.han === 0 && counts.kana === 0 && counts.hangul === 0 && counts.other === 0) {
+            return isVietnameseLikeLatinText(value) ? "vietnamese-like" : "latin";
+        }
+        if (counts.other === total) return "other";
+        return "mixed";
+    }
+
+    function isBatchableTranslationBucket(bucket = "") {
+        return ["latin", "vietnamese-like", "japanese", "hangul", "han"].includes(String(bucket || ""));
+    }
+
+    function normalizeTranslationLanguageCode(language = "") {
+        const value = String(language || "").trim().toLowerCase().replace(/_/g, "-");
+        if (!value) return "";
+        if (value === "zh" || value.startsWith("zh-")) return "zh";
+        return value.split("-")[0];
+    }
+
+    function translationLanguageMatchesTarget(detectedLanguage = "", targetLanguage = "") {
+        const detected = normalizeTranslationLanguageCode(detectedLanguage);
+        const target = normalizeTranslationLanguageCode(targetLanguage);
+        return Boolean(detected && target && detected === target);
+    }
+
+    class TranslationProvider {
+        constructor(request = userscriptHttpRequest) {
+            this.request = request;
+        }
+
+        getBatchLimits() {
+            return { maxItems: 20, maxPayloadChars: 5000 };
+        }
+
+        canTranslateText(text = "", _options = {}) {
+            const maxPayloadChars = Math.max(1, Number(this.getBatchLimits().maxPayloadChars || 5000));
+            const sourceText = String(text || "");
+            return Boolean(sourceText && sourceText.length <= maxPayloadChars);
+        }
+
+        async translateBatch(texts = [], options = {}) {
+            if (!texts.length) return [];
+            const payload = createPackedTranslationBatch(texts);
+            const result = await this.translateSingle(payload.text, options);
+            const parsed = parsePackedTranslationBatch(result.text, payload);
+            if (parsed.some((value) => value === null)) {
+                const error = new Error("Translation batch boundaries could not be parsed");
+                error.batchParseFailure = true;
+                throw error;
             }
-            if (node?.nodeType !== 1 || isExcludedElement(node)) continue;
-            if (inlineTags.has(String(node.tagName || "").toUpperCase())) {
-                parts.push(String(node.textContent || ""));
-            } else {
-                safeContainers.push(node);
+            return parsed;
+        }
+
+        async translateSingle(_text, _options = {}) {
+            throw new Error("Translation provider is not implemented");
+        }
+    }
+
+    class GoogleFreeTranslationProvider extends TranslationProvider {
+        createRequestUrl(text = "", options = {}) {
+            const sourceText = String(text || "");
+            const url = new URL("https://translate.google.com/translate_a/single");
+            url.searchParams.set("client", "t");
+            url.searchParams.set("sl", options.source || "auto");
+            url.searchParams.set("tl", options.target || DEFAULT_CONFIG.comment_translation_target);
+            url.searchParams.set("hl", "en");
+            for (const value of ["at", "bd", "ex", "ld", "md", "qca", "rw", "rm", "ss", "t"]) {
+                url.searchParams.append("dt", value);
+            }
+            url.searchParams.set("ie", "UTF-8");
+            url.searchParams.set("oe", "UTF-8");
+            url.searchParams.set("otf", "1");
+            url.searchParams.set("ssel", "0");
+            url.searchParams.set("tsel", "0");
+            url.searchParams.set("kc", "7");
+            url.searchParams.set("q", sourceText);
+            url.searchParams.set("tk", generateGoogleTranslateToken(sourceText));
+            return url;
+        }
+
+        canTranslateText(text = "", options = {}) {
+            const sourceText = String(text || "");
+            if (!super.canTranslateText(sourceText, options)) return false;
+            return this.createRequestUrl(sourceText, options).toString().length <= 8000;
+        }
+
+        async translateSingle(text = "", options = {}) {
+            const sourceText = String(text || "").trim();
+            if (!sourceText) return { text: "", detectedLanguage: "" };
+            const url = this.createRequestUrl(sourceText, options);
+            const response = await this.request({
+                url: url.toString(),
+                timeout: 18000,
+                signal: options.signal,
+            });
+            const data = parseTranslationJson(response.responseText, "Google Translate");
+            const translated = Array.isArray(data?.[0])
+            ? data[0].map((item) => String(item?.[0] || "")).join("").trim()
+            : "";
+            if (!translated) {
+                throw createTranslationResponseError(data, "Google Translate returned an empty result");
+            }
+            return { text: translated, detectedLanguage: String(data?.[2] || "") };
+        }
+    }
+
+    class BingFreeTranslationProvider extends TranslationProvider {
+        constructor(request = userscriptHttpRequest) {
+            super(request);
+            this.credentials = null;
+            this.credentialsExpireAt = 0;
+            this.credentialsPromise = null;
+            this.requestSequence = 0;
+        }
+
+        getBatchLimits() {
+            return { maxItems: 10, maxPayloadChars: 3000 };
+        }
+
+        async getCredentials(options = {}) {
+            if (this.credentials && Date.now() < this.credentialsExpireAt) {
+                return this.credentials;
+            }
+            if (this.credentialsPromise) return this.credentialsPromise;
+
+            const loadPromise = (async () => {
+                const response = await this.request({
+                    url: "https://www.bing.com/translator",
+                    timeout: 18000,
+                    signal: options.signal,
+                });
+                const page = String(response.responseText || "");
+                const tokenMatch = page.match(
+                    /params_AbusePreventionHelper\s*=\s*\[\s*["']?(\d+)["']?\s*,\s*["']([^"']+)["'](?:\s*,\s*(\d+))?/,
+                );
+                const igMatch = page.match(/["']?IG["']?\s*:\s*["']([^"']+)["']/);
+                const iidMatch = page.match(/data-iid\s*=\s*["']([^"']+)["']/i);
+                if (!tokenMatch || !igMatch || !iidMatch) {
+                    throw new Error("Bing Translator bootstrap data was not found");
+                }
+                const expiryMs = Math.max(60000, Number(tokenMatch[3]) || 15 * 60 * 1000);
+                const tokenIssuedAt = Number(tokenMatch[1]);
+                let origin = "https://www.bing.com";
+                try {
+                    const finalUrl = new URL(response.finalUrl || origin);
+                    if (finalUrl.hostname === "bing.com" || finalUrl.hostname.endsWith(".bing.com")) {
+                        origin = finalUrl.origin;
+                    }
+                } catch (_error) {}
+                this.credentials = {
+                    key: tokenMatch[1],
+                    token: tokenMatch[2],
+                    ig: igMatch[1],
+                    iid: iidMatch[1],
+                    origin,
+                };
+                this.credentialsExpireAt =
+                    (Number.isFinite(tokenIssuedAt) && tokenIssuedAt > 0 ? tokenIssuedAt : Date.now()) +
+                    Math.max(30000, expiryMs - 30000);
+                return this.credentials;
+            })();
+            this.credentialsPromise = loadPromise;
+            try {
+                return await loadPromise;
+            } finally {
+                if (this.credentialsPromise === loadPromise) this.credentialsPromise = null;
             }
         }
-        const directText = parts.join("").trim();
-        if (directText) return directText;
-        if (safeContainers.length === 1) return String(safeContainers[0]?.textContent || "").trim();
-        return "";
+
+        createRequestUrl(credentials, useEPT = true) {
+            const url = new URL("/ttranslatev3", credentials.origin || "https://www.bing.com");
+            url.searchParams.set("isVertical", "1");
+            url.searchParams.set("IG", credentials.ig);
+            url.searchParams.set("IID", credentials.iid);
+            if (useEPT) {
+                url.searchParams.set("SFX", String(++this.requestSequence));
+                url.searchParams.set("ref", "TThis");
+                url.searchParams.set("edgepdftranslator", "1");
+            }
+            return url;
+        }
+
+        async requestTranslationText(text = "", options = {}) {
+            const sourceText = String(text || "").trim();
+            if (!sourceText) return { text: "", detectedLanguage: "" };
+            const credentials = await this.getCredentials(options);
+            const target = mapBingTranslationLanguage(
+                options.target || DEFAULT_CONFIG.comment_translation_target,
+            );
+            const source = options.source === "auto"
+            ? "auto-detect"
+            : mapBingTranslationLanguage(options.source || "auto-detect");
+            const useEPT = sourceText.length <= 3000 && [source, target].every((language) => (
+                language === "auto-detect" || COMMENT_TRANSLATION_TARGETS.some(([value]) => (
+                    mapBingTranslationLanguage(value) === language
+                ))
+            ));
+            const url = this.createRequestUrl(credentials, useEPT);
+            const body = new URLSearchParams({
+                fromLang: source,
+                text: sourceText,
+                to: target,
+                token: credentials.token,
+                key: credentials.key,
+            });
+            let response;
+            try {
+                response = await this.request({
+                    method: "POST",
+                    url: url.toString(),
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                        Referer: `${credentials.origin || "https://www.bing.com"}/translator`,
+                    },
+                    data: body.toString(),
+                    timeout: 18000,
+                    signal: options.signal,
+                });
+            } catch (error) {
+                if ([401, 403].includes(Number(error?.status || 0))) {
+                    this.credentials = null;
+                    this.credentialsExpireAt = 0;
+                }
+                if (Number(error?.status || 0) === 401) {
+                    error.status = 429;
+                    error.stopTranslation = true;
+                }
+                throw error;
+            }
+            const data = parseTranslationJson(response.responseText, "Bing Translator");
+            const result = getBingTranslationResult(data);
+            const translated = String(result?.translations?.[0]?.text || "");
+            const detectedLanguage = String(result?.detectedLanguage?.language || "");
+            if (!translated) {
+                if (translationLanguageMatchesTarget(detectedLanguage, target)) {
+                    return { text: sourceText, detectedLanguage };
+                }
+                const error = createTranslationResponseError(
+                    result || data,
+                    "Bing Translator returned an empty result",
+                );
+                if (Number(error.status || 0) === 401) {
+                    this.credentials = null;
+                    this.credentialsExpireAt = 0;
+                    error.status = 429;
+                }
+                if (Number(error.status || 0) === 429) error.stopTranslation = true;
+                throw error;
+            }
+            return { text: translated, detectedLanguage };
+        }
+
+        async translateSingle(text = "", options = {}) {
+            return this.requestTranslationText(text, options);
+        }
     }
 
-    clearRetryTimer() {
-        if (this.retryTimer !== null) this.window.clearTimeout?.(this.retryTimer);
-        this.retryTimer = null;
-        this.retryAt = 0;
+    const TRANSLATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+    const TRANSLATION_UNTRANSLATED_CACHE_TTL_MS = 5 * 60 * 1000;
+
+    class TranslationService {
+        constructor(request = userscriptHttpRequest) {
+            this.providerFactories = new Map();
+            this.providers = new Map();
+            this.cache = new Map();
+            this.confirmedSameCache = new Map();
+            this.untranslatedCache = new Map();
+            this.inFlight = new Map();
+            this.registerProvider("google", () => new GoogleFreeTranslationProvider(request));
+            this.registerProvider("bing", () => new BingFreeTranslationProvider(request));
+        }
+
+        registerProvider(name, factory) {
+            this.providerFactories.set(String(name), factory);
+            this.providers.delete(String(name));
+        }
+
+        getProvider(name) {
+            const key = String(name || DEFAULT_CONFIG.comment_translation_provider);
+            if (!this.providerFactories.has(key)) throw new Error(`Unknown translation provider: ${key}`);
+            if (!this.providers.has(key)) this.providers.set(key, this.providerFactories.get(key)());
+            return this.providers.get(key);
+        }
+
+        getBatchLimits(providerName = "") {
+            return this.getProvider(providerName).getBatchLimits();
+        }
+
+        canTranslateBatch(providerName = "", texts = [], options = {}) {
+            const provider = this.getProvider(providerName);
+            const limits = provider.getBatchLimits();
+            const maxItems = Math.max(1, Number(limits.maxItems || 20));
+            const packedText = createPackedTranslationBatch(texts).text;
+            const withinProviderLimit = typeof provider.canTranslateText === "function"
+            ? provider.canTranslateText(packedText, options)
+            : packedText.length <= Math.max(1, Number(limits.maxPayloadChars || 5000));
+            return (
+                texts.length > 0 &&
+                texts.length <= maxItems &&
+                estimatePackedTranslationBatchLength(texts) <= Math.max(1, Number(limits.maxPayloadChars || 5000)) &&
+                withinProviderLimit
+            );
+        }
+
+        canTranslateSingle(providerName = "", text = "", options = {}) {
+            const provider = this.getProvider(providerName);
+            if (typeof provider.canTranslateText === "function") {
+                return provider.canTranslateText(text, options);
+            }
+            const maxPayloadChars = Math.max(1, Number(provider.getBatchLimits().maxPayloadChars || 5000));
+            const sourceText = String(text || "");
+            return Boolean(sourceText && sourceText.length <= maxPayloadChars);
+        }
+
+        getCacheKey(providerName, target, sourceText) {
+            return `${providerName}\n${target}\n${sourceText}`;
+        }
+
+        getCachedResult(store, cacheKey) {
+            const entry = store.get(cacheKey);
+            if (!entry) return undefined;
+            if (entry.expiresAt <= Date.now()) {
+                store.delete(cacheKey);
+                return undefined;
+            }
+            store.delete(cacheKey);
+            store.set(cacheKey, entry);
+            return entry.value;
+        }
+
+        setCacheEntry(store, cacheKey, value, ttlMs) {
+            store.delete(cacheKey);
+            store.set(cacheKey, { value, expiresAt: Date.now() + ttlMs });
+            if (store.size > 1200) store.delete(store.keys().next().value);
+            return value;
+        }
+
+        setCachedResult(cacheKey, result) {
+            return this.setCacheEntry(this.cache, cacheKey, result, TRANSLATION_CACHE_TTL_MS);
+        }
+
+        setConfirmedSame(cacheKey, result) {
+            return this.setCacheEntry(this.confirmedSameCache, cacheKey, result, TRANSLATION_CACHE_TTL_MS);
+        }
+
+        setUntranslated(cacheKey, result) {
+            return this.setCacheEntry(
+                this.untranslatedCache,
+                cacheKey,
+                result,
+                TRANSLATION_UNTRANSLATED_CACHE_TTL_MS,
+            );
+        }
+
+        getCachedTranslation(cacheKey) {
+            return this.getCachedResult(this.cache, cacheKey);
+        }
+
+        getConfirmedSame(cacheKey) {
+            return this.getCachedResult(this.confirmedSameCache, cacheKey);
+        }
+
+        getUntranslated(cacheKey) {
+            return this.getCachedResult(this.untranslatedCache, cacheKey);
+        }
+
+        async translateBatch(texts = [], options = {}) {
+            const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
+            const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
+            const sourceTexts = texts.map((text) => String(text || "").trim());
+            const results = new Array(sourceTexts.length).fill(null);
+            const uniqueEntries = new Map();
+
+            sourceTexts.forEach((sourceText, index) => {
+                if (!sourceText) return;
+                const cacheKey = this.getCacheKey(providerName, target, sourceText);
+                let entry = uniqueEntries.get(cacheKey);
+                if (!entry) {
+                    entry = { cacheKey, sourceText, indices: [] };
+                    uniqueEntries.set(cacheKey, entry);
+                }
+                entry.indices.push(index);
+            });
+
+            const freshEntries = [];
+            const assignResult = (entry, result) => {
+                for (const index of entry.indices) results[index] = result;
+            };
+
+            for (const entry of uniqueEntries.values()) {
+                const cached = this.getCachedTranslation(entry.cacheKey);
+                const confirmedSame = this.getConfirmedSame(entry.cacheKey);
+                const untranslated = this.getUntranslated(entry.cacheKey);
+                if (cached !== undefined) {
+                    assignResult(entry, cached);
+                } else if (confirmedSame !== undefined) {
+                    assignResult(entry, entry.sourceText);
+                } else if (untranslated !== undefined) {
+                    assignResult(entry, null);
+                } else {
+                    freshEntries.push(entry);
+                }
+            }
+
+            if (freshEntries.length) {
+                if (!this.canTranslateBatch(
+                    providerName,
+                    freshEntries.map((entry) => entry.sourceText),
+                    { source: "auto", target },
+                )) {
+                    throw new Error("Translation batch exceeds provider limits");
+                }
+                const batchResults = await this.getProvider(providerName).translateBatch(
+                    freshEntries.map((entry) => entry.sourceText),
+                    { source: "auto", target, signal: options.signal },
+                );
+                if (!Array.isArray(batchResults) || batchResults.length !== freshEntries.length) {
+                    throw new Error("Translation provider returned an invalid batch size");
+                }
+                freshEntries.forEach((entry, index) => {
+                    const value = typeof batchResults[index] === "string"
+                    ? batchResults[index].trim()
+                    : "";
+                    if (
+                        !value ||
+                        normalizeTranslationComparisonText(value) ===
+                        normalizeTranslationComparisonText(entry.sourceText)
+                    ) {
+                        this.setUntranslated(entry.cacheKey, {
+                            status: "untranslated",
+                            text: entry.sourceText,
+                            detectedLanguage: "",
+                            fromCache: false,
+                            reason: value ? "source-returned-unchanged" : "batch-item-empty",
+                        });
+                        return;
+                    }
+                    assignResult(entry, this.setCachedResult(entry.cacheKey, value));
+                });
+            }
+
+            return results;
+        }
+
+        async translateSingle(text = "", options = {}) {
+            const providerName = String(options.provider || DEFAULT_CONFIG.comment_translation_provider);
+            const target = String(options.target || DEFAULT_CONFIG.comment_translation_target);
+            const sourceText = String(text || "").trim();
+            if (!sourceText) return { status: "unchanged", text: "", detectedLanguage: "", fromCache: true };
+            if (!this.canTranslateSingle(providerName, sourceText, { source: "auto", target })) {
+                throw new Error("Translation text exceeds provider limits");
+            }
+
+            const cacheKey = this.getCacheKey(providerName, target, sourceText);
+            const cached = this.getCachedTranslation(cacheKey);
+            if (cached !== undefined) {
+                return { status: "translated", text: cached, detectedLanguage: "", fromCache: true };
+            }
+            const confirmedSame = this.getConfirmedSame(cacheKey);
+            if (confirmedSame !== undefined) return { ...confirmedSame, fromCache: true };
+            const untranslated = this.getUntranslated(cacheKey);
+            if (untranslated !== undefined) return { ...untranslated, fromCache: true };
+            const inFlightEntry = this.inFlight.get(cacheKey);
+            if (inFlightEntry) {
+                if (!inFlightEntry.signal?.aborted) return inFlightEntry.promise;
+                this.inFlight.delete(cacheKey);
+            }
+
+            const pending = (async () => {
+                const result = await this.getProvider(providerName).translateSingle(
+                    sourceText,
+                    { source: "auto", target, signal: options.signal },
+                );
+                const translated = String(result?.text || "").trim();
+                const detectedLanguage = String(result?.detectedLanguage || "");
+                if (!translated) throw new Error("Translation provider returned an empty single result");
+                if (
+                    normalizeTranslationComparisonText(translated) !==
+                    normalizeTranslationComparisonText(sourceText)
+                ) {
+                    this.setCachedResult(cacheKey, translated);
+                    return { status: "translated", text: translated, detectedLanguage, fromCache: false };
+                }
+                if (translationLanguageMatchesTarget(detectedLanguage, target)) {
+                    return this.setConfirmedSame(cacheKey, {
+                        status: "unchanged",
+                        text: sourceText,
+                        detectedLanguage,
+                        fromCache: false,
+                    });
+                }
+
+                return this.setUntranslated(cacheKey, {
+                    status: "untranslated",
+                    text: sourceText,
+                    detectedLanguage,
+                    fromCache: false,
+                    reason: "source-returned-unchanged",
+                });
+            })();
+            const pendingEntry = { promise: pending, signal: options.signal };
+            this.inFlight.set(cacheKey, pendingEntry);
+            try {
+                return await pending;
+            } finally {
+                if (this.inFlight.get(cacheKey) === pendingEntry) this.inFlight.delete(cacheKey);
+            }
+        }
     }
 
-    scheduleRetry(delayMs = 30000) {
-        if (!this.enabled) return;
-        const runAt = Date.now() + Math.max(0, Number(delayMs) || 0);
-        if (this.retryTimer !== null && this.retryAt && this.retryAt <= runAt) return;
-        this.clearRetryTimer();
-        this.retryAt = runAt;
-        this.retryTimer = this.window.setTimeout?.(() => {
+    const COMMENT_TEXT_SELECTOR = '[data-e2e="comment-level-1"], [data-e2e="comment-level-2"]';
+    const MAX_SCRIPT_TRANSLATION_BATCH_ITEMS = 10;
+    const COMMENT_TRANSLATION_RETRY_DELAY_MS = 30000;
+    const COMMENT_TRANSLATION_MAX_ATTEMPTS = 3;
+
+    class CommentTranslationController {
+        constructor(app, service = new TranslationService()) {
+            this.app = app;
+            this.window = app.window;
+            this.document = app.document;
+            this.service = service;
+            this.enabled = false;
+            this.displayMode = "original";
+            this.records = new WeakMap();
+            this.queue = [];
+            this.batchInFlight = false;
+            this.activeBatches = new Set();
+            this.generation = 0;
+            this.observer = null;
+            this.observerRoot = null;
+            this.discoveryObserver = null;
+            this.discoveryRoot = null;
+            this.scanTimer = null;
+            this.button = null;
+            this.buttonHost = null;
+            this.buttonTooltip = null;
+            this.currentVideoKey = null;
+            this.mediaElementKeys = new WeakMap();
+            this.mediaElementIdentities = new WeakMap();
+            this.nextMediaElementKey = 1;
+            this.lastErrorToastAt = 0;
             this.retryTimer = null;
             this.retryAt = 0;
-            if (this.enabled) this.scan();
-        }, Math.max(0, runAt - Date.now())) ?? null;
-    }
-
-    getRecord(element) {
-        const currentText = this.getCommentText(element);
-        let record = this.records.get(element);
-        if (record && record.original === currentText) return record;
-        record?.translatedElement?.remove?.();
-        record = {
-            original: currentText,
-            translated: "",
-            translatedElement: null,
-            status: "idle",
-            failedAt: 0,
-        };
-        this.records.set(element, record);
-        return record;
-    }
-
-    getTranslationBucket(text = "") {
-        return classifyTranslationText(this.getTranslationSourceText(text));
-    }
-
-    isTranslatableText(text = "") {
-        return this.getTranslationBucket(text) !== "neutral";
-    }
-
-    renderRecord(element, record) {
-        if (!record.translated) return;
-        if (!record.translatedElement?.isConnected) {
-            const translatedElement = createElement(
-                this.document,
-                "span",
-                `${SCRIPT_PREFIX}-comment-translation-text`,
-                record.translated,
-            );
-            element.insertAdjacentElement?.("afterend", translatedElement);
-            record.translatedElement = translatedElement;
-        } else if (record.translatedElement.textContent !== record.translated) {
-            record.translatedElement.textContent = record.translated;
         }
-        const showTranslation = this.enabled && this.displayMode === "translated";
-        const replaceOriginal =
-              showTranslation && this.app.configStore.get().comment_translation_display_mode === "replace";
-        element.classList.toggle(`${SCRIPT_PREFIX}-comment-original-hidden`, replaceOriginal);
-        record.translatedElement.hidden = !showTranslation;
-    }
 
-    applyDisplayMode() {
-        const showTranslation = this.enabled && this.displayMode === "translated";
-        const replaceOriginal =
-              showTranslation && this.app.configStore.get().comment_translation_display_mode === "replace";
-        for (const element of this.getCommentElements()) {
-            const record = this.records.get(element);
-            if (!record?.translatedElement) continue;
+        start() {
+            if (this.app.configStore.get().comment_translation_auto_open === "auto") {
+                this.enabled = true;
+                this.displayMode = "translated";
+            }
+            this.scheduleScan(0);
+            this.syncMutationObservers(null);
+        }
+
+        disconnectMutationObservers() {
+            this.observer?.disconnect?.();
+            this.discoveryObserver?.disconnect?.();
+            this.observer = null;
+            this.observerRoot = null;
+            this.discoveryObserver = null;
+            this.discoveryRoot = null;
+        }
+
+        syncMutationObservers(panelRoot = null) {
+            const MutationObserverCtor = this.window.MutationObserver;
+            const body = this.document.body;
+            if (typeof MutationObserverCtor !== "function" || !body) return;
+
+            const nextRoot = panelRoot?.isConnected ? panelRoot : null;
+            const nextDiscoveryRoot = nextRoot?.parentElement || (!nextRoot ? body : null);
+            if (this.observerRoot === nextRoot && this.discoveryRoot === nextDiscoveryRoot) return;
+
+            this.disconnectMutationObservers();
+
+            if (nextRoot) {
+                this.observerRoot = nextRoot;
+                this.observer = new MutationObserverCtor((records) => {
+                    if (records.some((record) => (
+                        record.type === "characterData" ||
+                        (record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))
+                    ))) {
+                        this.scheduleScan(80);
+                    }
+                });
+                this.observer.observe(nextRoot, { childList: true, characterData: true, subtree: true });
+
+                if (nextDiscoveryRoot) {
+                    this.discoveryRoot = nextDiscoveryRoot;
+                    this.discoveryObserver = new MutationObserverCtor((records) => {
+                        if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
+                            this.scheduleScan(80);
+                        }
+                    });
+                    this.discoveryObserver.observe(nextDiscoveryRoot, { childList: true, subtree: false });
+                }
+                return;
+            }
+
+            this.discoveryRoot = body;
+            this.discoveryObserver = new MutationObserverCtor((records) => {
+                if (records.some((record) => record.type === "childList" && (record.addedNodes.length || record.removedNodes.length))) {
+                    this.scheduleScan(80);
+                }
+            });
+            this.discoveryObserver.observe(body, { childList: true, subtree: true });
+        }
+
+        scheduleScan(delay = 80) {
+            if (this.scanTimer !== null) return;
+            this.scanTimer = this.window.setTimeout?.(() => {
+                this.scanTimer = null;
+                this.scan();
+            }, delay) || null;
+        }
+
+        isRendered(element) {
+            if (!element?.isConnected) return false;
+            const style = this.window.getComputedStyle?.(element);
+            if (style?.display === "none" || style?.visibility === "hidden") return false;
+            const rect = element.getBoundingClientRect?.();
+            return !rect || (rect.width > 0 && rect.height > 0);
+        }
+
+        getCommentElements() {
+            if (/\/live(?:\/|$)/i.test(this.window.location?.pathname || "")) return [];
+            return Array.from(this.document.querySelectorAll(COMMENT_TEXT_SELECTOR)).filter((element) => {
+                const hiddenByTranslation = element.classList.contains(
+                    `${SCRIPT_PREFIX}-comment-original-hidden`,
+                );
+                if (!hiddenByTranslation && !this.isRendered(element)) return false;
+                if (hiddenByTranslation) {
+                    const record = this.records.get(element);
+                    if (!record?.translated) {
+                        element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
+                        if (!this.isRendered(element)) return false;
+                    }
+                }
+                if (element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')) return false;
+                return true;
+            });
+        }
+
+        getPanelContext(commentElements = []) {
+            const profilePanel = Array.from(
+                this.document.querySelectorAll('[data-e2e="search-comment-container"]'),
+            ).find((element) => this.isRendered(element)) || null;
+            if (profilePanel) {
+                const profileComment = commentElements.find((element) => profilePanel.contains?.(element)) || null;
+                let profileList =
+                    profileComment?.closest?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"], [class*="CommentListContainer"]') ||
+                    profilePanel.querySelector?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"], [class*="CommentListContainer"]') ||
+                    null;
+                if (!profileList && profileComment) {
+                    let candidate = profileComment.parentElement;
+                    for (let depth = 0; candidate && candidate !== profilePanel && depth < 8; depth += 1) {
+                        if (candidate.querySelectorAll?.(COMMENT_TEXT_SELECTOR).length >= 2) {
+                            profileList = candidate;
+                            break;
+                        }
+                        candidate = candidate.parentElement;
+                    }
+                }
+                return {
+                    list: profileList || profilePanel,
+                    root: profilePanel,
+                    placement: "profile",
+                };
+            }
+
+            const cinemaPanel = Array.from(
+                this.document.querySelectorAll('[aria-label="cinema-side-panel-comment-panel"]'),
+            ).find((element) => this.isRendered(element)) || null;
+            if (cinemaPanel) {
+                return {
+                    list: cinemaPanel,
+                    root: cinemaPanel.parentElement || cinemaPanel,
+                    placement: "title",
+                };
+            }
+
+            const first = commentElements.find((element) => this.isRendered(element)) || null;
+            const list =
+                  first?.closest?.('[data-e2e="comment-list"], [class*="DivCommentListContainer"]') ||
+                  Array.from(this.document.querySelectorAll('[data-e2e="comment-list"]')).find((element) => this.isRendered(element)) ||
+                  null;
+            let rootElement =
+                first?.closest?.('section, [role="complementary"], aside, [class*="CommentSidebarContainer"], [class*="DivCommentContainer"]') ||
+                list?.parentElement ||
+                null;
+            if (!rootElement && first) {
+                rootElement = first.parentElement;
+                const wantedCount = Math.min(2, commentElements.length);
+                for (let depth = 0; rootElement && depth < 8; depth += 1) {
+                    if (rootElement.querySelectorAll?.(COMMENT_TEXT_SELECTOR).length >= wantedCount) break;
+                    rootElement = rootElement.parentElement;
+                }
+            }
+            return { list: list || rootElement, root: rootElement || list, placement: "title" };
+        }
+
+        getCommentInput(context = null) {
+            const selector = '[data-e2e="comment-input"]';
+            const scoped = context?.root?.querySelectorAll?.(selector) || [];
+            const candidates = scoped.length ? Array.from(scoped) : Array.from(this.document.querySelectorAll(selector));
+            return candidates.find((element) => (
+                this.isRendered(element) &&
+                !element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')
+            )) || null;
+        }
+
+        getCommentActionRow(commentInput) {
+            const mentionButton = commentInput?.querySelector?.('[data-e2e="comment-at-icon"]');
+            const emojiButton = commentInput?.querySelector?.('[data-e2e="comment-emoji-icon"]');
+            if (!mentionButton || !emojiButton) return null;
+            let candidate = emojiButton.parentElement;
+            while (candidate && candidate !== commentInput) {
+                if (candidate.contains?.(mentionButton) && candidate.contains?.(emojiButton)) return candidate;
+                candidate = candidate.parentElement;
+            }
+            return null;
+        }
+
+        getCommentLoginRow(context = null) {
+            const selector = ".comment-login-bar";
+            const scoped = context?.root?.querySelectorAll?.(selector) || [];
+            const candidates = scoped.length ? Array.from(scoped) : Array.from(this.document.querySelectorAll(selector));
+            const loginBar = candidates.find((element) => (
+                this.isRendered(element) &&
+                !element.closest?.('[data-e2e*="live-chat"], [data-e2e*="live-room"], [class*="LiveChat"], [class*="ChatRoom"]')
+            )) || null;
+            const loginButton = loginBar?.parentElement || null;
+            const loginWrapper = loginButton?.parentElement || null;
+            return loginWrapper && this.isRendered(loginWrapper) ? loginWrapper : null;
+        }
+
+        getCurrentVideoKey() {
+            const pathname = String(this.window.location?.pathname || "");
+            const mediaMatch = pathname.match(/\/(?:video|photo)\/(\d+)/i);
+            if (mediaMatch) return `media:${mediaMatch[1]}`;
+
+            const visibleMedia = this.app.extractor?.getVisibleMediaElement?.() || null;
+            const stableElement =
+                  this.app.extractor?.getMediaContextElement?.(visibleMedia) ||
+                  visibleMedia;
+            const visibleUrl = this.app.extractor?.getVisibleMediaContextUrls?.(visibleMedia)?.[0] || "";
+            const visibleId = getVideoIdFromUrl(visibleUrl);
+
+            if (stableElement) {
+                let identity = this.mediaElementIdentities.get(stableElement);
+                if (!identity) {
+                    let elementKey = this.mediaElementKeys.get(stableElement);
+                    if (!elementKey) {
+                        elementKey = this.nextMediaElementKey;
+                        this.nextMediaElementKey += 1;
+                        this.mediaElementKeys.set(stableElement, elementKey);
+                    }
+                    identity = {
+                        key: visibleId ? `media:${visibleId}` : `media-element:${pathname}:${elementKey}`,
+                        mediaId: visibleId || "",
+                    };
+                    this.mediaElementIdentities.set(stableElement, identity);
+                    return identity.key;
+                }
+
+                if (visibleId && identity.mediaId && visibleId !== identity.mediaId) {
+                    identity = { key: `media:${visibleId}`, mediaId: visibleId };
+                    this.mediaElementIdentities.set(stableElement, identity);
+                    return identity.key;
+                }
+                if (visibleId && !identity.mediaId) identity.mediaId = visibleId;
+                return identity.key;
+            }
+            return visibleId ? `media:${visibleId}` : null;
+        }
+
+        resetForVideo(nextVideoKey) {
+            this.abortActiveRequests();
+            this.generation += 1;
+            this.queue.length = 0;
+            this.clearRetryTimer();
+            for (const element of this.document.querySelectorAll(COMMENT_TEXT_SELECTOR)) {
+                const record = this.records.get(element);
+                record?.translatedElement?.remove?.();
+                element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
+            }
+            this.records = new WeakMap();
+            const autoOpen = this.app.configStore.get().comment_translation_auto_open === "auto";
+            this.enabled = autoOpen;
+            this.displayMode = autoOpen ? "translated" : "original";
+            this.currentVideoKey = nextVideoKey;
+            this.updateButton();
+        }
+
+        createTranslationIcon() {
+            const svg = this.document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute("fill", "none");
+            svg.setAttribute("stroke", "currentColor");
+            svg.setAttribute("stroke-width", "1.8");
+            svg.setAttribute("stroke-linecap", "round");
+            svg.setAttribute("stroke-linejoin", "round");
+            svg.setAttribute("viewBox", "0 0 24 24");
+            svg.setAttribute("width", "1em");
+            svg.setAttribute("height", "1em");
+            svg.setAttribute("aria-hidden", "true");
+            const circle = this.document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            circle.setAttribute("cx", "12");
+            circle.setAttribute("cy", "12");
+            circle.setAttribute("r", "10.25");
+            const glyph = this.document.createElementNS("http://www.w3.org/2000/svg", "g");
+            glyph.setAttribute("transform", "translate(3.6 3.6) scale(0.7)");
+            [
+                "m5 8 6 6",
+                "m4 14 6-6 2-3",
+                "M2 5h12",
+                "M7 2h1",
+                "m22 22-5-10-5 10",
+                "M14 18h6",
+            ].forEach((pathData) => {
+                const path = this.document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", pathData);
+                path.setAttribute("vector-effect", "non-scaling-stroke");
+                glyph.appendChild(path);
+            });
+            svg.append(circle, glyph);
+            return svg;
+        }
+
+        mountButton(commentElements = [], suppliedContext = null) {
+            const context = suppliedContext || this.getPanelContext(commentElements);
+            const commentInput = this.getCommentInput(context);
+            const inputActionRow = this.getCommentActionRow(commentInput);
+            const actionRow = inputActionRow || this.getCommentLoginRow(context);
+            const placement = inputActionRow ? "input" : "login";
+            if (!actionRow) {
+                this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
+                this.buttonHost?.remove?.();
+                this.button = null;
+                this.buttonHost = null;
+                this.buttonTooltip = null;
+                return;
+            }
+            if (
+                !this.button?.isConnected ||
+                !this.buttonHost?.isConnected ||
+                this.buttonHost.parentElement !== actionRow ||
+                this.buttonHost.dataset.placement !== placement
+            ) {
+                this.buttonHost?.parentElement?.classList?.remove?.(`${SCRIPT_PREFIX}-comment-login-row`);
+                this.buttonHost?.remove?.();
+                const host = createElement(
+                    this.document,
+                    "div",
+                    `TUXTooltip-reference ${SCRIPT_PREFIX}-comment-translation-host`,
+                );
+                host.dataset.placement = placement;
+                if (placement === "login") actionRow.classList?.add?.(`${SCRIPT_PREFIX}-comment-login-row`);
+                const referenceButton = commentInput?.querySelector?.('[data-e2e="comment-emoji-icon"]');
+                const colorScheme = (referenceButton || actionRow)
+                ?.closest?.('[data-tux-color-scheme]')
+                ?.getAttribute?.("data-tux-color-scheme");
+                if (colorScheme) host.setAttribute("data-tux-color-scheme", colorScheme);
+                const referenceClasses = String(referenceButton?.className || "").trim();
+                const button = createElement(
+                    this.document,
+                    "button",
+                    `${referenceClasses || "TUXButton TUXButton--default TUXButton--medium TUXButton--secondary"} ${SCRIPT_PREFIX}-comment-translate-button`,
+                );
+                button.type = "button";
+                button.dataset.e2e = `${SCRIPT_PREFIX}-comment-translate-icon`;
+                button.setAttribute("aria-disabled", "false");
+                button.setAttribute("aria-expanded", "false");
+                button.tabIndex = 0;
+                const content = createElement(this.document, "div", "TUXButton-content");
+                const iconContainer = createElement(this.document, "div", "TUXButton-iconContainer");
+                iconContainer.appendChild(this.createTranslationIcon());
+                content.appendChild(iconContainer);
+                button.appendChild(content);
+                button.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+
+
+
+                    host.dataset.tooltipSuppressed = "true";
+                    button.blur?.();
+                    this.toggleDisplay();
+                });
+                host.addEventListener("pointerleave", () => {
+                    delete host.dataset.tooltipSuppressed;
+                });
+                host.appendChild(button);
+                const tooltip = createElement(
+                    this.document,
+                    "div",
+                    `${SCRIPT_PREFIX}-comment-translation-tooltip`,
+                );
+                tooltip.id = `${SCRIPT_PREFIX}-comment-translation-tooltip`;
+                tooltip.setAttribute("role", "tooltip");
+                button.setAttribute("aria-describedby", tooltip.id);
+                host.appendChild(tooltip);
+                actionRow.appendChild(host);
+                this.buttonHost = host;
+                this.button = button;
+                this.buttonTooltip = tooltip;
+            }
+            this.updateButton();
+        }
+
+        updateButton() {
+            if (!this.button) return;
+            const busy = this.enabled && this.displayMode === "translated" && (this.batchInFlight || this.queue.length > 0);
+            const comparison = this.app.configStore.get().comment_translation_display_mode === "comparison";
+            const label = !this.enabled
+            ? this.app.t("translate_comments")
+            : busy
+            ? this.app.t("translating_comments")
+            : this.displayMode === "translated"
+            ? this.app.t(comparison ? "hide_translated_comments" : "show_original_comments")
+            : this.app.t("show_translated_comments");
+            this.button.setAttribute("aria-label", label);
+            if (this.buttonTooltip && this.buttonTooltip.textContent !== label) this.buttonTooltip.textContent = label;
+            this.button.dataset.state = busy ? "busy" : this.displayMode;
+            this.button.setAttribute("aria-pressed", String(this.enabled && this.displayMode === "translated"));
+        }
+
+        stop() {
+            this.enabled = false;
+            this.displayMode = "original";
+            this.abortActiveRequests();
+            this.clearRetryTimer();
+            for (const task of this.queue) {
+                if (task.record.status === "pending") task.record.status = "idle";
+            }
+            this.queue.length = 0;
+        }
+
+        toggleDisplay() {
+            if (!this.enabled) {
+                this.enabled = true;
+                this.displayMode = "translated";
+            } else {
+                this.stop();
+            }
+            this.applyDisplayMode();
+            this.updateButton();
+            this.scan();
+        }
+        getTranslationSourceText(text = "") {
+            const value = String(text || "").trim();
+            return value
+                .replace(/^(?:\[(?:贴纸|sticker|ステッカー|스티커)\]\s*)+/iu, "")
+                .trim();
+        }
+
+        normalizeTranslationComparison(text = "") {
+            return normalizeTranslationComparisonText(text);
+        }
+
+        getCommentText(element) {
+            const nodes = Array.from(element?.childNodes || []);
+            if (!nodes.length) return String(element?.textContent || "").trim();
+
+            const inlineTags = new Set(["SPAN", "A", "STRONG", "EM", "B", "I", "S", "U"]);
+            const isExcludedElement = (node) => Boolean(
+                node?.matches?.(COMMENT_TEXT_SELECTOR) ||
+                node?.querySelector?.(COMMENT_TEXT_SELECTOR) ||
+                node?.matches?.('button, [role="button"], svg, [aria-hidden="true"]') ||
+                node?.querySelector?.('button, [role="button"]')
+            );
+
+            const parts = [];
+            const safeContainers = [];
+            for (const node of nodes) {
+                if (node?.nodeType === 3) {
+                    parts.push(String(node.textContent || ""));
+                    continue;
+                }
+                if (node?.nodeType !== 1 || isExcludedElement(node)) continue;
+                if (inlineTags.has(String(node.tagName || "").toUpperCase())) {
+                    parts.push(String(node.textContent || ""));
+                } else {
+                    safeContainers.push(node);
+                }
+            }
+            const directText = parts.join("").trim();
+            if (directText) return directText;
+            if (safeContainers.length === 1) return String(safeContainers[0]?.textContent || "").trim();
+            return "";
+        }
+
+        clearRetryTimer() {
+            if (this.retryTimer !== null) this.window.clearTimeout?.(this.retryTimer);
+            this.retryTimer = null;
+            this.retryAt = 0;
+        }
+
+        scheduleRetry(delayMs = COMMENT_TRANSLATION_RETRY_DELAY_MS) {
+            if (!this.enabled) return;
+            const runAt = Date.now() + Math.max(0, Number(delayMs) || 0);
+            if (this.retryTimer !== null && this.retryAt && this.retryAt <= runAt) return;
+            this.clearRetryTimer();
+            this.retryAt = runAt;
+            this.retryTimer = this.window.setTimeout?.(() => {
+                this.retryTimer = null;
+                this.retryAt = 0;
+                if (this.enabled) this.scan();
+            }, Math.max(0, runAt - Date.now())) ?? null;
+        }
+
+        getRecord(element) {
+            const currentText = this.getCommentText(element);
+            let record = this.records.get(element);
+            if (record && record.original === currentText) return record;
+            record?.translatedElement?.remove?.();
+            record = {
+                original: currentText,
+                translated: "",
+                translatedElement: null,
+                status: "idle",
+                failedAt: 0,
+                failureCount: 0,
+            };
+            this.records.set(element, record);
+            return record;
+        }
+
+        getTranslationBucket(text = "") {
+            return classifyTranslationText(this.getTranslationSourceText(text));
+        }
+
+        isTranslatableText(text = "") {
+            return this.getTranslationBucket(text) !== "neutral";
+        }
+
+        renderRecord(element, record) {
+            if (!record.translated) return;
+            if (!record.translatedElement?.isConnected) {
+                const translatedElement = createElement(
+                    this.document,
+                    "span",
+                    `${SCRIPT_PREFIX}-comment-translation-text`,
+                    record.translated,
+                );
+                element.insertAdjacentElement?.("afterend", translatedElement);
+                record.translatedElement = translatedElement;
+            } else if (record.translatedElement.textContent !== record.translated) {
+                record.translatedElement.textContent = record.translated;
+            }
+            const showTranslation = this.enabled && this.displayMode === "translated";
+            const replaceOriginal =
+                  showTranslation && this.app.configStore.get().comment_translation_display_mode === "replace";
             element.classList.toggle(`${SCRIPT_PREFIX}-comment-original-hidden`, replaceOriginal);
             record.translatedElement.hidden = !showTranslation;
         }
-    }
 
-    enqueue(element, record, config, options = {}) {
-        if (["pending", "blocked", "unchanged", "untranslated"].includes(record.status)) return;
-        if (record.status === "failed") {
-            const remaining = 30000 - (Date.now() - record.failedAt);
-            if (remaining > 0) {
-                this.scheduleRetry(remaining);
+        applyDisplayMode() {
+            const showTranslation = this.enabled && this.displayMode === "translated";
+            const replaceOriginal =
+                  showTranslation && this.app.configStore.get().comment_translation_display_mode === "replace";
+            for (const element of this.getCommentElements()) {
+                const record = this.records.get(element);
+                if (!record?.translatedElement) continue;
+                element.classList.toggle(`${SCRIPT_PREFIX}-comment-original-hidden`, replaceOriginal);
+                record.translatedElement.hidden = !showTranslation;
+            }
+        }
+
+        enqueue(element, record, config) {
+            if (["pending", "blocked", "unchanged", "untranslated"].includes(record.status)) return;
+            if (record.status === "failed") {
+                const remaining = COMMENT_TRANSLATION_RETRY_DELAY_MS - (Date.now() - record.failedAt);
+                if (remaining > 0) {
+                    this.scheduleRetry(remaining);
+                    return;
+                }
+            }
+
+            const sourceText = this.getTranslationSourceText(record.original);
+            if (!sourceText) return;
+            const bucket = classifyTranslationText(sourceText);
+            if (bucket === "neutral") {
+                record.status = "unchanged";
                 return;
             }
+
+            record.status = "pending";
+            const task = {
+                element,
+                record,
+                sourceText,
+                bucket,
+                provider: config.comment_translation_provider,
+                target: config.comment_translation_target,
+                generation: this.generation,
+            };
+            if (element.matches?.('[data-e2e="comment-level-2"]')) this.queue.unshift(task);
+            else this.queue.push(task);
         }
 
-        const sourceText = this.getTranslationSourceText(record.original);
-        if (!sourceText) return;
-        const bucket = classifyTranslationText(sourceText);
-        if (bucket === "neutral") {
-            record.status = "unchanged";
-            return;
-        }
-
-        record.status = "pending";
-        this.queue.push({
-            element,
-            record,
-            sourceText,
-            bucket,
-            forceSingle: Boolean(options.forceSingle),
-            provider: config.comment_translation_provider,
-            target: config.comment_translation_target,
-            generation: this.generation,
-        });
-    }
-
-    queueSingleFallback(task) {
-        if (
-            task.generation !== this.generation ||
-            !task.element?.isConnected ||
-            this.records.get(task.element) !== task.record
-        ) return;
-        task.record.translated = "";
-        task.record.status = "pending";
-        this.queue.push({ ...task, forceSingle: true });
-    }
-
-    drainQueue() {
-        if (this.batchInFlight || !this.queue.length) {
-            this.updateButton();
-            return;
-        }
-
-        let firstTask = null;
-        while (this.queue.length && !firstTask) {
-            const candidate = this.queue.shift();
-            if (!candidate.element?.isConnected || candidate.generation !== this.generation) {
-                candidate.record.status = "idle";
-                continue;
+        abortActiveRequests() {
+            for (const active of this.activeBatches) {
+                for (const task of active.tasks) {
+                    if (task.record.status === "pending") task.record.status = "idle";
+                }
+                active.controller?.abort?.();
             }
-            firstTask = candidate;
-        }
-        if (!firstTask) {
-            this.updateButton();
-            return;
+            this.activeBatches.clear();
+            this.batchInFlight = false;
         }
 
-        const canBatchBucket = !firstTask.forceSingle && isBatchableTranslationBucket(firstTask.bucket);
-        const limits = this.service.getBatchLimits(firstTask.provider);
-        const providerMaxItems = Math.max(1, Number(limits.maxItems || 20));
-        const maxItems = Math.min(MAX_SCRIPT_TRANSLATION_BATCH_ITEMS, providerMaxItems);
-        const batch = [firstTask];
+        drainQueue() {
+            if (!this.enabled) {
+                for (const task of this.queue) {
+                    if (task.record.status === "pending") task.record.status = "idle";
+                }
+                this.queue.length = 0;
+                this.updateButton();
+                return;
+            }
+            if (!this.queue.length) {
+                this.updateButton();
+                return;
+            }
 
-        if (canBatchBucket) {
+            let firstTask = null;
             for (let index = 0; index < this.queue.length;) {
-                const task = this.queue[index];
-                if (!task.element?.isConnected || task.generation !== this.generation) {
-                    task.record.status = "idle";
+                const candidate = this.queue[index];
+                if (!candidate.element?.isConnected || candidate.generation !== this.generation) {
+                    candidate.record.status = "idle";
                     this.queue.splice(index, 1);
                     continue;
                 }
-                const sameBucket =
-                      !task.forceSingle &&
-                      task.generation === firstTask.generation &&
-                      task.provider === firstTask.provider &&
-                      task.target === firstTask.target &&
-                      task.bucket === firstTask.bucket;
-                if (
-                    sameBucket &&
-                    batch.length < maxItems &&
-                    this.service.canTranslateBatch(
-                        firstTask.provider,
-                        [...batch.map((entry) => entry.sourceText), task.sourceText],
-                    )
-                ) {
-                    batch.push(task);
-                    this.queue.splice(index, 1);
-                    continue;
-                }
-                index += 1;
+                firstTask = candidate;
+                this.queue.splice(index, 1);
+                break;
             }
-        }
-
-        const usePackedBatch = canBatchBucket && batch.length >= 2;
-        const requestSingle = !usePackedBatch;
-
-        if (requestSingle && !this.service.canTranslateSingle(firstTask.provider, firstTask.sourceText)) {
-            firstTask.record.status = "blocked";
-            firstTask.record.failedAt = Date.now();
-            if (Date.now() - this.lastErrorToastAt > 8000) {
-                this.lastErrorToastAt = Date.now();
-                this.app.notifications.toast(this.app.t("comment_translation_failed"), {
-                    type: "error",
-                    detail: "Comment is too long for the selected translation provider",
-                });
+            if (!firstTask) {
+                this.updateButton();
+                return;
             }
-            this.updateButton();
-            this.drainQueue();
-            return;
-        }
 
-        const batchGeneration = firstTask.generation;
-        this.batchInFlight = true;
-        this.updateButton();
+            const canBatchBucket = !firstTask.forceSingle && isBatchableTranslationBucket(firstTask.bucket);
+            const limits = this.service.getBatchLimits(firstTask.provider);
+            const providerMaxItems = Math.max(1, Number(limits.maxItems || 20));
+            const maxItems = Math.min(MAX_SCRIPT_TRANSLATION_BATCH_ITEMS, providerMaxItems);
+            const batch = [firstTask];
 
-        const applyTranslatedItem = (task, translatedValue) => {
-            if (
-                task.generation !== this.generation ||
-                !task.element?.isConnected ||
-                this.records.get(task.element) !== task.record
-            ) return;
-            task.record.translated = String(translatedValue || "").trim();
-            task.record.status = "done";
-            this.renderRecord(task.element, task.record);
-        };
-
-        const markTaskFailed = (task, error) => {
-            if (
-                task.generation !== this.generation ||
-                !task.element?.isConnected ||
-                this.records.get(task.element) !== task.record
-            ) return false;
-            task.record.status = "failed";
-            task.record.failedAt = Date.now();
-            this.scheduleRetry(30000);
-            if (Date.now() - this.lastErrorToastAt > 8000) {
-                this.lastErrorToastAt = Date.now();
-                this.app.notifications.toast(this.app.t("comment_translation_failed"), {
-                    type: "error",
-                    detail: error?.message || String(error),
-                });
-            }
-            return true;
-        };
-
-        let work;
-        if (requestSingle) {
-            work = this.service.translateSingle(firstTask.sourceText, {
-                provider: firstTask.provider,
-                target: firstTask.target,
-                cacheScope: String(firstTask.generation),
-            }).then((result) => {
-                if (
-                    firstTask.generation !== this.generation ||
-                    !firstTask.element?.isConnected ||
-                    this.records.get(firstTask.element) !== firstTask.record
-                ) return;
-                if (result?.status === "translated" && String(result.text || "").trim()) {
-                    applyTranslatedItem(firstTask, result.text);
-                } else if (result?.status === "unchanged" || result?.status === "untranslated") {
-                    firstTask.record.translated = "";
-                    firstTask.record.status = result.status;
-                } else {
-                    markTaskFailed(firstTask, new Error("Single translation returned an invalid result"));
-                }
-            }).catch((error) => {
-                markTaskFailed(firstTask, error);
-            });
-        } else {
-            work = this.service.translateBatch(batch.map((task) => task.sourceText), {
-                provider: firstTask.provider,
-                target: firstTask.target,
-                cacheScope: String(firstTask.generation),
-            }).then((translatedItems) => {
-                if (!Array.isArray(translatedItems) || translatedItems.length !== batch.length) {
-                    throw new Error("Translation service returned an invalid batch size");
-                }
-                batch.forEach((task, index) => {
-                    const translated = typeof translatedItems[index] === "string"
-                    ? translatedItems[index].trim()
-                    : "";
-                    if (
-                        translated &&
-                        this.normalizeTranslationComparison(translated) !==
-                        this.normalizeTranslationComparison(task.sourceText)
-                    ) {
-                        applyTranslatedItem(task, translated);
-                    } else {
-                        this.queueSingleFallback(task);
+            if (canBatchBucket) {
+                for (let index = 0; index < this.queue.length;) {
+                    const task = this.queue[index];
+                    if (!task.element?.isConnected || task.generation !== this.generation) {
+                        task.record.status = "idle";
+                        this.queue.splice(index, 1);
+                        continue;
                     }
-                });
-            }).catch((error) => {
-                for (const task of batch) markTaskFailed(task, error);
-            });
-        }
+                    const sameBucket =
+                          task.generation === firstTask.generation &&
+                          task.provider === firstTask.provider &&
+                          task.target === firstTask.target &&
+                          task.bucket === firstTask.bucket &&
+                          !task.forceSingle;
+                    if (
+                        sameBucket &&
+                        batch.length < maxItems &&
+                        this.service.canTranslateBatch(
+                            firstTask.provider,
+                            [...batch.map((entry) => entry.sourceText), task.sourceText],
+                            { source: "auto", target: firstTask.target },
+                        )
+                    ) {
+                        batch.push(task);
+                        this.queue.splice(index, 1);
+                        continue;
+                    }
+                    index += 1;
+                }
+            }
 
-        work.finally(() => {
-            if (batchGeneration === this.generation) this.batchInFlight = false;
+            const usePackedBatch = canBatchBucket && batch.length >= 2;
+            const requestSingle = !usePackedBatch;
+
+            if (requestSingle && !this.service.canTranslateSingle(
+                firstTask.provider,
+                firstTask.sourceText,
+                { source: "auto", target: firstTask.target },
+            )) {
+                firstTask.record.status = "blocked";
+                firstTask.record.failedAt = Date.now();
+                if (Date.now() - this.lastErrorToastAt > 8000) {
+                    this.lastErrorToastAt = Date.now();
+                    this.app.notifications.toast(this.app.t("comment_translation_failed"), {
+                        type: "error",
+                        detail: "Comment is too long for the selected translation provider",
+                    });
+                }
+                this.updateButton();
+                this.drainQueue();
+                return;
+            }
+
+            const batchGeneration = firstTask.generation;
+            const AbortControllerCtor = this.window.AbortController || root?.AbortController;
+            const requestController = typeof AbortControllerCtor === "function"
+            ? new AbortControllerCtor()
+            : null;
+            const activeBatch = {
+                controller: requestController,
+                tasks: batch,
+                generation: batchGeneration,
+            };
+            this.activeBatches.add(activeBatch);
+            this.batchInFlight = this.activeBatches.size > 0;
+            this.updateButton();
+
+            const applyTranslatedItem = (task, translatedValue) => {
+                if (
+                    task.generation !== this.generation ||
+                    !task.element?.isConnected ||
+                    this.records.get(task.element) !== task.record
+                ) return;
+                task.record.translated = String(translatedValue || "").trim();
+                task.record.status = "done";
+                this.renderRecord(task.element, task.record);
+            };
+
+            const markTaskUntranslated = (task) => {
+                if (
+                    task.generation !== this.generation ||
+                    !task.element?.isConnected ||
+                    this.records.get(task.element) !== task.record
+                ) return;
+                task.record.translated = "";
+                task.record.status = "untranslated";
+            };
+
+            const markTaskFailed = (task, error) => {
+                if (
+                    task.generation !== this.generation ||
+                    !task.element?.isConnected ||
+                    this.records.get(task.element) !== task.record
+                ) return false;
+                if (!this.enabled) {
+                    task.record.status = "idle";
+                    return false;
+                }
+                const rateLimited = Number(error?.status || 0) === 429;
+                const stopTranslation = rateLimited || Boolean(error?.stopTranslation);
+                task.record.failureCount = Number(task.record.failureCount || 0) + 1;
+                task.record.status = stopTranslation || error?.nonRetryable ||
+                    task.record.failureCount >= COMMENT_TRANSLATION_MAX_ATTEMPTS
+                    ? "blocked"
+                : "failed";
+                task.record.failedAt = Date.now();
+                if (task.record.status === "failed") {
+                    this.scheduleRetry(COMMENT_TRANSLATION_RETRY_DELAY_MS);
+                }
+                if (stopTranslation) this.stop();
+                if (Date.now() - this.lastErrorToastAt > 8000) {
+                    this.lastErrorToastAt = Date.now();
+                    this.app.notifications.toast(this.app.t("comment_translation_failed"), {
+                        type: "error",
+                        detail: rateLimited
+                        ? this.app.t("comment_translation_rate_limited")
+                        : error?.message || String(error),
+                    });
+                }
+                return true;
+            };
+
+            let work;
+            if (requestSingle) {
+                work = this.service.translateSingle(firstTask.sourceText, {
+                    provider: firstTask.provider,
+                    target: firstTask.target,
+                    signal: requestController?.signal,
+                }).then((result) => {
+                    if (
+                        firstTask.generation !== this.generation ||
+                        !firstTask.element?.isConnected ||
+                        this.records.get(firstTask.element) !== firstTask.record
+                    ) return;
+                    if (result?.status === "translated" && String(result.text || "").trim()) {
+                        applyTranslatedItem(firstTask, result.text);
+                    } else if (result?.status === "unchanged" || result?.status === "untranslated") {
+                        firstTask.record.translated = "";
+                        firstTask.record.status = result.status;
+                    } else {
+                        markTaskFailed(firstTask, new Error("Single translation returned an invalid result"));
+                    }
+                }).catch((error) => {
+                    markTaskFailed(firstTask, error);
+                });
+            } else {
+                work = this.service.translateBatch(batch.map((task) => task.sourceText), {
+                    provider: firstTask.provider,
+                    target: firstTask.target,
+                    signal: requestController?.signal,
+                }).then((translatedItems) => {
+                    if (!Array.isArray(translatedItems) || translatedItems.length !== batch.length) {
+                        throw new Error("Translation service returned an invalid batch size");
+                    }
+                    batch.forEach((task, index) => {
+                        const translated = typeof translatedItems[index] === "string"
+                        ? translatedItems[index].trim()
+                        : "";
+                        if (
+                            translated &&
+                            this.normalizeTranslationComparison(translated) !==
+                            this.normalizeTranslationComparison(task.sourceText)
+                        ) {
+                            applyTranslatedItem(task, translated);
+                        } else {
+                            markTaskUntranslated(task);
+                        }
+                    });
+                }).catch((error) => {
+                    const fallbackToSingle = (
+                        !Number.isFinite(Number(error?.status)) || Number(error.status) < 500
+                    ) && Number(error?.status || 0) !== 429 && (
+                        error?.batchParseFailure ||
+                        [400, 413, 414, 422].includes(Number(error?.status || 0)) ||
+                        /(?:empty result|invalid json|invalid batch|boundaries could not be parsed)/i.test(
+                            String(error?.message || ""),
+                        )
+                    );
+                    if (fallbackToSingle) {
+                        const retryTasks = batch.filter((task) => (
+                            task.generation === this.generation &&
+                            task.element?.isConnected &&
+                            this.records.get(task.element) === task.record
+                        ));
+                        for (const task of retryTasks) {
+                            task.forceSingle = true;
+                            task.record.status = "pending";
+                        }
+                        this.queue.unshift(...retryTasks);
+                        return;
+                    }
+                    for (const task of batch) markTaskFailed(task, error);
+                });
+            }
+
+            work.finally(() => {
+                this.activeBatches.delete(activeBatch);
+                this.batchInFlight = this.activeBatches.size > 0;
+                this.updateButton();
+                this.drainQueue();
+            });
             this.updateButton();
             this.drainQueue();
-        });
-        this.updateButton();
-    }
-
-    scan() {
-        const videoKey = this.getCurrentVideoKey();
-        if (videoKey !== null) {
-            if (this.currentVideoKey === null) this.currentVideoKey = videoKey;
-            else if (videoKey !== this.currentVideoKey) this.resetForVideo(videoKey);
         }
-        const allCommentElements = this.getCommentElements();
-        const context = this.getPanelContext(allCommentElements);
-        this.syncMutationObservers(context.root);
-        const commentElements = context.root
-        ? allCommentElements.filter((element) => context.root.contains?.(element))
-        : allCommentElements;
-        this.mountButton(commentElements, context);
-        if (!this.enabled) return;
-        const config = this.app.configStore.get();
-        for (const element of commentElements) {
-            const record = this.getRecord(element);
-            if (!this.isTranslatableText(record.original)) continue;
-            if (["unchanged", "untranslated", "blocked"].includes(record.status)) continue;
-            if (record.translated) {
-                this.renderRecord(element, record);
-                continue;
+
+        scan() {
+            const videoKey = this.getCurrentVideoKey();
+            if (videoKey !== null) {
+                if (this.currentVideoKey === null) this.currentVideoKey = videoKey;
+                else if (videoKey !== this.currentVideoKey) this.resetForVideo(videoKey);
             }
-            this.enqueue(element, record, config);
+            const allCommentElements = this.getCommentElements();
+            const context = this.getPanelContext(allCommentElements);
+            this.syncMutationObservers(context.root);
+            const commentElements = context.root
+            ? allCommentElements.filter((element) => context.root.contains?.(element))
+            : allCommentElements;
+            this.mountButton(commentElements, context);
+            if (!this.enabled) return;
+            const config = this.app.configStore.get();
+            for (const element of commentElements) {
+                const record = this.getRecord(element);
+                if (!this.isTranslatableText(record.original)) continue;
+                if (["unchanged", "untranslated", "blocked"].includes(record.status)) continue;
+                if (record.translated) {
+                    this.renderRecord(element, record);
+                    continue;
+                }
+                this.enqueue(element, record, config);
+            }
+            this.drainQueue();
         }
-        this.drainQueue();
-    }
 
-    handleSettingsChanged(previousConfig = {}, nextConfig = {}) {
-        const serviceChanged =
-              previousConfig.comment_translation_provider !== nextConfig.comment_translation_provider ||
-              previousConfig.comment_translation_target !== nextConfig.comment_translation_target;
-        const displayChanged =
-              previousConfig.comment_translation_display_mode !== nextConfig.comment_translation_display_mode;
-        const autoOpenChanged =
-              previousConfig.comment_translation_auto_open !== nextConfig.comment_translation_auto_open;
-        if (!serviceChanged && !displayChanged && !autoOpenChanged) return;
-        if (autoOpenChanged) {
-            const autoOpen = nextConfig.comment_translation_auto_open === "auto";
-            this.enabled = autoOpen;
-            this.displayMode = autoOpen ? "translated" : "original";
-            this.applyDisplayMode();
-            if (autoOpen) this.scheduleScan(0);
-        }
-        if (displayChanged) {
-            this.applyDisplayMode();
+        handleSettingsChanged(previousConfig = {}, nextConfig = {}) {
+            const serviceChanged =
+                  previousConfig.comment_translation_provider !== nextConfig.comment_translation_provider ||
+                  previousConfig.comment_translation_target !== nextConfig.comment_translation_target;
+            const displayChanged =
+                  previousConfig.comment_translation_display_mode !== nextConfig.comment_translation_display_mode;
+            const autoOpenChanged =
+                  previousConfig.comment_translation_auto_open !== nextConfig.comment_translation_auto_open;
+            if (!serviceChanged && !displayChanged && !autoOpenChanged) return;
+            if (autoOpenChanged) {
+                const autoOpen = nextConfig.comment_translation_auto_open === "auto";
+                if (autoOpen) {
+                    this.enabled = true;
+                    this.displayMode = "translated";
+                } else {
+                    this.stop();
+                }
+                this.applyDisplayMode();
+                if (autoOpen) this.scheduleScan(0);
+            }
+            if (displayChanged) {
+                this.applyDisplayMode();
+                this.updateButton();
+                this.scheduleScan(0);
+            }
+            if (!serviceChanged) {
+                this.updateButton();
+                return;
+            }
+            this.abortActiveRequests();
+            this.generation += 1;
+            this.queue.length = 0;
+            this.clearRetryTimer();
+            for (const element of this.getCommentElements()) {
+                const record = this.records.get(element);
+                if (!record) continue;
+                record.translated = "";
+                record.status = "idle";
+                record.failedAt = 0;
+                record.failureCount = 0;
+                record.translatedElement?.remove?.();
+                record.translatedElement = null;
+                element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
+            }
+            if (this.enabled) {
+                this.displayMode = "translated";
+                this.scheduleScan(0);
+            }
             this.updateButton();
-            this.scheduleScan(0);
         }
-        if (!serviceChanged) {
-            this.updateButton();
-            return;
-        }
-        this.generation += 1;
-        this.queue.length = 0;
-        this.batchInFlight = false;
-        this.clearRetryTimer();
-        for (const element of this.getCommentElements()) {
-            const record = this.records.get(element);
-            if (!record) continue;
-            record.translated = "";
-            record.status = "idle";
-            record.failedAt = 0;
-            record.translatedElement?.remove?.();
-            record.translatedElement = null;
-            element.classList.remove(`${SCRIPT_PREFIX}-comment-original-hidden`);
-        }
-        if (this.enabled) {
-            this.displayMode = "translated";
-            this.scheduleScan(0);
-        }
-        this.updateButton();
-    }
-}
-
-class TikTokMediaExtractor {
-    constructor(doc, win) {
-        this.document = doc;
-        this.window = win;
     }
 
-    getImageElementUrl(image = null) {
-        return String(image?.currentSrc || image?.src || image?.getAttribute?.("src") || "").trim();
-    }
+    class TikTokMediaExtractor {
+        constructor(doc, win) {
+            this.document = doc;
+            this.window = win;
+        }
 
-    isLikelyPhotoModeElement(image = null) {
-        if (!image || String(image.tagName || "").toLowerCase() !== "img") return false;
-        const src = this.getImageElementUrl(image);
-        if (!src) return false;
-        const signature = `${image.className || ""} ${image.parentElement?.className || ""} ${src}`;
-        if (/ImgPhotoSlide|PhotoSlide|PhotoMode|photomode|tplv-photomode/i.test(signature)) return true;
-        const rect = image.getBoundingClientRect?.();
-        const viewportWidth = Number(this.window?.innerWidth || 0);
-        const viewportHeight = Number(this.window?.innerHeight || 0);
-        return Boolean(
-            rect &&
-            viewportWidth &&
-            viewportHeight &&
-            rect.width >= viewportWidth * 0.22 &&
-            rect.height >= viewportHeight * 0.45 &&
-            getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.28,
-        );
-    }
+        getImageElementUrl(image = null) {
+            return String(image?.currentSrc || image?.src || image?.getAttribute?.("src") || "").trim();
+        }
 
-    getVisiblePhotoModeImages(primaryImage = null) {
-        const context = this.getMediaContextElement(primaryImage) || this.document;
-        const candidates = this.getImageMediaCandidates(context).filter((image) => {
+        isLikelyPhotoModeElement(image = null) {
             if (!image || String(image.tagName || "").toLowerCase() !== "img") return false;
             const src = this.getImageElementUrl(image);
             if (!src) return false;
-            if (this.isLikelyPhotoModeElement(image)) return true;
-            if (primaryImage && image.className === primaryImage.className) return true;
-            return false;
-        });
-        if (primaryImage && !candidates.includes(primaryImage)) candidates.unshift(primaryImage);
-        const seen = new Set();
-        const result = [];
-        for (const image of candidates) {
-            const src = this.getImageElementUrl(image);
-            if (!src || seen.has(src)) continue;
-            seen.add(src);
-            result.push(image);
-        }
-        return result;
-    }
-
-    getCurrentVideoElement(anchorElement = null) {
-        const anchorContext = this.getMediaContextElement(anchorElement);
-        return this.getContextVideoElement(anchorContext) || this.getVisibleVideoElement();
-    }
-
-    getContextVideoElement(context = null) {
-        if (!context) return null;
-        const videos = Array.from(context.querySelectorAll?.("video") || []);
-        return this.selectBestVideoElement(videos);
-    }
-
-    getContextMediaElement(context = null) {
-        if (!context) return null;
-        const mediaElements = [
-            ...Array.from(context.querySelectorAll?.("video") || []),
-            ...this.getImageMediaCandidates(context),
-        ];
-        return this.selectBestMediaElement(mediaElements);
-    }
-
-    getVisibleVideoElement() {
-        const videos = Array.from(this.document?.querySelectorAll?.("video") || []);
-        return this.selectBestVideoElement(videos);
-    }
-
-    getVisibleMediaElement() {
-        const mediaElements = [
-            ...Array.from(this.document?.querySelectorAll?.("video") || []),
-            ...this.getImageMediaCandidates(this.document),
-        ];
-        return this.selectBestMediaElement(mediaElements);
-    }
-
-    getImageMediaCandidates(scope = this.document) {
-        return Array.from(scope?.querySelectorAll?.("img") || []).filter((image) => {
-            if (!image || image.closest?.(`.${SCRIPT_PREFIX}-panel`)) return false;
-            const src = image.currentSrc || image.src || image.getAttribute?.("src") || "";
-            if (!src || src.startsWith("data:")) return false;
+            const signature = `${image.className || ""} ${image.parentElement?.className || ""} ${src}`;
+            if (/ImgPhotoSlide|PhotoSlide|PhotoMode|photomode|tplv-photomode/i.test(signature)) return true;
             const rect = image.getBoundingClientRect?.();
-            if (!rect || rect.width < 160 || rect.height < 160) return false;
             const viewportWidth = Number(this.window?.innerWidth || 0);
             const viewportHeight = Number(this.window?.innerHeight || 0);
-            if (viewportWidth && viewportHeight && getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.08) {
-                return false;
-            }
-            const signature = `${image.alt || ""} ${image.className || ""} ${image.parentElement?.className || ""}`;
-            if (/(avatar|profile|music|icon|logo|emoji|comment)/i.test(signature)) return false;
-            return true;
-        });
-    }
-
-    selectBestVideoElement(videos = []) {
-        return this.selectBestMediaElement(videos);
-    }
-
-    selectBestMediaElement(elements = []) {
-        const viewportWidth = Number(this.window?.innerWidth || 0);
-        const viewportHeight = Number(this.window?.innerHeight || 0);
-        const scored = elements
-        .filter(Boolean)
-        .map((element) => ({
-            element,
-            rect: element.getBoundingClientRect?.(),
-        }))
-        .map((entry) => ({
-            ...entry,
-            score: scoreMediaElementRect(entry.rect, viewportWidth, viewportHeight),
-        }))
-        .filter((entry) => Number.isFinite(entry.score))
-        .sort((left, right) => right.score - left.score);
-        if (scored[0]) return scored[0].element;
-
-        return (
-            elements
-            .filter(Boolean)
-            .filter((element) => {
-                const rect = element.getBoundingClientRect?.();
-                return rect && rect.width > 80 && rect.height > 80;
-            })
-            .sort((left, right) => {
-                const leftRect = left.getBoundingClientRect();
-                const rightRect = right.getBoundingClientRect();
-                return rightRect.width * rightRect.height - leftRect.width * leftRect.height;
-            })[0] || elements[0] || null
-        );
-    }
-
-    getMediaContextElement(element = null) {
-        if (!element) return null;
-        const cinemaRoot = element.closest?.('[role="dialog"][aria-label="Cinema mode"]');
-        if (cinemaRoot) return cinemaRoot;
-        const selector = [
-            "article",
-            "section[id*='media-card']",
-            "section[data-e2e*='feed-video']",
-            "section[data-e2e*='video']",
-            "[id*='media-card']",
-            "[data-e2e*='feed-video']",
-            "[data-e2e*='video']",
-            "[class*='SectionMediaCardContainer']",
-            "[class*='DivContentFlexLayout']",
-            "[class*='DivContentContainer']",
-            "[class*='DivItemContainer']",
-            "[class*='DivFeedCard']",
-        ].join(",");
-        const closest = element.closest?.(selector);
-        if (closest) return closest;
-
-        let current = element.parentElement || null;
-        while (current && current !== this.document?.body) {
-            if (this.isMediaContextElement(current)) return current;
-            current = current.parentElement || null;
-        }
-        return null;
-    }
-
-    isMediaContextElement(element = null) {
-        if (!element) return false;
-        const tagName = String(element.tagName || "").toLowerCase();
-        if (tagName === "article") return true;
-        const className = String(element.className || "");
-        const id = String(element.id || "");
-        const dataE2e = String(element.getAttribute?.("data-e2e") || "");
-        const signature = `${id} ${dataE2e} ${className}`;
-        if (/ActionBarContainer/i.test(signature)) return false;
-        if (tagName === "section" && /media-card|feed-video|video/i.test(signature)) return true;
-        return /SectionMediaCardContainer|DivContentFlexLayout|DivContentContainer|DivItemContainer|DivFeedCard/i.test(
-            className,
-        );
-    }
-
-    getMediaUrlsFromScopes(scopes = []) {
-        const urls = [];
-        for (const scope of scopes) {
-            const anchors = Array.from(
-                scope.querySelectorAll?.("a[href*='/video/'],a[href*='/photo/']") || [],
+            return Boolean(
+                rect &&
+                viewportWidth &&
+                viewportHeight &&
+                rect.width >= viewportWidth * 0.22 &&
+                rect.height >= viewportHeight * 0.45 &&
+                getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.28,
             );
-            for (const anchor of anchors) {
-                const href = anchor.href || anchor.getAttribute?.("href") || "";
-                if (getVideoIdFromUrl(href)) urls.push(href);
-            }
-            if (urls.length) break;
         }
-        return unique(urls);
-    }
 
-    getVisibleMediaContextUrls(mediaElement = this.getVisibleMediaElement()) {
-        const scopes = [];
-        const addScope = (scope) => {
-            if (scope && !scopes.includes(scope)) scopes.push(scope);
-        };
-        addScope(this.getMediaContextElement(mediaElement));
-        addScope(mediaElement?.parentElement);
-        return this.getMediaUrlsFromScopes(scopes);
-    }
-}
-
-function createDownloadCancelledError() {
-    const error = new Error("Download cancelled");
-    error.name = "AbortError";
-    error.code = "download-cancelled";
-    return error;
-}
-
-function isDownloadCancelledError(error) {
-    return error?.code === "download-cancelled" || error?.name === "AbortError";
-}
-
-function throwIfDownloadAborted(signal) {
-    if (signal?.aborted) throw createDownloadCancelledError();
-}
-
-class Downloader {
-    constructor(win, gmRequest = null, gmDownloadFn = null) {
-        this.window = win;
-        this.gmRequest = gmRequest;
-        this.gmDownload = gmDownloadFn;
-        this.lastResult = null;
-    }
-
-    getDebugSnapshot() {
-        return {
-            lastResult: this.lastResult ? { ...this.lastResult } : null,
-        };
-    }
-
-    normalizeFetchHeaders(headers = {}) {
-        const blocked = new Set(["referer", "origin", "user-agent", "cookie", "host"]);
-        const result = {};
-        for (const [key, value] of Object.entries(headers || {})) {
-            if (!blocked.has(key.toLowerCase()) && value !== undefined && value !== null) {
-                result[key] = String(value);
-            }
-        }
-        return result;
-    }
-
-    async fetchBlob(url, headers = {}, signal = null) {
-        throwIfDownloadAborted(signal);
-        try {
-            const response = await this.window.fetch(url, {
-                credentials: "include",
-                headers: this.normalizeFetchHeaders(headers),
-                referrer: this.window.location?.href || "https://www.tiktok.com/",
-                signal: signal || undefined,
+        getVisiblePhotoModeImages(primaryImage = null) {
+            const context = this.getMediaContextElement(primaryImage) || this.document;
+            const candidates = this.getImageMediaCandidates(context).filter((image) => {
+                if (!image || String(image.tagName || "").toLowerCase() !== "img") return false;
+                const src = this.getImageElementUrl(image);
+                if (!src) return false;
+                if (this.isLikelyPhotoModeElement(image)) return true;
+                if (primaryImage && image.className === primaryImage.className) return true;
+                return false;
             });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+            if (primaryImage && !candidates.includes(primaryImage)) candidates.unshift(primaryImage);
+            const seen = new Set();
+            const result = [];
+            for (const image of candidates) {
+                const src = this.getImageElementUrl(image);
+                if (!src || seen.has(src)) continue;
+                seen.add(src);
+                result.push(image);
             }
-            const blob = await response.blob();
-            throwIfDownloadAborted(signal);
+            return result;
+        }
+
+        getCurrentVideoElement(anchorElement = null) {
+            const anchorContext = this.getMediaContextElement(anchorElement);
+            return this.getContextVideoElement(anchorContext) || this.getVisibleVideoElement();
+        }
+
+        getContextVideoElement(context = null) {
+            if (!context) return null;
+            const videos = Array.from(context.querySelectorAll?.("video") || []);
+            return this.selectBestVideoElement(videos);
+        }
+
+        getContextMediaElement(context = null) {
+            if (!context) return null;
+            const mediaElements = [
+                ...Array.from(context.querySelectorAll?.("video") || []),
+                ...this.getImageMediaCandidates(context),
+            ];
+            return this.selectBestMediaElement(mediaElements);
+        }
+
+        getVisibleVideoElement() {
+            const videos = Array.from(this.document?.querySelectorAll?.("video") || []);
+            return this.selectBestVideoElement(videos);
+        }
+
+        getVisibleMediaElement() {
+            const mediaElements = [
+                ...Array.from(this.document?.querySelectorAll?.("video") || []),
+                ...this.getImageMediaCandidates(this.document),
+            ];
+            return this.selectBestMediaElement(mediaElements);
+        }
+
+        getImageMediaCandidates(scope = this.document) {
+            return Array.from(scope?.querySelectorAll?.("img") || []).filter((image) => {
+                if (!image || image.closest?.(`.${SCRIPT_PREFIX}-panel`)) return false;
+                const src = image.currentSrc || image.src || image.getAttribute?.("src") || "";
+                if (!src || src.startsWith("data:")) return false;
+                const rect = image.getBoundingClientRect?.();
+                if (!rect || rect.width < 160 || rect.height < 160) return false;
+                const viewportWidth = Number(this.window?.innerWidth || 0);
+                const viewportHeight = Number(this.window?.innerHeight || 0);
+                if (viewportWidth && viewportHeight && getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.08) {
+                    return false;
+                }
+                const signature = `${image.alt || ""} ${image.className || ""} ${image.parentElement?.className || ""}`;
+                if (/(avatar|profile|music|icon|logo|emoji|comment)/i.test(signature)) return false;
+                return true;
+            });
+        }
+
+        selectBestVideoElement(videos = []) {
+            return this.selectBestMediaElement(videos);
+        }
+
+        selectBestMediaElement(elements = []) {
+            const viewportWidth = Number(this.window?.innerWidth || 0);
+            const viewportHeight = Number(this.window?.innerHeight || 0);
+            const scored = elements
+            .filter(Boolean)
+            .map((element) => ({
+                element,
+                rect: element.getBoundingClientRect?.(),
+            }))
+            .map((entry) => ({
+                ...entry,
+                score: scoreMediaElementRect(entry.rect, viewportWidth, viewportHeight),
+            }))
+            .filter((entry) => Number.isFinite(entry.score))
+            .sort((left, right) => right.score - left.score);
+            if (scored[0]) return scored[0].element;
+
+            return (
+                elements
+                .filter(Boolean)
+                .filter((element) => {
+                    const rect = element.getBoundingClientRect?.();
+                    return rect && rect.width > 80 && rect.height > 80;
+                })
+                .sort((left, right) => {
+                    const leftRect = left.getBoundingClientRect();
+                    const rightRect = right.getBoundingClientRect();
+                    return rightRect.width * rightRect.height - leftRect.width * leftRect.height;
+                })[0] || elements[0] || null
+            );
+        }
+
+        getMediaContextElement(element = null) {
+            if (!element) return null;
+            const cinemaRoot = element.closest?.('[role="dialog"][aria-label="Cinema mode"]');
+            if (cinemaRoot) return cinemaRoot;
+            const selector = [
+                "article",
+                "section[id*='media-card']",
+                "section[data-e2e*='feed-video']",
+                "section[data-e2e*='video']",
+                "[id*='media-card']",
+                "[data-e2e*='feed-video']",
+                "[data-e2e*='video']",
+                "[class*='SectionMediaCardContainer']",
+                "[class*='DivContentFlexLayout']",
+                "[class*='DivContentContainer']",
+                "[class*='DivItemContainer']",
+                "[class*='DivFeedCard']",
+            ].join(",");
+            const closest = element.closest?.(selector);
+            if (closest) return closest;
+
+            let current = element.parentElement || null;
+            while (current && current !== this.document?.body) {
+                if (this.isMediaContextElement(current)) return current;
+                current = current.parentElement || null;
+            }
+            return null;
+        }
+
+        isMediaContextElement(element = null) {
+            if (!element) return false;
+            const tagName = String(element.tagName || "").toLowerCase();
+            if (tagName === "article") return true;
+            const className = String(element.className || "");
+            const id = String(element.id || "");
+            const dataE2e = String(element.getAttribute?.("data-e2e") || "");
+            const signature = `${id} ${dataE2e} ${className}`;
+            if (/ActionBarContainer/i.test(signature)) return false;
+            if (tagName === "section" && /media-card|feed-video|video/i.test(signature)) return true;
+            return /SectionMediaCardContainer|DivContentFlexLayout|DivContentContainer|DivItemContainer|DivFeedCard/i.test(
+                className,
+            );
+        }
+
+        getMediaUrlsFromScopes(scopes = []) {
+            const urls = [];
+            for (const scope of scopes) {
+                const anchors = Array.from(
+                    scope.querySelectorAll?.("a[href*='/video/'],a[href*='/photo/']") || [],
+                );
+                for (const anchor of anchors) {
+                    const href = anchor.href || anchor.getAttribute?.("href") || "";
+                    if (getVideoIdFromUrl(href)) urls.push(href);
+                }
+                if (urls.length) break;
+            }
+            return unique(urls);
+        }
+
+        getVisibleMediaContextUrls(mediaElement = this.getVisibleMediaElement()) {
+            const scopes = [];
+            const addScope = (scope) => {
+                if (scope && !scopes.includes(scope)) scopes.push(scope);
+            };
+            addScope(this.getMediaContextElement(mediaElement));
+            addScope(mediaElement?.parentElement);
+            return this.getMediaUrlsFromScopes(scopes);
+        }
+    }
+
+    function createDownloadCancelledError() {
+        const error = new Error("Download cancelled");
+        error.name = "AbortError";
+        error.code = "download-cancelled";
+        return error;
+    }
+
+    function isDownloadCancelledError(error) {
+        return error?.code === "download-cancelled" || error?.name === "AbortError";
+    }
+
+    function throwIfDownloadAborted(signal) {
+        if (signal?.aborted) throw createDownloadCancelledError();
+    }
+
+    class Downloader {
+        constructor(win, gmRequest = null, gmDownloadFn = null) {
+            this.window = win;
+            this.gmRequest = gmRequest;
+            this.gmDownload = gmDownloadFn;
+            this.lastResult = null;
+        }
+
+        getDebugSnapshot() {
             return {
-                blob,
-                requestedUrl: url,
-                url: response.url || url,
-                method: "fetch-blob",
+                lastResult: this.lastResult ? { ...this.lastResult } : null,
             };
-        } catch (err) {
-            if (signal?.aborted || isDownloadCancelledError(err)) {
-                throw createDownloadCancelledError();
-            }
-            if (!this.gmRequest) throw err;
-            return this.fetchBlobWithGm(url, headers, signal);
         }
-    }
 
-    fetchBlobWithGm(url, headers = {}, signal = null) {
-        return new Promise((resolve, reject) => {
-            if (signal?.aborted) {
-                reject(createDownloadCancelledError());
-                return;
-            }
-            let request = null;
-            let settled = false;
-            const cleanup = () => signal?.removeEventListener?.("abort", onAbort);
-            const settle = (callback, value) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                callback(value);
-            };
-            const onAbort = () => {
-                try {
-                    request?.abort?.();
-                } catch (_err) {
+        normalizeFetchHeaders(headers = {}) {
+            const blocked = new Set(["referer", "origin", "user-agent", "cookie", "host"]);
+            const result = {};
+            for (const [key, value] of Object.entries(headers || {})) {
+                if (!blocked.has(key.toLowerCase()) && value !== undefined && value !== null) {
+                    result[key] = String(value);
                 }
-                settle(reject, createDownloadCancelledError());
-            };
-            signal?.addEventListener?.("abort", onAbort, { once: true });
-            try {
-                request = this.gmRequest({
-                    method: "GET",
-                    url,
-                    headers: normalizeHeaders(headers),
-                    responseType: "blob",
-                    onload: (response) => {
-                        const status = Number(response.status || 0);
-                        if (status >= 200 && status < 300 && response.response) {
-                            settle(resolve, {
-                                blob: response.response,
-                                requestedUrl: url,
-                                url: response.finalUrl || url,
-                                method: "gm-xhr-blob",
-                            });
-                            return;
-                        }
-                        settle(reject, new Error(`HTTP ${status || "unknown"}`));
-                    },
-                    onabort: () => settle(reject, createDownloadCancelledError()),
-                    onerror: (error) => settle(
-                        reject,
-                        signal?.aborted
-                        ? createDownloadCancelledError()
-                        : error,
-                    ),
-                    ontimeout: () => settle(reject, new Error("Request timeout")),
-                });
-                if (signal?.aborted) onAbort();
-            } catch (err) {
-                settle(
-                    reject,
-                    signal?.aborted ? createDownloadCancelledError() : err,
-                );
             }
-        });
-    }
-
-    downloadWithGm(url, filename, headers = {}, signal = null) {
-        if (typeof this.gmDownload !== "function") {
-            return Promise.reject(new Error("GM_download unavailable"));
+            return result;
         }
 
-        return new Promise((resolve, reject) => {
-            if (signal?.aborted) {
-                reject(createDownloadCancelledError());
-                return;
-            }
-            let download = null;
-            let settled = false;
-            const cleanup = () => signal?.removeEventListener?.("abort", onAbort);
-            const settle = (callback, value) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                callback(value);
-            };
-            const onAbort = () => {
-                try {
-                    download?.abort?.();
-                } catch (_err) {
-                }
-                settle(reject, createDownloadCancelledError());
-            };
-            signal?.addEventListener?.("abort", onAbort, { once: true });
-            try {
-                download = this.gmDownload({
-                    url,
-                    name: filename,
-                    headers: normalizeHeaders(headers),
-                    saveAs: false,
-                    onload: () => settle(resolve, {
-                        requestedUrl: url,
-                        url,
-                        method: "gm-download",
-                    }),
-                    onerror: (error) => settle(
-                        reject,
-                        signal?.aborted
-                        ? createDownloadCancelledError()
-                        : error?.error
-                        ? new Error(error.error)
-                        : error,
-                    ),
-                    ontimeout: () => settle(reject, new Error("Download timeout")),
-                });
-                if (signal?.aborted) onAbort();
-            } catch (err) {
-                settle(
-                    reject,
-                    signal?.aborted ? createDownloadCancelledError() : err,
-                );
-            }
-        });
-    }
-
-    async downloadUrl(urls, filename, headers = {}, signal = null) {
-        let lastError = null;
-        this.lastResult = null;
-        const allUrls = unique(ensureArray(urls))
-        .map((url) => {
-            try {
-                return normalizeSafeDownloadUrl(
-                    url,
-                    this.window.location?.href || "https://www.tiktok.com/",
-                );
-            } catch (err) {
-                lastError = err;
-                return "";
-            }
-        })
-        .filter(Boolean);
-
-        if (!allUrls.length) {
-            throw lastError || new Error("No safe download URL");
-        }
-
-        for (let candidateIndex = 0; candidateIndex < allUrls.length; candidateIndex += 1) {
-            const url = allUrls[candidateIndex];
+        async fetchBlob(url, headers = {}, signal = null) {
             throwIfDownloadAborted(signal);
+            const AbortControllerCtor = this.window.AbortController;
+            const timeoutController = typeof AbortControllerCtor === "function"
+            ? new AbortControllerCtor()
+            : null;
+            let timeoutTimer = null;
+            let timedOut = false;
+            const abortFetch = () => timeoutController?.abort();
+            signal?.addEventListener?.("abort", abortFetch, { once: true });
+            const timeoutPromise = new Promise((_resolve, reject) => {
+                timeoutTimer = this.window.setTimeout(() => {
+                    timedOut = true;
+                    abortFetch();
+                    reject(new Error("Request timeout"));
+                }, DOWNLOAD_TIMEOUT_MS);
+            });
+            const withTimeout = (promise) => Promise.race([promise, timeoutPromise]);
             try {
-                const result = await this.downloadWithGm(url, filename, headers, signal);
-                const fact = {
-                    ...result,
-                    candidateIndex,
-                    fallbackUsed: candidateIndex > 0,
-                };
-                this.lastResult = { ...fact, filename };
-                return fact;
-            } catch (err) {
-                if (signal?.aborted || isDownloadCancelledError(err)) {
-                    throw createDownloadCancelledError();
+                const response = await withTimeout(this.window.fetch(url, {
+                    credentials: "include",
+                    headers: this.normalizeFetchHeaders(headers),
+                    referrer: this.window.location?.href || "https://www.tiktok.com/",
+                    signal: timeoutController?.signal || signal || undefined,
+                }));
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
                 }
-                lastError = err;
-            }
-
-            throwIfDownloadAborted(signal);
-            try {
-                const result = await this.fetchBlob(url, headers, signal);
+                const blob = await withTimeout(response.blob());
                 throwIfDownloadAborted(signal);
-                this.downloadBlob(result.blob, filename);
-                const fact = {
-                    requestedUrl: result.requestedUrl || url,
-                    url: result.url || url,
-                    method: result.method || "fetch-blob",
-                    candidateIndex,
-                    fallbackUsed: candidateIndex > 0,
+                return {
+                    blob,
+                    requestedUrl: url,
+                    url: response.url || url,
+                    method: "fetch-blob",
                 };
-                this.lastResult = { ...fact, filename };
-                return fact;
             } catch (err) {
-                if (signal?.aborted || isDownloadCancelledError(err)) {
+                if (signal?.aborted || (!timedOut && isDownloadCancelledError(err))) {
                     throw createDownloadCancelledError();
                 }
-                lastError = err;
+                if (!this.gmRequest) throw timedOut ? new Error("Request timeout") : err;
+                return this.fetchBlobWithGm(url, headers, signal);
+            } finally {
+                this.window.clearTimeout(timeoutTimer);
+                signal?.removeEventListener?.("abort", abortFetch);
             }
         }
-        throw lastError || new Error("No download URL");
+
+        fetchBlobWithGm(url, headers = {}, signal = null) {
+            return new Promise((resolve, reject) => {
+                if (signal?.aborted) {
+                    reject(createDownloadCancelledError());
+                    return;
+                }
+                let request = null;
+                let settled = false;
+                let timeoutTimer = null;
+                const cleanup = () => {
+                    this.window.clearTimeout(timeoutTimer);
+                    signal?.removeEventListener?.("abort", onAbort);
+                };
+                const settle = (callback, value) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    callback(value);
+                };
+                const onAbort = () => {
+                    try {
+                        request?.abort?.();
+                    } catch (_err) {
+                    }
+                    settle(reject, createDownloadCancelledError());
+                };
+                const onTimeout = () => {
+                    settle(reject, new Error("Request timeout"));
+                    try {
+                        request?.abort?.();
+                    } catch (_err) {
+                    }
+                };
+                signal?.addEventListener?.("abort", onAbort, { once: true });
+                timeoutTimer = this.window.setTimeout(onTimeout, DOWNLOAD_TIMEOUT_MS);
+                try {
+                    request = this.gmRequest({
+                        method: "GET",
+                        url,
+                        headers: normalizeHeaders(headers),
+                        responseType: "blob",
+                        timeout: DOWNLOAD_TIMEOUT_MS,
+                        onload: (response) => {
+                            const status = Number(response.status || 0);
+                            if (status >= 200 && status < 300 && response.response) {
+                                settle(resolve, {
+                                    blob: response.response,
+                                    requestedUrl: url,
+                                    url: response.finalUrl || url,
+                                    method: "gm-xhr-blob",
+                                });
+                                return;
+                            }
+                            settle(reject, new Error(`HTTP ${status || "unknown"}`));
+                        },
+                        onabort: () => settle(reject, createDownloadCancelledError()),
+                        onerror: (error) => settle(
+                            reject,
+                            signal?.aborted
+                            ? createDownloadCancelledError()
+                            : error,
+                        ),
+                        ontimeout: () => settle(reject, new Error("Request timeout")),
+                    });
+                    if (signal?.aborted) onAbort();
+                } catch (err) {
+                    settle(
+                        reject,
+                        signal?.aborted ? createDownloadCancelledError() : err,
+                    );
+                }
+            });
+        }
+
+        downloadWithGm(url, filename, headers = {}, signal = null) {
+            if (typeof this.gmDownload !== "function") {
+                return Promise.reject(new Error("GM_download unavailable"));
+            }
+
+            return new Promise((resolve, reject) => {
+                if (signal?.aborted) {
+                    reject(createDownloadCancelledError());
+                    return;
+                }
+                let download = null;
+                let settled = false;
+                let timeoutTimer = null;
+                const cleanup = () => {
+                    this.window.clearTimeout(timeoutTimer);
+                    signal?.removeEventListener?.("abort", onAbort);
+                };
+                const settle = (callback, value) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    callback(value);
+                };
+                const onAbort = () => {
+                    try {
+                        download?.abort?.();
+                    } catch (_err) {
+                    }
+                    settle(reject, createDownloadCancelledError());
+                };
+                const onTimeout = () => {
+                    settle(reject, new Error("Download timeout"));
+                    try {
+                        download?.abort?.();
+                    } catch (_err) {
+                    }
+                };
+                signal?.addEventListener?.("abort", onAbort, { once: true });
+                timeoutTimer = this.window.setTimeout(onTimeout, DOWNLOAD_TIMEOUT_MS);
+                try {
+                    download = this.gmDownload({
+                        url,
+                        name: filename,
+                        headers: normalizeHeaders(headers),
+                        saveAs: false,
+                        timeout: DOWNLOAD_TIMEOUT_MS,
+                        onload: () => settle(resolve, {
+                            requestedUrl: url,
+                            url,
+                            method: "gm-download",
+                        }),
+                        onerror: (error) => settle(
+                            reject,
+                            signal?.aborted
+                            ? createDownloadCancelledError()
+                            : error?.error
+                            ? new Error(error.error)
+                            : error,
+                        ),
+                        ontimeout: () => settle(reject, new Error("Download timeout")),
+                    });
+                    if (signal?.aborted) onAbort();
+                } catch (err) {
+                    settle(
+                        reject,
+                        signal?.aborted ? createDownloadCancelledError() : err,
+                    );
+                }
+            });
+        }
+
+        async downloadUrl(urls, filename, headers = {}, signal = null) {
+            let lastError = null;
+            this.lastResult = null;
+            const allUrls = unique(ensureArray(urls))
+            .map((url) => {
+                try {
+                    return normalizeSafeDownloadUrl(
+                        url,
+                        this.window.location?.href || "https://www.tiktok.com/",
+                    );
+                } catch (err) {
+                    lastError = err;
+                    return "";
+                }
+            })
+            .filter(Boolean);
+
+            if (!allUrls.length) {
+                throw lastError || new Error("No safe download URL");
+            }
+
+            for (let candidateIndex = 0; candidateIndex < allUrls.length; candidateIndex += 1) {
+                const url = allUrls[candidateIndex];
+                throwIfDownloadAborted(signal);
+                try {
+                    const result = await this.downloadWithGm(url, filename, headers, signal);
+                    const fact = {
+                        ...result,
+                        candidateIndex,
+                        fallbackUsed: candidateIndex > 0,
+                    };
+                    this.lastResult = { ...fact, filename };
+                    return fact;
+                } catch (err) {
+                    if (signal?.aborted || isDownloadCancelledError(err)) {
+                        throw createDownloadCancelledError();
+                    }
+                    lastError = err;
+                }
+
+                throwIfDownloadAborted(signal);
+                try {
+                    const result = await this.fetchBlob(url, headers, signal);
+                    throwIfDownloadAborted(signal);
+                    this.downloadBlob(result.blob, filename);
+                    const fact = {
+                        requestedUrl: result.requestedUrl || url,
+                        url: result.url || url,
+                        method: result.method || "fetch-blob",
+                        candidateIndex,
+                        fallbackUsed: candidateIndex > 0,
+                    };
+                    this.lastResult = { ...fact, filename };
+                    return fact;
+                } catch (err) {
+                    if (signal?.aborted || isDownloadCancelledError(err)) {
+                        throw createDownloadCancelledError();
+                    }
+                    lastError = err;
+                }
+            }
+            throw lastError || new Error("No download URL");
+        }
+
+        downloadBlob(blob, filename) {
+            const objectUrl = this.window.URL.createObjectURL(blob);
+            const anchor = this.window.document.createElement("a");
+            anchor.href = objectUrl;
+            anchor.download = filename;
+            anchor.style.display = "none";
+            this.window.document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(() => this.window.URL.revokeObjectURL(objectUrl), 1000);
+        }
     }
 
-    downloadBlob(blob, filename) {
-        const objectUrl = this.window.URL.createObjectURL(blob);
-        const anchor = this.window.document.createElement("a");
-        anchor.href = objectUrl;
-        anchor.download = filename;
-        anchor.style.display = "none";
-        this.window.document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setTimeout(() => this.window.URL.revokeObjectURL(objectUrl), 1000);
-    }
-}
-
-function createElement(doc, tag, className, text) {
-    const element = doc.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = text;
-    return element;
-}
-
-function createTuxIconButton(doc, label, onClick, kind = "close", className = "") {
-    const isSave = kind === "save";
-    const button = createElement(
-        doc,
-        "button",
-        `TUXButton TUXButton--capsule TUXButton--medium TUXButton--${isSave ? "primary" : "secondary"} ${SCRIPT_PREFIX}-icon-button ${SCRIPT_PREFIX}-${isSave ? "save" : "close"}-button${className ? ` ${className}` : ""}`,
-    );
-    button.type = "button";
-    button.setAttribute("aria-label", label);
-    button.title = label;
-
-    const content = createElement(doc, "div", "TUXButton-content");
-    const iconContainer = createElement(doc, "div", "TUXButton-iconContainer");
-    const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("fill", "currentColor");
-    svg.setAttribute("viewBox", "0 0 48 48");
-    svg.setAttribute("width", "1em");
-    svg.setAttribute("height", "1em");
-    svg.setAttribute("aria-hidden", "true");
-    const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", isSave
-                      ? "M40.3 14.7a1 1 0 0 1 0 1.42L20.42 36a2 2 0 0 1-2.84 0L7.7 26.12a1 1 0 0 1 0-1.42l1.42-1.4a1 1 0 0 1 1.42 0L19 31.76 37.46 13.3a1 1 0 0 1 1.42 0l1.42 1.4Z"
-                      : "M38.7 12.12a1 1 0 0 0 0-1.41l-1.4-1.42a1 1 0 0 0-1.42 0L24 21.17 12.12 9.3a1 1 0 0 0-1.41 0l-1.42 1.42a1 1 0 0 0 0 1.41L21.17 24 9.3 35.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0L24 26.83 35.88 38.7a1 1 0 0 0 1.41 0l1.42-1.42a1 1 0 0 0 0-1.41L26.83 24 38.7 12.12Z");
-    svg.appendChild(path);
-    iconContainer.appendChild(svg);
-    content.appendChild(iconContainer);
-    button.appendChild(content);
-    if (typeof onClick === "function") button.addEventListener("click", onClick);
-    return button;
-}
-
-function calculatePanelMenuPlacement(options = {}) {
-    const gap = Number(options.gap || 10);
-    const margin = Number(options.margin || 8);
-    const viewportWidth = Number(options.viewportWidth || 0);
-    const viewportHeight = Number(options.viewportHeight || 0);
-    const menuWidth = Number(options.menuWidth || 160);
-    const menuHeight = Number(options.menuHeight || 180);
-    const panelRect = options.panelRect;
-    const anchorRect = options.launcherRect || options.buttonRect || panelRect;
-    if (!anchorRect || !viewportWidth || !viewportHeight) {
-        return { placement: "right", left: margin, top: margin };
+    function createElement(doc, tag, className, text) {
+        const element = doc.createElement(tag);
+        if (className) element.className = className;
+        if (text !== undefined) element.textContent = text;
+        return element;
     }
 
-    const edges = getRectEdges(anchorRect);
-    const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
-    const maxTop = Math.max(margin, viewportHeight - menuHeight - margin);
-    const centeredTop = clampNumber(
-        Math.round(edges.top + edges.height / 2 - menuHeight / 2),
-        margin,
-        maxTop,
-    );
+    function createTuxIconButton(doc, label, onClick, kind = "close", className = "") {
+        const isSave = kind === "save";
+        const button = createElement(
+            doc,
+            "button",
+            `TUXButton TUXButton--capsule TUXButton--medium TUXButton--${isSave ? "primary" : "secondary"} ${SCRIPT_PREFIX}-icon-button ${SCRIPT_PREFIX}-${isSave ? "save" : "close"}-button${className ? ` ${className}` : ""}`,
+        );
+        button.type = "button";
+        button.setAttribute("aria-label", label);
+        button.title = label;
 
-    if (edges.right + gap + menuWidth <= viewportWidth - margin) {
-        return {
-            placement: "right",
-            left: Math.round(edges.right + gap),
-            top: centeredTop,
-        };
+        const content = createElement(doc, "div", "TUXButton-content");
+        const iconContainer = createElement(doc, "div", "TUXButton-iconContainer");
+        const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("fill", "currentColor");
+        svg.setAttribute("viewBox", "0 0 48 48");
+        svg.setAttribute("width", "1em");
+        svg.setAttribute("height", "1em");
+        svg.setAttribute("aria-hidden", "true");
+        const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", isSave
+                          ? "M40.3 14.7a1 1 0 0 1 0 1.42L20.42 36a2 2 0 0 1-2.84 0L7.7 26.12a1 1 0 0 1 0-1.42l1.42-1.4a1 1 0 0 1 1.42 0L19 31.76 37.46 13.3a1 1 0 0 1 1.42 0l1.42 1.4Z"
+                          : "M38.7 12.12a1 1 0 0 0 0-1.41l-1.4-1.42a1 1 0 0 0-1.42 0L24 21.17 12.12 9.3a1 1 0 0 0-1.41 0l-1.42 1.42a1 1 0 0 0 0 1.41L21.17 24 9.3 35.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0L24 26.83 35.88 38.7a1 1 0 0 0 1.41 0l1.42-1.42a1 1 0 0 0 0-1.41L26.83 24 38.7 12.12Z");
+        svg.appendChild(path);
+        iconContainer.appendChild(svg);
+        content.appendChild(iconContainer);
+        button.appendChild(content);
+        if (typeof onClick === "function") button.addEventListener("click", onClick);
+        return button;
     }
 
-    const centeredLeft = clampNumber(
-        Math.round(edges.left + edges.width / 2 - menuWidth / 2),
-        margin,
-        maxLeft,
-    );
+    function calculatePanelMenuPlacement(options = {}) {
+        const gap = Number(options.gap || 10);
+        const margin = Number(options.margin || 8);
+        const viewportWidth = Number(options.viewportWidth || 0);
+        const viewportHeight = Number(options.viewportHeight || 0);
+        const menuWidth = Number(options.menuWidth || 160);
+        const menuHeight = Number(options.menuHeight || 180);
+        const panelRect = options.panelRect;
+        const anchorRect = options.launcherRect || options.buttonRect || panelRect;
+        if (!anchorRect || !viewportWidth || !viewportHeight) {
+            return { placement: "right", left: margin, top: margin };
+        }
 
-    if (edges.top - gap - menuHeight >= margin) {
-        return {
-            placement: "top",
-            left: centeredLeft,
-            top: Math.round(edges.top - menuHeight - gap),
-        };
-    }
+        const edges = getRectEdges(anchorRect);
+        const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+        const maxTop = Math.max(margin, viewportHeight - menuHeight - margin);
+        const centeredTop = clampNumber(
+            Math.round(edges.top + edges.height / 2 - menuHeight / 2),
+            margin,
+            maxTop,
+        );
 
-    if (edges.left - gap - menuWidth >= margin) {
-        return {
-            placement: "left",
-            left: Math.round(edges.left - menuWidth - gap),
-            top: centeredTop,
-        };
-    }
+        if (edges.right + gap + menuWidth <= viewportWidth - margin) {
+            return {
+                placement: "right",
+                left: Math.round(edges.right + gap),
+                top: centeredTop,
+            };
+        }
 
-    const bottomTop = Math.round(edges.bottom + gap);
-    if (bottomTop + menuHeight <= viewportHeight - margin) {
+        const centeredLeft = clampNumber(
+            Math.round(edges.left + edges.width / 2 - menuWidth / 2),
+            margin,
+            maxLeft,
+        );
+
+        if (edges.top - gap - menuHeight >= margin) {
+            return {
+                placement: "top",
+                left: centeredLeft,
+                top: Math.round(edges.top - menuHeight - gap),
+            };
+        }
+
+        if (edges.left - gap - menuWidth >= margin) {
+            return {
+                placement: "left",
+                left: Math.round(edges.left - menuWidth - gap),
+                top: centeredTop,
+            };
+        }
+
+        const bottomTop = Math.round(edges.bottom + gap);
+        if (bottomTop + menuHeight <= viewportHeight - margin) {
+            return {
+                placement: "bottom",
+                left: centeredLeft,
+                top: bottomTop,
+            };
+        }
+
         return {
             placement: "bottom",
             left: centeredLeft,
-            top: bottomTop,
+            top: clampNumber(bottomTop, margin, maxTop),
         };
     }
 
-    return {
-        placement: "bottom",
-        left: centeredLeft,
-        top: clampNumber(bottomTop, margin, maxTop),
-    };
-}
-
-function clearFixedMenuPlacement(menu) {
-    if (!menu) return;
-    for (const property of ["left", "right", "top", "bottom"]) {
-        menu.style[property] = "";
-    }
-    menu.style.position = "";
-    menu.style.transform = "";
-    delete menu.dataset.placement;
-}
-
-function applyFixedMenuPlacement(menu, placement) {
-    if (!menu || !placement) return;
-    menu.style.position = "fixed";
-    menu.style.left = `${Math.round(placement.left)}px`;
-    menu.style.top = `${Math.round(placement.top)}px`;
-    menu.style.right = "auto";
-    menu.style.bottom = "auto";
-    menu.style.transform = "none";
-    menu.dataset.placement = placement.placement;
-}
-
-const RECOMMEND_ACTION_BAR_SELECTOR = [
-    'section[class*="SectionActionBarContainer"]',
-    '[class*="SectionActionBarContainer"]',
-    'section[class*="ActionBarContainer"]',
-    '[class*="ActionBarContainer"]',
-].join(",");
-
-const RECOMMEND_ACTION_METRIC_SELECTOR =
-      '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"], ' +
-      '[data-e2e="live-like-icon"], [data-e2e="live-share-icon"]';
-
-const PROFILE_BROWSE_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
-const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
-const PROFILE_BROWSE_MEDIA_SELECTOR = '[data-e2e="browse-video"], video, img';
-const CINEMA_MODE_ROOT_SELECTOR = '[role="dialog"][aria-label="Cinema mode"]';
-const CINEMA_MORE_BUTTON_SELECTOR =
-      'button[data-testid="tux-web-button"][aria-haspopup="dialog"]';
-
-function isActionBarClassName(className = "") {
-    const value = String(className || "");
-    return /ActionBarContainer/i.test(value) && !/FeedNavigation|NavigationContainer/i.test(value);
-}
-
-function hasVisibleRecommendFeedActionBar(doc = root?.document) {
-    const win = doc?.defaultView || root;
-    const viewportWidth = Number(win?.innerWidth || 0);
-    const viewportHeight = Number(win?.innerHeight || 0);
-    if (!doc?.querySelectorAll || !viewportWidth || !viewportHeight) return false;
-    return Array.from(
-        doc.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR),
-    ).some((section) => {
-        if (!section || !isActionBarClassName(section.className)) return false;
-        const rect = section.getBoundingClientRect?.();
-        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-        if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.45) return false;
-        return Boolean(
-            section.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR),
-        );
-    });
-}
-
-function isVisibleProfileBrowseDialog(dialog = null, win = root) {
-    if (!dialog?.querySelector) return false;
-    const rect = dialog.getBoundingClientRect?.();
-    const viewportWidth = Number(win?.innerWidth || 0);
-    const viewportHeight = Number(win?.innerHeight || 0);
-    if (!rect || !viewportWidth || !viewportHeight) return false;
-    if (rect.width < 280 || rect.height < 280) return false;
-    if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
-    const ellipsis = dialog.querySelector(PROFILE_BROWSE_ELLIPSIS_SELECTOR);
-    if (!ellipsis) return false;
-    const ellipsisRect = ellipsis.getBoundingClientRect?.();
-    if (!ellipsisRect || ellipsisRect.width < 24 || ellipsisRect.height < 24) return false;
-    if (getVisibleRectRatio(ellipsisRect, viewportWidth, viewportHeight) < 0.5) return false;
-    return Boolean(dialog.querySelector(PROFILE_BROWSE_MEDIA_SELECTOR));
-}
-
-function getVisibleProfileBrowseDialog(doc = root?.document) {
-    const win = doc?.defaultView || root;
-    if (!doc?.querySelectorAll) return null;
-    const dialogs = Array.from(doc.querySelectorAll(PROFILE_BROWSE_DIALOG_SELECTOR))
-    .filter((dialog) => isVisibleProfileBrowseDialog(dialog, win))
-    .sort((left, right) => {
-        const leftRect = left.getBoundingClientRect?.();
-        const rightRect = right.getBoundingClientRect?.();
-        const leftArea = (leftRect?.width || 0) * (leftRect?.height || 0);
-        const rightArea = (rightRect?.width || 0) * (rightRect?.height || 0);
-        return rightArea - leftArea;
-    });
-    return dialogs[0] || null;
-}
-
-function getCinemaModeRoot(doc = root?.document) {
-    return doc?.querySelector?.(CINEMA_MODE_ROOT_SELECTOR) || null;
-}
-
-function getVisibleCinemaMoreButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
-    const win = doc?.defaultView || root;
-    const viewportWidth = Number(win?.innerWidth || 0);
-    const viewportHeight = Number(win?.innerHeight || 0);
-    if (!cinema?.querySelectorAll || !viewportWidth || !viewportHeight) return null;
-    return Array.from(cinema.querySelectorAll(CINEMA_MORE_BUTTON_SELECTOR))
-        .map((button) => button.closest?.('[data-testid="tux-web-button-container"]') || button)
-        .find((anchor) => {
-        const rect = anchor.getBoundingClientRect?.();
-        return Boolean(
-            rect?.width > 0 &&
-            rect?.height > 0 &&
-            getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.5
-        );
-    }) || null;
-}
-
-function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
-    const rawPath = String(locationLike?.pathname || "/");
-    const pathname = rawPath.replace(/\/+$/, "") || "/";
-    if (/^\/(?:explore|messages|upload|following|friends)(?:\/|$)/i.test(pathname)) return "explore";
-    if (/^\/live(?:\/|$)/i.test(pathname)) return "live";
-    if (pathname === "/" || /^\/(?:foryou|feed|recommend)(?:\/|$)/i.test(pathname)) {
-        return "recommend";
-    }
-    if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
-    if (getVisibleProfileBrowseDialog(doc)) return "profile-dialog";
-    if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
-        return "detail";
-    }
-    if (/^\/@[^/]+(?:\/|$)/.test(pathname)) return "profile";
-    const hasRecommendFeed = Boolean(
-        doc?.querySelector?.('article[data-e2e="recommend-list-item-container"], [data-e2e="recommend-list-item-container"]'),
-    );
-    if (hasRecommendFeed) return "recommend";
-    return "unknown";
-}
-
-function getRectEdges(rect = {}) {
-    const left = Number(rect.left || 0);
-    const top = Number(rect.top || 0);
-    const width = Number(rect.width || 0);
-    const height = Number(rect.height || 0);
-    return {
-        left,
-        top,
-        right: Number(rect.right ?? left + width),
-        bottom: Number(rect.bottom ?? top + height),
-        width,
-        height,
-        centerX: Number(rect.centerX ?? left + width / 2),
-        centerY: Number(rect.centerY ?? top + height / 2),
-    };
-}
-
-function getVisibleRectRatio(rect, viewportWidth, viewportHeight) {
-    const edges = getRectEdges(rect);
-    const visibleWidth = Math.max(
-        0,
-        Math.min(edges.right, viewportWidth) - Math.max(edges.left, 0),
-    );
-    const visibleHeight = Math.max(
-        0,
-        Math.min(edges.bottom, viewportHeight) - Math.max(edges.top, 0),
-    );
-    const area = Math.max(1, edges.width * edges.height);
-    return (visibleWidth * visibleHeight) / area;
-}
-
-function isUsableActionBarRect(rect, viewportWidth = 0, viewportHeight = 0) {
-    if (!rect || !viewportWidth || !viewportHeight) return false;
-    const edges = getRectEdges(rect);
-    if (edges.width < 32 || edges.width > 140) return false;
-    if (edges.height < 120 || edges.height > viewportHeight * 1.25) return false;
-    if (edges.left < viewportWidth * 0.18 || edges.right > viewportWidth + 24) return false;
-    if (getVisibleRectRatio(edges, viewportWidth, viewportHeight) < 0.62) return false;
-    return true;
-}
-
-function scoreActionBarRect(rect, viewportWidth = 0, viewportHeight = 0) {
-    if (!isUsableActionBarRect(rect, viewportWidth, viewportHeight)) return -Infinity;
-    const edges = getRectEdges(rect);
-    const centerDistance = Math.abs(edges.centerY - viewportHeight / 2) / viewportHeight;
-    const visibleRatio = getVisibleRectRatio(edges, viewportWidth, viewportHeight);
-    const sideScore = Math.min(1, Math.max(0, edges.left / Math.max(1, viewportWidth)));
-    return visibleRatio * 100 + sideScore * 10 - centerDistance * 30;
-}
-
-function scoreMediaElementRect(rect, viewportWidth = 0, viewportHeight = 0) {
-    if (!rect) return -Infinity;
-    const edges = getRectEdges(rect);
-    if (edges.width < 80 || edges.height < 80) return -Infinity;
-    if (!viewportWidth || !viewportHeight) return edges.width * edges.height;
-    const visibleRatio = getVisibleRectRatio(edges, viewportWidth, viewportHeight);
-    if (visibleRatio <= 0.03) return -Infinity;
-    const centerDistance =
-          Math.hypot(edges.centerX - viewportWidth / 2, edges.centerY - viewportHeight / 2) /
-          Math.max(1, Math.hypot(viewportWidth, viewportHeight));
-    const areaRatio = Math.min(1, (edges.width * edges.height) / Math.max(1, viewportWidth * viewportHeight));
-    return visibleRatio * 120 + areaRatio * 18 - centerDistance * 45;
-}
-
-function isAvatarActionChild(element) {
-    if (!element) return false;
-    const text = [
-        element.className,
-        element.getAttribute?.("aria-label"),
-        element.getAttribute?.("data-e2e"),
-        element.title,
-        element.textContent,
-    ]
-    .filter(Boolean)
-    .join(" ");
-    return /avatar|profile|author|follow|DivAvatar|AvatarAction/i.test(text);
-}
-
-function getNativeActionControl(element) {
-    if (!element) return null;
-    if (element.matches?.("button,[role='button'],a")) return element;
-    return element.querySelector?.("button,[role='button'],a") || element;
-}
-
-function getNativeActionVisualControl(element) {
-    if (!element) return null;
-    const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
-    if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
-    let best = null;
-    let bestScore = -Infinity;
-    for (const candidate of candidates) {
-        const rect = candidate?.getBoundingClientRect?.();
-        if (!rect || rect.width < 34 || rect.height < 34) continue;
-        const size = Math.max(rect.width, rect.height);
-        const squarePenalty = Math.abs(rect.width - rect.height);
-        const sizePenalty = Math.abs(size - 48);
-        const tagBonus = candidate.tagName === "BUTTON" ? 18 : 0;
-        const classBonus = /tux-button|button/i.test(String(candidate.className || "")) ? 8 : 0;
-        const oversizedPenalty = size > 64 ? 80 : 0;
-        const score = 120 - squarePenalty * 4 - sizePenalty + tagBonus + classBonus - oversizedPenalty;
-        if (score > bestScore) {
-            best = candidate;
-            bestScore = score;
+    function clearFixedMenuPlacement(menu) {
+        if (!menu) return;
+        for (const property of ["left", "right", "top", "bottom"]) {
+            menu.style[property] = "";
         }
+        menu.style.position = "";
+        menu.style.transform = "";
+        delete menu.dataset.placement;
     }
-    return best || getNativeActionControl(element);
-}
 
-function getOfficialActionButtonCandidate(element) {
-    if (!element) return null;
-    const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
-    if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
-    return (
-        candidates.find((candidate) => /(?:^|\s)tux-button__element|TUX|tux-button/i.test(String(candidate.className || ""))) ||
-        getNativeActionVisualControl(element)
-    );
-}
+    function applyFixedMenuPlacement(menu, placement) {
+        if (!menu || !placement) return;
+        menu.style.position = "fixed";
+        menu.style.left = `${Math.round(placement.left)}px`;
+        menu.style.top = `${Math.round(placement.top)}px`;
+        menu.style.right = "auto";
+        menu.style.bottom = "auto";
+        menu.style.transform = "none";
+        menu.dataset.placement = placement.placement;
+    }
 
-function isOfficialActionMetricElement(element) {
-    const value = String(element?.getAttribute?.("data-e2e") || "");
-    return /^(?:like|comment|favorite|share|live-like|live-share)-icon$/i.test(value);
-}
+    const RECOMMEND_ACTION_BAR_SELECTOR = [
+        'section[class*="SectionActionBarContainer"]',
+        '[class*="SectionActionBarContainer"]',
+        'section[class*="ActionBarContainer"]',
+        '[class*="ActionBarContainer"]',
+    ].join(",");
 
-function getOfficialActionMetricElement(child) {
-    if (!child) return null;
-    if (isOfficialActionMetricElement(child)) return child;
-    return (
-        child.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR) ||
-        null
-    );
-}
+    const RECOMMEND_ACTION_METRIC_SELECTOR =
+          '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="favorite-icon"], [data-e2e="share-icon"], ' +
+          '[data-e2e="live-like-icon"], [data-e2e="live-share-icon"]';
 
-function getBestSquareMetricElement(root) {
-    if (!root) return null;
-    const candidates = [];
-    if (root.matches?.("button,[role='button'],a,span,div")) candidates.push(root);
-    candidates.push(...Array.from(root.querySelectorAll?.("span,button,[role='button'],a,svg,div") || []));
-    let best = null;
-    let bestScore = -Infinity;
-    for (const candidate of candidates) {
-        const rect = candidate?.getBoundingClientRect?.();
-        if (!rect || rect.width < 20 || rect.height < 20 || rect.width > 80 || rect.height > 80) continue;
-        const size = Math.max(rect.width, rect.height);
-        const squarePenalty = Math.abs(rect.width - rect.height) * 8;
-        const className = String(candidate.className || "");
-        const spanBonus = candidate.tagName === "SPAN" ? 24 : 0;
-        const buttonBonus = candidate.tagName === "BUTTON" ? 16 : 0;
-        const iconBonus = /icon|tux|button/i.test(className) ? 20 : 0;
-        const svgPenalty = candidate.tagName === "svg" ? 18 : 0;
-        const actionItemPenalty = candidate.getAttribute?.("data-e2e") ? 24 : 0;
-        const score = 140 + spanBonus + buttonBonus + iconBonus - svgPenalty - actionItemPenalty - squarePenalty - Math.abs(size - 40) * 0.6;
-        if (score > bestScore) {
-            best = candidate;
-            bestScore = score;
+    const PROFILE_BROWSE_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
+    const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
+    const PROFILE_BROWSE_MEDIA_SELECTOR = '[data-e2e="browse-video"], video, img';
+    const CINEMA_MODE_ROOT_SELECTOR = '[role="dialog"][aria-label="Cinema mode"]';
+    const CINEMA_MORE_BUTTON_SELECTOR =
+          'button[data-testid="tux-web-button"][aria-haspopup="dialog"]';
+
+    function isActionBarClassName(className = "") {
+        const value = String(className || "");
+        return /ActionBarContainer/i.test(value) && !/FeedNavigation|NavigationContainer/i.test(value);
+    }
+
+    function hasVisibleRecommendFeedActionBar(doc = root?.document) {
+        const win = doc?.defaultView || root;
+        const viewportWidth = Number(win?.innerWidth || 0);
+        const viewportHeight = Number(win?.innerHeight || 0);
+        if (!doc?.querySelectorAll || !viewportWidth || !viewportHeight) return false;
+        return Array.from(
+            doc.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR),
+        ).some((section) => {
+            if (!section || !isActionBarClassName(section.className)) return false;
+            const rect = section.getBoundingClientRect?.();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.45) return false;
+            return Boolean(
+                section.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR),
+            );
+        });
+    }
+
+    function isVisibleProfileBrowseDialog(dialog = null, win = root) {
+        if (!dialog?.querySelector) return false;
+        const rect = dialog.getBoundingClientRect?.();
+        const viewportWidth = Number(win?.innerWidth || 0);
+        const viewportHeight = Number(win?.innerHeight || 0);
+        if (!rect || !viewportWidth || !viewportHeight) return false;
+        if (rect.width < 280 || rect.height < 280) return false;
+        if (getVisibleRectRatio(rect, viewportWidth, viewportHeight) < 0.55) return false;
+        const ellipsis = dialog.querySelector(PROFILE_BROWSE_ELLIPSIS_SELECTOR);
+        if (!ellipsis) return false;
+        const ellipsisRect = ellipsis.getBoundingClientRect?.();
+        if (!ellipsisRect || ellipsisRect.width < 24 || ellipsisRect.height < 24) return false;
+        if (getVisibleRectRatio(ellipsisRect, viewportWidth, viewportHeight) < 0.5) return false;
+        return Boolean(dialog.querySelector(PROFILE_BROWSE_MEDIA_SELECTOR));
+    }
+
+    function getVisibleProfileBrowseDialog(doc = root?.document) {
+        const win = doc?.defaultView || root;
+        if (!doc?.querySelectorAll) return null;
+        const dialogs = Array.from(doc.querySelectorAll(PROFILE_BROWSE_DIALOG_SELECTOR))
+        .filter((dialog) => isVisibleProfileBrowseDialog(dialog, win))
+        .sort((left, right) => {
+            const leftRect = left.getBoundingClientRect?.();
+            const rightRect = right.getBoundingClientRect?.();
+            const leftArea = (leftRect?.width || 0) * (leftRect?.height || 0);
+            const rightArea = (rightRect?.width || 0) * (rightRect?.height || 0);
+            return rightArea - leftArea;
+        });
+        return dialogs[0] || null;
+    }
+
+    function getCinemaModeRoot(doc = root?.document) {
+        return doc?.querySelector?.(CINEMA_MODE_ROOT_SELECTOR) || null;
+    }
+
+    function getVisibleCinemaMoreButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
+        const win = doc?.defaultView || root;
+        const viewportWidth = Number(win?.innerWidth || 0);
+        const viewportHeight = Number(win?.innerHeight || 0);
+        if (!cinema?.querySelectorAll || !viewportWidth || !viewportHeight) return null;
+        return Array.from(cinema.querySelectorAll(CINEMA_MORE_BUTTON_SELECTOR))
+            .map((button) => button.closest?.('[data-testid="tux-web-button-container"]') || button)
+            .find((anchor) => {
+            const rect = anchor.getBoundingClientRect?.();
+            return Boolean(
+                rect?.width > 0 &&
+                rect?.height > 0 &&
+                getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.5
+            );
+        }) || null;
+    }
+
+    function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
+        const rawPath = String(locationLike?.pathname || "/");
+        const pathname = rawPath.replace(/\/+$/, "") || "/";
+        if (/^\/(?:explore|messages|upload|following|friends)(?:\/|$)/i.test(pathname)) return "explore";
+        if (/^\/live(?:\/|$)/i.test(pathname)) return "live";
+        if (pathname === "/" || /^\/(?:foryou|feed|recommend)(?:\/|$)/i.test(pathname)) {
+            return "recommend";
         }
+        if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
+        if (getVisibleProfileBrowseDialog(doc)) return "profile-dialog";
+        if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
+            return "detail";
+        }
+        if (/^\/@[^/]+(?:\/|$)/.test(pathname)) return "profile";
+        const hasRecommendFeed = Boolean(
+            doc?.querySelector?.('article[data-e2e="recommend-list-item-container"], [data-e2e="recommend-list-item-container"]'),
+        );
+        if (hasRecommendFeed) return "recommend";
+        return "unknown";
     }
-    return best;
-}
 
-function clampNumber(value, min, max, fallback = min) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.max(min, Math.min(max, number));
-}
+    function getRectEdges(rect = {}) {
+        const left = Number(rect.left || 0);
+        const top = Number(rect.top || 0);
+        const width = Number(rect.width || 0);
+        const height = Number(rect.height || 0);
+        return {
+            left,
+            top,
+            right: Number(rect.right ?? left + width),
+            bottom: Number(rect.bottom ?? top + height),
+            width,
+            height,
+            centerX: Number(rect.centerX ?? left + width / 2),
+            centerY: Number(rect.centerY ?? top + height / 2),
+        };
+    }
 
-function getPanelCoreStyleSheet() {
-    return `
+    function getVisibleRectRatio(rect, viewportWidth, viewportHeight) {
+        const edges = getRectEdges(rect);
+        const visibleWidth = Math.max(
+            0,
+            Math.min(edges.right, viewportWidth) - Math.max(edges.left, 0),
+        );
+        const visibleHeight = Math.max(
+            0,
+            Math.min(edges.bottom, viewportHeight) - Math.max(edges.top, 0),
+        );
+        const area = Math.max(1, edges.width * edges.height);
+        return (visibleWidth * visibleHeight) / area;
+    }
+
+    function isUsableActionBarRect(rect, viewportWidth = 0, viewportHeight = 0) {
+        if (!rect || !viewportWidth || !viewportHeight) return false;
+        const edges = getRectEdges(rect);
+        if (edges.width < 32 || edges.width > 140) return false;
+        if (edges.height < 120 || edges.height > viewportHeight * 1.25) return false;
+        if (edges.left < viewportWidth * 0.18 || edges.right > viewportWidth + 24) return false;
+        if (getVisibleRectRatio(edges, viewportWidth, viewportHeight) < 0.62) return false;
+        return true;
+    }
+
+    function scoreActionBarRect(rect, viewportWidth = 0, viewportHeight = 0) {
+        if (!isUsableActionBarRect(rect, viewportWidth, viewportHeight)) return -Infinity;
+        const edges = getRectEdges(rect);
+        const centerDistance = Math.abs(edges.centerY - viewportHeight / 2) / viewportHeight;
+        const visibleRatio = getVisibleRectRatio(edges, viewportWidth, viewportHeight);
+        const sideScore = Math.min(1, Math.max(0, edges.left / Math.max(1, viewportWidth)));
+        return visibleRatio * 100 + sideScore * 10 - centerDistance * 30;
+    }
+
+    function scoreMediaElementRect(rect, viewportWidth = 0, viewportHeight = 0) {
+        if (!rect) return -Infinity;
+        const edges = getRectEdges(rect);
+        if (edges.width < 80 || edges.height < 80) return -Infinity;
+        if (!viewportWidth || !viewportHeight) return edges.width * edges.height;
+        const visibleRatio = getVisibleRectRatio(edges, viewportWidth, viewportHeight);
+        if (visibleRatio <= 0.03) return -Infinity;
+        const centerDistance =
+              Math.hypot(edges.centerX - viewportWidth / 2, edges.centerY - viewportHeight / 2) /
+              Math.max(1, Math.hypot(viewportWidth, viewportHeight));
+        const areaRatio = Math.min(1, (edges.width * edges.height) / Math.max(1, viewportWidth * viewportHeight));
+        return visibleRatio * 120 + areaRatio * 18 - centerDistance * 45;
+    }
+
+    function isAvatarActionChild(element) {
+        if (!element) return false;
+        const text = [
+            element.className,
+            element.getAttribute?.("aria-label"),
+            element.getAttribute?.("data-e2e"),
+            element.title,
+            element.textContent,
+        ]
+        .filter(Boolean)
+        .join(" ");
+        return /avatar|profile|author|follow|DivAvatar|AvatarAction/i.test(text);
+    }
+
+    function getNativeActionControl(element) {
+        if (!element) return null;
+        if (element.matches?.("button,[role='button'],a")) return element;
+        return element.querySelector?.("button,[role='button'],a") || element;
+    }
+
+    function getNativeActionVisualControl(element) {
+        if (!element) return null;
+        const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
+        if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
+        let best = null;
+        let bestScore = -Infinity;
+        for (const candidate of candidates) {
+            const rect = candidate?.getBoundingClientRect?.();
+            if (!rect || rect.width < 34 || rect.height < 34) continue;
+            const size = Math.max(rect.width, rect.height);
+            const squarePenalty = Math.abs(rect.width - rect.height);
+            const sizePenalty = Math.abs(size - 48);
+            const tagBonus = candidate.tagName === "BUTTON" ? 18 : 0;
+            const classBonus = /tux-button|button/i.test(String(candidate.className || "")) ? 8 : 0;
+            const oversizedPenalty = size > 64 ? 80 : 0;
+            const score = 120 - squarePenalty * 4 - sizePenalty + tagBonus + classBonus - oversizedPenalty;
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best || getNativeActionControl(element);
+    }
+
+    function getOfficialActionButtonCandidate(element) {
+        if (!element) return null;
+        const candidates = Array.from(element.querySelectorAll?.("button,[role='button'],a") || []);
+        if (element.matches?.("button,[role='button'],a")) candidates.unshift(element);
+        return (
+            candidates.find((candidate) => /(?:^|\s)tux-button__element|TUX|tux-button/i.test(String(candidate.className || ""))) ||
+            getNativeActionVisualControl(element)
+        );
+    }
+
+    function isOfficialActionMetricElement(element) {
+        const value = String(element?.getAttribute?.("data-e2e") || "");
+        return /^(?:like|comment|favorite|share|live-like|live-share)-icon$/i.test(value);
+    }
+
+    function getOfficialActionMetricElement(child) {
+        if (!child) return null;
+        if (isOfficialActionMetricElement(child)) return child;
+        return (
+            child.querySelector?.(RECOMMEND_ACTION_METRIC_SELECTOR) ||
+            null
+        );
+    }
+
+    function getBestSquareMetricElement(root) {
+        if (!root) return null;
+        const candidates = [];
+        if (root.matches?.("button,[role='button'],a,span,div")) candidates.push(root);
+        candidates.push(...Array.from(root.querySelectorAll?.("span,button,[role='button'],a,svg,div") || []));
+        let best = null;
+        let bestScore = -Infinity;
+        for (const candidate of candidates) {
+            const rect = candidate?.getBoundingClientRect?.();
+            if (!rect || rect.width < 20 || rect.height < 20 || rect.width > 80 || rect.height > 80) continue;
+            const size = Math.max(rect.width, rect.height);
+            const squarePenalty = Math.abs(rect.width - rect.height) * 8;
+            const className = String(candidate.className || "");
+            const spanBonus = candidate.tagName === "SPAN" ? 24 : 0;
+            const buttonBonus = candidate.tagName === "BUTTON" ? 16 : 0;
+            const iconBonus = /icon|tux|button/i.test(className) ? 20 : 0;
+            const svgPenalty = candidate.tagName === "svg" ? 18 : 0;
+            const actionItemPenalty = candidate.getAttribute?.("data-e2e") ? 24 : 0;
+            const score = 140 + spanBonus + buttonBonus + iconBonus - svgPenalty - actionItemPenalty - squarePenalty - Math.abs(size - 40) * 0.6;
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    function clampNumber(value, min, max, fallback = min) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return fallback;
+        return Math.max(min, Math.min(max, number));
+    }
+
+    function getPanelCoreStyleSheet() {
+        return `
 :where(.${SCRIPT_PREFIX}-panel, .${SCRIPT_PREFIX}-menu, .${SCRIPT_PREFIX}-modal, .${SCRIPT_PREFIX}-notification-card, .${SCRIPT_PREFIX}-image-button, .${SCRIPT_PREFIX}-sticker-button, .${SCRIPT_PREFIX}-profile-bulk-menu) {
   font-family: var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
 }
@@ -6245,6 +6692,19 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
 .${SCRIPT_PREFIX}-profile-select-box:focus-visible { outline: 2px solid var(--tux-v2-color-ui-image-overlay-white-a75); outline-offset: 2px; }
 .${SCRIPT_PREFIX}-profile-select-box.selected { border-color: var(--tux-v2-color-ui-shape-primary); background: var(--tux-v2-color-ui-shape-primary); box-shadow: none; }
 .${SCRIPT_PREFIX}-profile-select-box.downloaded { border-color: var(--tux-v2-color-ui-shape-success); background: var(--tux-v2-color-ui-shape-success); }
+.${SCRIPT_PREFIX}-profile-drag-select {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: none;
+  border: 1px solid var(--tux-v2-color-ui-shape-primary);
+  background: rgba(37, 244, 238, 0.16);
+  box-sizing: border-box;
+}
+.${SCRIPT_PREFIX}-profile-drag-select.deselecting {
+  border-color: #fe2c55;
+  background: rgba(254, 44, 85, 0.18);
+}
+body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
 .${SCRIPT_PREFIX}-profile-select-mark {
   position: relative;
   width: 100%;
@@ -6596,8 +7056,8 @@ button.TUXButton.${SCRIPT_PREFIX}-comment-translate-button[data-state="busy"] {
     `;
     }
 
-function getNotificationStyleSheet() {
-    return `
+    function getNotificationStyleSheet() {
+        return `
 .${SCRIPT_PREFIX}-notification-stack {
   position: fixed;
   top: 76px;
@@ -6706,8 +7166,8 @@ function getNotificationStyleSheet() {
     `;
     }
 
-function getModalStyleSheet() {
-    return `
+    function getModalStyleSheet() {
+        return `
 .${SCRIPT_PREFIX}-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -7211,578 +7671,580 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
     `;
     }
 
-function getPanelStyleSheet() {
-    return [
-        getPanelCoreStyleSheet(),
-        getNotificationStyleSheet(),
-        getModalStyleSheet(),
-    ].join("\n");
-}
-const CANDIDATE_IMAGE_OVERLAY_SELECTORS = [
-    '[class*="ImagePreview"]',
-    '[class*="ImageViewer"]',
-    '[class*="PhotoViewer"]',
-    '[class*="PhotoPreview"]',
-    '[class*="Lightbox"]',
-    '[class*="CommentImage"]',
-    '[class*="CommentPicture"]',
-    '[role="dialog"]',
-];
-const IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO = 0.12;
-const IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO = 0.18;
-const IMAGE_OVERLAY_SMALL_MIN_AREA_PX = 6400;
-const IMAGE_OVERLAY_SMALL_MIN_SIDE_PX = 56;
-const IMAGE_OVERLAY_RECENT_GESTURE_MS = 5000;
-const IMAGE_OVERLAY_BUTTON_MARGIN = 18;
-const IMAGE_OVERLAY_BUTTON_BOTTOM = 80;
-const IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH = 150;
-const IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT = 46;
-const IMAGE_OVERLAY_BUTTON_SAFE_GAP = 8;
-const COMMENT_STICKER_SELECTOR = '[data-e2e="comment-sticker-comment"], [data-testid="comment-sticker-comment"]';
-const COMMENT_STICKER_BUTTON_MARGIN = 12;
-const COMMENT_STICKER_BUTTON_GAP = 8;
-const COMMENT_STICKER_BUTTON_ESTIMATED_WIDTH = 96;
-const COMMENT_STICKER_BUTTON_ESTIMATED_HEIGHT = 42;
-
-function toPlainRect(rect) {
-    if (!rect) return null;
-    const left = Number(rect.left || 0);
-    const top = Number(rect.top || 0);
-    const width = Number(rect.width || Math.max(0, Number(rect.right || 0) - left));
-    const height = Number(rect.height || Math.max(0, Number(rect.bottom || 0) - top));
-    return {
-        left,
-        top,
-        width,
-        height,
-        right: left + width,
-        bottom: top + height,
-    };
-}
-
-function rectArea(rect) {
-    return Math.max(0, Number(rect?.width || 0)) * Math.max(0, Number(rect?.height || 0));
-}
-
-function rectsOverlap(first, second, padding = 0) {
-    if (!first || !second) return false;
-    return !(
-        first.right + padding <= second.left ||
-        first.left - padding >= second.right ||
-        first.bottom + padding <= second.top ||
-        first.top - padding >= second.bottom
-    );
-}
-
-function getSafeOverlayButtonPlacement(imageRect, options = {}) {
-    const viewportWidth = Number(options.viewportWidth || 0);
-    const viewportHeight = Number(options.viewportHeight || 0);
-    const buttonWidth = Number(options.buttonWidth || IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH);
-    const buttonHeight = Number(options.buttonHeight || IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT);
-    const image = toPlainRect(imageRect);
-    if (!viewportWidth || !viewportHeight || !buttonWidth || !buttonHeight || !image) return null;
-
-    const margin = Number(options.margin || IMAGE_OVERLAY_BUTTON_MARGIN);
-    const bottomOffset = Number(options.bottom || IMAGE_OVERLAY_BUTTON_BOTTOM);
-    const gap = Number(options.gap || IMAGE_OVERLAY_BUTTON_SAFE_GAP);
-    const candidates = [
-        {
-            right: margin,
-            bottom: bottomOffset,
-            rect: toPlainRect({
-                left: viewportWidth - margin - buttonWidth,
-                top: viewportHeight - bottomOffset - buttonHeight,
-                width: buttonWidth,
-                height: buttonHeight,
-            }),
-        },
-        {
-            right: margin,
-            top: margin,
-            rect: toPlainRect({
-                left: viewportWidth - margin - buttonWidth,
-                top: margin,
-                width: buttonWidth,
-                height: buttonHeight,
-            }),
-        },
-        {
-            left: margin,
-            bottom: bottomOffset,
-            rect: toPlainRect({
-                left: margin,
-                top: viewportHeight - bottomOffset - buttonHeight,
-                width: buttonWidth,
-                height: buttonHeight,
-            }),
-        },
-        {
-            left: margin,
-            top: margin,
-            rect: toPlainRect({ left: margin, top: margin, width: buttonWidth, height: buttonHeight }),
-        },
+    function getPanelStyleSheet() {
+        return [
+            getPanelCoreStyleSheet(),
+            getNotificationStyleSheet(),
+            getModalStyleSheet(),
+        ].join("\n");
+    }
+    const CANDIDATE_IMAGE_OVERLAY_SELECTORS = [
+        '[class*="ImagePreview"]',
+        '[class*="ImageViewer"]',
+        '[class*="PhotoViewer"]',
+        '[class*="PhotoPreview"]',
+        '[class*="Lightbox"]',
+        '[class*="CommentImage"]',
+        '[class*="CommentPicture"]',
+        '[role="dialog"]',
     ];
+    const IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO = 0.12;
+    const IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO = 0.18;
+    const IMAGE_OVERLAY_SMALL_MIN_AREA_PX = 6400;
+    const IMAGE_OVERLAY_SMALL_MIN_SIDE_PX = 56;
+    const IMAGE_OVERLAY_RECENT_GESTURE_MS = 5000;
+    const IMAGE_OVERLAY_BUTTON_MARGIN = 18;
+    const IMAGE_OVERLAY_BUTTON_BOTTOM = 80;
+    const IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH = 150;
+    const IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT = 46;
+    const IMAGE_OVERLAY_BUTTON_SAFE_GAP = 8;
+    const COMMENT_STICKER_SELECTOR = '[data-e2e="comment-sticker-comment"], [data-testid="comment-sticker-comment"]';
+    const COMMENT_STICKER_BUTTON_MARGIN = 12;
+    const COMMENT_STICKER_BUTTON_GAP = 8;
+    const COMMENT_STICKER_BUTTON_ESTIMATED_WIDTH = 96;
+    const COMMENT_STICKER_BUTTON_ESTIMATED_HEIGHT = 42;
 
-    return (
-        candidates.find((candidate) => {
-            const rect = candidate.rect;
-            if (!rect) return false;
-            if (rect.left < 0 || rect.top < 0) return false;
-            if (rect.right > viewportWidth || rect.bottom > viewportHeight) return false;
-            return !rectsOverlap(rect, image, gap);
-        }) || null
-    );
-}
-
-function getCommentStickerButtonPlacement(stickerRect, options = {}) {
-    const viewportWidth = Number(options.viewportWidth || 0);
-    const viewportHeight = Number(options.viewportHeight || 0);
-    const buttonWidth = Number(options.buttonWidth || COMMENT_STICKER_BUTTON_ESTIMATED_WIDTH);
-    const buttonHeight = Number(options.buttonHeight || COMMENT_STICKER_BUTTON_ESTIMATED_HEIGHT);
-    const sticker = toPlainRect(stickerRect);
-    if (!viewportWidth || !viewportHeight || !buttonWidth || !buttonHeight || !sticker) return null;
-
-    const margin = Number(options.margin || COMMENT_STICKER_BUTTON_MARGIN);
-    const gap = Number(options.gap || COMMENT_STICKER_BUTTON_GAP);
-    const maxTop = Math.max(margin, viewportHeight - buttonHeight - margin);
-    const top = clampNumber(
-        sticker.top + sticker.height / 2 - buttonHeight / 2,
-        margin,
-        maxTop,
-        sticker.top,
-    );
-    const leftCandidate = sticker.left - gap - buttonWidth;
-    if (leftCandidate >= margin) return { left: leftCandidate, top };
-
-    const rightCandidate = sticker.right + gap;
-    if (rightCandidate + buttonWidth <= viewportWidth - margin) {
-        return { left: rightCandidate, top };
+    function toPlainRect(rect) {
+        if (!rect) return null;
+        const left = Number(rect.left || 0);
+        const top = Number(rect.top || 0);
+        const width = Number(rect.width || Math.max(0, Number(rect.right || 0) - left));
+        const height = Number(rect.height || Math.max(0, Number(rect.bottom || 0) - top));
+        return {
+            left,
+            top,
+            width,
+            height,
+            right: left + width,
+            bottom: top + height,
+        };
     }
 
-    return {
-        left: clampNumber(leftCandidate, margin, Math.max(margin, viewportWidth - buttonWidth - margin), margin),
-        top,
-    };
-}
-
-function getComputedStyleSafe(win, element) {
-    try {
-        return typeof win?.getComputedStyle === "function" ? win.getComputedStyle(element) : null;
-    } catch (_err) {
-        return null;
+    function rectArea(rect) {
+        return Math.max(0, Number(rect?.width || 0)) * Math.max(0, Number(rect?.height || 0));
     }
-}
 
-function parseCssUrl(value) {
-    const match = String(value || "").match(/url\((['"]?)(.*?)\1\)/i);
-    return match?.[2]?.trim() || "";
-}
-
-function getElementImageUrl(element, win) {
-    const directUrl = element?.currentSrc || element?.src || "";
-    if (directUrl) return directUrl;
-    const style = getComputedStyleSafe(win, element);
-    return parseCssUrl(style?.backgroundImage) || parseCssUrl(style?.background);
-}
-
-function getDownloadableOverlayImageUrl(url) {
-    const value = String(url || "").trim();
-    if (!value || value.startsWith("blob:") || value.startsWith("data:")) return "";
-    return value;
-}
-
-function isHiddenByStyle(style) {
-    if (!style) return false;
-    return (
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        Number(style.opacity || 1) <= 0.01
-    );
-}
-
-function getImageOverlayContext(element, win, viewportArea) {
-    const strongImageClassPattern =
-          /(?:image|photo|picture).*(?:preview|viewer)|(?:preview|viewer).*(?:image|photo|picture)|commentimage|commentpicture|lightbox/i;
-    const overlayClassPattern = /(preview|viewer|lightbox|modal|dialog|popup|popover|overlay)/i;
-    const context = { matched: false, strong: false };
-    let current = element;
-    let depth = 0;
-    while (current && depth < 8) {
-        const role = current.getAttribute?.("role");
-        const ariaModal = current.getAttribute?.("aria-modal");
-        const className = String(current.className || "");
-        if (strongImageClassPattern.test(className)) {
-            context.matched = true;
-            context.strong = true;
-            return context;
-        }
-        if (role === "dialog" || ariaModal === "true" || overlayClassPattern.test(className)) {
-            context.matched = true;
-        }
-
-        const rect = toPlainRect(current.getBoundingClientRect?.());
-        const style = getComputedStyleSafe(win, current);
-        if (isHiddenByStyle(style)) return { matched: false, strong: false };
-        const contextAreaRatio = rectArea(rect) / Math.max(1, viewportArea);
-        const zIndex = Number.parseInt(style?.zIndex || "", 10);
-        const isFloating = style?.position === "fixed" || style?.position === "sticky";
-        if (
-            (isFloating || (Number.isFinite(zIndex) && zIndex >= 100)) &&
-            contextAreaRatio >= IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO
-        ) {
-            context.matched = true;
-        }
-
-        current = current.parentElement;
-        depth += 1;
+    function rectsOverlap(first, second, padding = 0) {
+        if (!first || !second) return false;
+        return !(
+            first.right + padding <= second.left ||
+            first.left - padding >= second.right ||
+            first.bottom + padding <= second.top ||
+            first.top - padding >= second.bottom
+        );
     }
-    return context;
-}
 
-function hasSmallOverlayImageSize(rect) {
-    return (
-        rectArea(rect) >= IMAGE_OVERLAY_SMALL_MIN_AREA_PX &&
-        rect.width >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX &&
-        rect.height >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX
-    );
-}
+    function getSafeOverlayButtonPlacement(imageRect, options = {}) {
+        const viewportWidth = Number(options.viewportWidth || 0);
+        const viewportHeight = Number(options.viewportHeight || 0);
+        const buttonWidth = Number(options.buttonWidth || IMAGE_OVERLAY_BUTTON_ESTIMATED_WIDTH);
+        const buttonHeight = Number(options.buttonHeight || IMAGE_OVERLAY_BUTTON_ESTIMATED_HEIGHT);
+        const image = toPlainRect(imageRect);
+        if (!viewportWidth || !viewportHeight || !buttonWidth || !buttonHeight || !image) return null;
 
-function isOverlayImageSizeAllowed(rect, viewportArea, context, options = {}, element = null) {
-    const areaRatio = rectArea(rect) / Math.max(1, viewportArea);
-    if (areaRatio >= IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO) return true;
-    if (!context?.matched || !hasSmallOverlayImageSize(rect)) return false;
-    if (context.strong) return true;
-    return Boolean(
-        options.recentImageOpenGesture ||
-        (element && options.previousOverlayElement && element === options.previousOverlayElement),
-    );
-}
+        const margin = Number(options.margin || IMAGE_OVERLAY_BUTTON_MARGIN);
+        const bottomOffset = Number(options.bottom || IMAGE_OVERLAY_BUTTON_BOTTOM);
+        const gap = Number(options.gap || IMAGE_OVERLAY_BUTTON_SAFE_GAP);
+        const candidates = [
+            {
+                right: margin,
+                bottom: bottomOffset,
+                rect: toPlainRect({
+                    left: viewportWidth - margin - buttonWidth,
+                    top: viewportHeight - bottomOffset - buttonHeight,
+                    width: buttonWidth,
+                    height: buttonHeight,
+                }),
+            },
+            {
+                right: margin,
+                top: margin,
+                rect: toPlainRect({
+                    left: viewportWidth - margin - buttonWidth,
+                    top: margin,
+                    width: buttonWidth,
+                    height: buttonHeight,
+                }),
+            },
+            {
+                left: margin,
+                bottom: bottomOffset,
+                rect: toPlainRect({
+                    left: margin,
+                    top: viewportHeight - bottomOffset - buttonHeight,
+                    width: buttonWidth,
+                    height: buttonHeight,
+                }),
+            },
+            {
+                left: margin,
+                top: margin,
+                rect: toPlainRect({ left: margin, top: margin, width: buttonWidth, height: buttonHeight }),
+            },
+        ];
 
-function findOpenImageOverlay(doc, win, panel, options = {}) {
-    if (!doc?.querySelectorAll) return null;
-    const viewportWidth = win?.innerWidth || 0;
-    const viewportHeight = win?.innerHeight || 0;
-    if (!viewportWidth || !viewportHeight) return null;
-    const viewportArea = viewportWidth * viewportHeight;
+        return (
+            candidates.find((candidate) => {
+                const rect = candidate.rect;
+                if (!rect) return false;
+                if (rect.left < 0 || rect.top < 0) return false;
+                if (rect.right > viewportWidth || rect.bottom > viewportHeight) return false;
+                return !rectsOverlap(rect, image, gap);
+            }) || null
+        );
+    }
 
-    const seen = new Set();
-    const candidateElements = [];
-    const addCandidate = (element) => {
-        if (!element || seen.has(element)) return;
-        seen.add(element);
-        candidateElements.push(element);
-    };
+    function getCommentStickerButtonPlacement(stickerRect, options = {}) {
+        const viewportWidth = Number(options.viewportWidth || 0);
+        const viewportHeight = Number(options.viewportHeight || 0);
+        const buttonWidth = Number(options.buttonWidth || COMMENT_STICKER_BUTTON_ESTIMATED_WIDTH);
+        const buttonHeight = Number(options.buttonHeight || COMMENT_STICKER_BUTTON_ESTIMATED_HEIGHT);
+        const sticker = toPlainRect(stickerRect);
+        if (!viewportWidth || !viewportHeight || !buttonWidth || !buttonHeight || !sticker) return null;
 
-    for (const selector of CANDIDATE_IMAGE_OVERLAY_SELECTORS) {
+        const margin = Number(options.margin || COMMENT_STICKER_BUTTON_MARGIN);
+        const gap = Number(options.gap || COMMENT_STICKER_BUTTON_GAP);
+        const maxTop = Math.max(margin, viewportHeight - buttonHeight - margin);
+        const top = clampNumber(
+            sticker.top + sticker.height / 2 - buttonHeight / 2,
+            margin,
+            maxTop,
+            sticker.top,
+        );
+        const leftCandidate = sticker.left - gap - buttonWidth;
+        if (leftCandidate >= margin) return { left: leftCandidate, top };
+
+        const rightCandidate = sticker.right + gap;
+        if (rightCandidate + buttonWidth <= viewportWidth - margin) {
+            return { left: rightCandidate, top };
+        }
+
+        return {
+            left: clampNumber(leftCandidate, margin, Math.max(margin, viewportWidth - buttonWidth - margin), margin),
+            top,
+        };
+    }
+
+    function getComputedStyleSafe(win, element) {
         try {
-            for (const container of Array.from(doc.querySelectorAll(selector))) {
-                addCandidate(container);
-                for (const image of Array.from(container.querySelectorAll?.("img") || [])) {
-                    addCandidate(image);
+            return typeof win?.getComputedStyle === "function" ? win.getComputedStyle(element) : null;
+        } catch (_err) {
+            return null;
+        }
+    }
+
+    function parseCssUrl(value) {
+        const match = String(value || "").match(/url\((['"]?)(.*?)\1\)/i);
+        return match?.[2]?.trim() || "";
+    }
+
+    function getElementImageUrl(element, win) {
+        const directUrl = element?.currentSrc || element?.src || "";
+        if (directUrl) return directUrl;
+        const style = getComputedStyleSafe(win, element);
+        return parseCssUrl(style?.backgroundImage) || parseCssUrl(style?.background);
+    }
+
+    function getDownloadableOverlayImageUrl(url) {
+        const value = String(url || "").trim();
+        if (!value || value.startsWith("blob:") || value.startsWith("data:")) return "";
+        return value;
+    }
+
+    function isHiddenByStyle(style) {
+        if (!style) return false;
+        return (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            Number(style.opacity || 1) <= 0.01
+        );
+    }
+
+    function getImageOverlayContext(element, win, viewportArea) {
+        const strongImageClassPattern =
+              /(?:image|photo|picture).*(?:preview|viewer)|(?:preview|viewer).*(?:image|photo|picture)|commentimage|commentpicture|lightbox/i;
+        const overlayClassPattern = /(preview|viewer|lightbox|modal|dialog|popup|popover|overlay)/i;
+        const context = { matched: false, strong: false };
+        let current = element;
+        let depth = 0;
+        while (current && depth < 8) {
+            const role = current.getAttribute?.("role");
+            const ariaModal = current.getAttribute?.("aria-modal");
+            const className = String(current.className || "");
+            if (strongImageClassPattern.test(className)) {
+                context.matched = true;
+                context.strong = true;
+                return context;
+            }
+            if (role === "dialog" || ariaModal === "true" || overlayClassPattern.test(className)) {
+                context.matched = true;
+            }
+
+            const rect = toPlainRect(current.getBoundingClientRect?.());
+            const style = getComputedStyleSafe(win, current);
+            if (isHiddenByStyle(style)) return { matched: false, strong: false };
+            const contextAreaRatio = rectArea(rect) / Math.max(1, viewportArea);
+            const zIndex = Number.parseInt(style?.zIndex || "", 10);
+            const isFloating = style?.position === "fixed" || style?.position === "sticky";
+            if (
+                (isFloating || (Number.isFinite(zIndex) && zIndex >= 100)) &&
+                contextAreaRatio >= IMAGE_OVERLAY_CONTEXT_MIN_VIEWPORT_AREA_RATIO
+            ) {
+                context.matched = true;
+            }
+
+            current = current.parentElement;
+            depth += 1;
+        }
+        return context;
+    }
+
+    function hasSmallOverlayImageSize(rect) {
+        return (
+            rectArea(rect) >= IMAGE_OVERLAY_SMALL_MIN_AREA_PX &&
+            rect.width >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX &&
+            rect.height >= IMAGE_OVERLAY_SMALL_MIN_SIDE_PX
+        );
+    }
+
+    function isOverlayImageSizeAllowed(rect, viewportArea, context, options = {}, element = null) {
+        const areaRatio = rectArea(rect) / Math.max(1, viewportArea);
+        if (areaRatio >= IMAGE_OVERLAY_MIN_VIEWPORT_AREA_RATIO) return true;
+        if (!context?.matched || !hasSmallOverlayImageSize(rect)) return false;
+        if (context.strong) return true;
+        return Boolean(
+            options.recentImageOpenGesture ||
+            (element && options.previousOverlayElement && element === options.previousOverlayElement),
+        );
+    }
+
+    function findOpenImageOverlay(doc, win, panel, options = {}) {
+        if (!doc?.querySelectorAll) return null;
+        const viewportWidth = win?.innerWidth || 0;
+        const viewportHeight = win?.innerHeight || 0;
+        if (!viewportWidth || !viewportHeight) return null;
+        const viewportArea = viewportWidth * viewportHeight;
+
+        const seen = new Set();
+        const candidateElements = [];
+        const addCandidate = (element) => {
+            if (!element || seen.has(element)) return;
+            seen.add(element);
+            candidateElements.push(element);
+        };
+
+        for (const selector of CANDIDATE_IMAGE_OVERLAY_SELECTORS) {
+            try {
+                for (const container of Array.from(doc.querySelectorAll(selector))) {
+                    addCandidate(container);
+                    for (const image of Array.from(container.querySelectorAll?.("img") || [])) {
+                        addCandidate(image);
+                    }
+                    for (const background of Array.from(
+                        container.querySelectorAll?.('[style*="background-image"]') || [],
+                    )) {
+                        addCandidate(background);
+                    }
                 }
-                for (const background of Array.from(
-                    container.querySelectorAll?.('[style*="background-image"]') || [],
-                )) {
+            } catch (_err) {
+                continue;
+            }
+        }
+        if (options.allowDocumentFallbackScan) {
+            try {
+                for (const image of Array.from(doc.querySelectorAll("img"))) addCandidate(image);
+            } catch (_err) {
+                // Ignore selector failures in unusual DOM shims.
+            }
+            try {
+                for (const background of Array.from(doc.querySelectorAll('[style*="background-image"]'))) {
                     addCandidate(background);
                 }
+            } catch (_err) {
+                // Ignore selector failures in unusual DOM shims.
             }
-        } catch (_err) {
-            continue;
         }
+
+        let best = null;
+        const considerOverlayImage = (candidate) => {
+            if (!candidate?.rawImageUrl) return;
+            const canDownload = Boolean(candidate.imageUrl);
+            const bestCanDownload = Boolean(best?.imageUrl);
+            if (
+                !best ||
+                (canDownload && !bestCanDownload) ||
+                (canDownload === bestCanDownload && candidate.area > best.area)
+            ) {
+                best = candidate;
+            }
+        };
+        for (const element of candidateElements) {
+            if (panel?.contains(element)) continue;
+            const rect = toPlainRect(element.getBoundingClientRect?.());
+            if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+            const area = rectArea(rect);
+            const context = getImageOverlayContext(element, win, viewportArea);
+            if (!context.matched) continue;
+            if (!isOverlayImageSizeAllowed(rect, viewportArea, context, options, element)) continue;
+            const rawImageUrl = getElementImageUrl(element, win);
+            const imageUrl = getDownloadableOverlayImageUrl(rawImageUrl);
+            considerOverlayImage({ element, area, imageUrl, rawImageUrl, rect });
+
+            for (const image of Array.from(element.querySelectorAll?.("img") || [])) {
+                if (panel?.contains(image)) continue;
+                const imageRect = toPlainRect(image.getBoundingClientRect?.());
+                if (!imageRect || imageRect.width <= 0 || imageRect.height <= 0) continue;
+                const imageArea = rectArea(imageRect);
+                const imageContext = getImageOverlayContext(image, win, viewportArea);
+                if (!imageContext.matched) continue;
+                if (!isOverlayImageSizeAllowed(imageRect, viewportArea, imageContext, options, image)) continue;
+                const rawChildImageUrl = getElementImageUrl(image, win);
+                considerOverlayImage({
+                    element: image,
+                    area: imageArea,
+                    imageUrl: getDownloadableOverlayImageUrl(rawChildImageUrl),
+                    rawImageUrl: rawChildImageUrl,
+                    rect: imageRect,
+                });
+            }
+        }
+        return best
+            ? {
+            element: best.element,
+            imageUrl: best.imageUrl,
+            rawImageUrl: best.rawImageUrl,
+            rect: best.rect,
+        }
+        : null;
     }
-    if (options.allowDocumentFallbackScan) {
-        try {
-            for (const image of Array.from(doc.querySelectorAll("img"))) addCandidate(image);
-        } catch (_err) {
-            // Ignore selector failures in unusual DOM shims.
+    class ActionBarLocator {
+        constructor(app) {
+            this.app = app;
         }
-        try {
-            for (const background of Array.from(doc.querySelectorAll('[style*="background-image"]'))) {
-                addCandidate(background);
-            }
-        } catch (_err) {
-            // Ignore selector failures in unusual DOM shims.
+
+        getElementRect(element) {
+            const rect = element?.getBoundingClientRect?.();
+            if (!rect) return null;
+            return { element, ...getRectEdges(rect) };
+        }
+
+        isVisibleActionBarRect(rect) {
+            const viewportWidth = this.app.window.innerWidth || 0;
+            const viewportHeight = this.app.window.innerHeight || 0;
+            return isUsableActionBarRect(rect, viewportWidth, viewportHeight);
+        }
+
+        findActionBarHost() {
+            const viewportWidth = this.app.window.innerWidth || 0;
+            const viewportHeight = this.app.window.innerHeight || 0;
+            const referenceMediaRect = this.getElementRect(this.app.extractor?.getVisibleMediaElement?.());
+            const scoreHostRect = (rect) => {
+                const className = String(rect.element.className || "");
+                let score =
+                    scoreActionBarRect(rect, viewportWidth, viewportHeight) +
+                    (className.includes("SectionActionBarContainer") ? 12 : 0);
+                if (referenceMediaRect) {
+                    const overlap =
+                          Math.max(
+                              0,
+                              Math.min(rect.bottom, referenceMediaRect.bottom) -
+                              Math.max(rect.top, referenceMediaRect.top),
+                          ) / Math.max(1, Math.min(rect.height, referenceMediaRect.height));
+                    const verticalDistance =
+                          Math.abs(rect.centerY - referenceMediaRect.centerY) / Math.max(1, viewportHeight);
+                    if (rect.left >= referenceMediaRect.right - 20) score += 12;
+                    score += overlap * 60 - verticalDistance * 80;
+                }
+                return score;
+            };
+            const hosts = Array.from(this.app.document.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR))
+            .filter((element) => !this.app.isOwnUiElement?.(element))
+            .filter((element) => isActionBarClassName(element.className))
+            .map((element) => this.getElementRect(element))
+            .filter((rect) => {
+                if (!this.isVisibleActionBarRect(rect)) return false;
+                const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || [])
+                .filter((button) => !this.app.panel?.contains(button));
+                return buttons.length >= 2;
+            })
+            .sort((left, right) => {
+                const leftScore = scoreHostRect(left);
+                const rightScore = scoreHostRect(right);
+                if (leftScore !== rightScore) return rightScore - leftScore;
+                return (
+                    Math.abs(left.centerY - viewportHeight / 2) -
+                    Math.abs(right.centerY - viewportHeight / 2)
+                );
+            });
+            return hosts[0]?.element || null;
+        }
+
+
+        getNativeActionChildren(host) {
+            return Array.from(host?.children || []).filter((child) => !this.app.isOwnUiElement?.(child));
+        }
+
+        getActionBarInsertionReference(host) {
+            const nativeChildren = this.getNativeActionChildren(host);
+            return nativeChildren[0] || null;
         }
     }
 
-    let best = null;
-    const considerOverlayImage = (candidate) => {
-        if (!candidate?.rawImageUrl) return;
-        const canDownload = Boolean(candidate.imageUrl);
-        const bestCanDownload = Boolean(best?.imageUrl);
-        if (
-            !best ||
-            (canDownload && !bestCanDownload) ||
-            (canDownload === bestCanDownload && candidate.area > best.area)
-        ) {
-            best = candidate;
-        }
-    };
-    for (const element of candidateElements) {
-        if (panel?.contains(element)) continue;
-        const rect = toPlainRect(element.getBoundingClientRect?.());
-        if (!rect || rect.width <= 0 || rect.height <= 0) continue;
-        const area = rectArea(rect);
-        const context = getImageOverlayContext(element, win, viewportArea);
-        if (!context.matched) continue;
-        if (!isOverlayImageSizeAllowed(rect, viewportArea, context, options, element)) continue;
-        const rawImageUrl = getElementImageUrl(element, win);
-        const imageUrl = getDownloadableOverlayImageUrl(rawImageUrl);
-        considerOverlayImage({ element, area, imageUrl, rawImageUrl, rect });
-
-        for (const image of Array.from(element.querySelectorAll?.("img") || [])) {
-            if (panel?.contains(image)) continue;
-            const imageRect = toPlainRect(image.getBoundingClientRect?.());
-            if (!imageRect || imageRect.width <= 0 || imageRect.height <= 0) continue;
-            const imageArea = rectArea(imageRect);
-            const imageContext = getImageOverlayContext(image, win, viewportArea);
-            if (!imageContext.matched) continue;
-            if (!isOverlayImageSizeAllowed(imageRect, viewportArea, imageContext, options, image)) continue;
-            const rawChildImageUrl = getElementImageUrl(image, win);
-            considerOverlayImage({
-                element: image,
-                area: imageArea,
-                imageUrl: getDownloadableOverlayImageUrl(rawChildImageUrl),
-                rawImageUrl: rawChildImageUrl,
-                rect: imageRect,
+    class ProfilePageBulkAdapter {
+        constructor(app) {
+            this.app = app;
+            this.buttonWrapper = null;
+            this.button = null;
+            this.menu = null;
+            this.selectionMode = false;
+            this.scanFrame = null;
+            this.scanInterval = null;
+            this.mutationObserver = null;
+            this.mutationRoot = null;
+            this.outsideHandler = null;
+            this.lastScanStats = null;
+            this.dragSelection = null;
+            this.suppressedClickBox = null;
+            this.checkboxItems = new WeakMap();
+            this.menuLifecycle = new MenuLifecycle(app.window, {
+                onClosed: () => {
+                    this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
+                    this.clearMenuPosition();
+                    this.unbindOutsideClose();
+                },
             });
         }
-    }
-    return best
-        ? {
-        element: best.element,
-        imageUrl: best.imageUrl,
-        rawImageUrl: best.rawImageUrl,
-        rect: best.rect,
-    }
-    : null;
-}
-class ActionBarLocator {
-    constructor(app) {
-        this.app = app;
-    }
 
-    getElementRect(element) {
-        const rect = element?.getBoundingClientRect?.();
-        if (!rect) return null;
-        return { element, ...getRectEdges(rect) };
-    }
+        get document() {
+            return this.app.document;
+        }
 
-    isVisibleActionBarRect(rect) {
-        const viewportWidth = this.app.window.innerWidth || 0;
-        const viewportHeight = this.app.window.innerHeight || 0;
-        return isUsableActionBarRect(rect, viewportWidth, viewportHeight);
-    }
+        get window() {
+            return this.app.window;
+        }
 
-    findActionBarHost() {
-        const viewportWidth = this.app.window.innerWidth || 0;
-        const viewportHeight = this.app.window.innerHeight || 0;
-        const referenceMediaRect = this.getElementRect(this.app.extractor?.getVisibleMediaElement?.());
-        const scoreHostRect = (rect) => {
-            const className = String(rect.element.className || "");
-            let score =
-                scoreActionBarRect(rect, viewportWidth, viewportHeight) +
-                (className.includes("SectionActionBarContainer") ? 12 : 0);
-            if (referenceMediaRect) {
-                const overlap =
-                      Math.max(
-                          0,
-                          Math.min(rect.bottom, referenceMediaRect.bottom) -
-                          Math.max(rect.top, referenceMediaRect.top),
-                      ) / Math.max(1, Math.min(rect.height, referenceMediaRect.height));
-                const verticalDistance =
-                      Math.abs(rect.centerY - referenceMediaRect.centerY) / Math.max(1, viewportHeight);
-                if (rect.left >= referenceMediaRect.right - 20) score += 12;
-                score += overlap * 60 - verticalDistance * 80;
+        get selectionState() {
+            if (!this.app.profileBulkSelectionState) {
+                this.app.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
             }
-            return score;
-        };
-        const hosts = Array.from(this.app.document.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR))
-        .filter((element) => !this.app.isOwnUiElement?.(element))
-        .filter((element) => isActionBarClassName(element.className))
-        .map((element) => this.getElementRect(element))
-        .filter((rect) => {
-            if (!this.isVisibleActionBarRect(rect)) return false;
-            const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || [])
-            .filter((button) => !this.app.panel?.contains(button));
-            return buttons.length >= 2;
-        })
-        .sort((left, right) => {
-            const leftScore = scoreHostRect(left);
-            const rightScore = scoreHostRect(right);
-            if (leftScore !== rightScore) return rightScore - leftScore;
-            return (
-                Math.abs(left.centerY - viewportHeight / 2) -
-                Math.abs(right.centerY - viewportHeight / 2)
-            );
-        });
-        return hosts[0]?.element || null;
-    }
-
-
-    getNativeActionChildren(host) {
-        return Array.from(host?.children || []).filter((child) => !this.app.isOwnUiElement?.(child));
-    }
-
-    getActionBarInsertionReference(host) {
-        const nativeChildren = this.getNativeActionChildren(host);
-        return nativeChildren[0] || null;
-    }
-}
-
-class ProfilePageBulkAdapter {
-    constructor(app) {
-        this.app = app;
-        this.buttonWrapper = null;
-        this.button = null;
-        this.menu = null;
-        this.selectionMode = false;
-        this.scanFrame = null;
-        this.scanInterval = null;
-        this.mutationObserver = null;
-        this.mutationRoot = null;
-        this.outsideHandler = null;
-        this.lastScanStats = null;
-        this.menuLifecycle = new MenuLifecycle(app.window, {
-            onClosed: () => {
-                this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
-                this.clearMenuPosition();
-                this.unbindOutsideClose();
-            },
-        });
-    }
-
-    get document() {
-        return this.app.document;
-    }
-
-    get window() {
-        return this.app.window;
-    }
-
-    get selectionState() {
-        if (!this.app.profileBulkSelectionState) {
-            this.app.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
+            return this.app.profileBulkSelectionState;
         }
-        return this.app.profileBulkSelectionState;
-    }
 
-    get selectedItems() {
-        const state = this.selectionState;
-        if (!(state.selectedItems instanceof Map)) state.selectedItems = new Map();
-        return state.selectedItems;
-    }
-
-    isProfilePage() {
-        return this.app.getCurrentPageType() === "profile";
-    }
-
-    getProfileKey() {
-        const match = String(this.window.location?.pathname || "").match(/^\/(@[^/]+)/);
-        return match ? match[1] : "";
-    }
-
-    syncProfileContext() {
-        const profileKey = this.getProfileKey();
-        if (!profileKey) return;
-        const state = this.selectionState;
-        if (state.profileKey && state.profileKey !== profileKey) {
-            state.selectedItems.clear();
+        get selectedItems() {
+            const state = this.selectionState;
+            if (!(state.selectedItems instanceof Map)) state.selectedItems = new Map();
+            return state.selectedItems;
         }
-        state.profileKey = profileKey;
-    }
 
-    findUserMoreButton() {
-        return this.document.querySelector('[data-e2e="user-more"]');
-    }
-
-    mount(userMore = this.findUserMoreButton()) {
-        if (!this.isProfilePage()) {
-            this.unmount();
-            return false;
+        isProfilePage() {
+            return this.app.getCurrentPageType() === "profile";
         }
-        this.syncProfileContext();
-        if (userMore) {
-            this.ensureButton(userMore);
-        } else {
+
+        getProfileKey() {
+            const match = String(this.window.location?.pathname || "").match(/^\/(@[^/]+)/);
+            return match ? match[1] : "";
+        }
+
+        syncProfileContext() {
+            const profileKey = this.getProfileKey();
+            if (!profileKey) return;
+            const state = this.selectionState;
+            if (state.profileKey && state.profileKey !== profileKey) {
+                state.selectedItems.clear();
+            }
+            state.profileKey = profileKey;
+        }
+
+        findUserMoreButton() {
+            return this.document.querySelector('[data-e2e="user-more"]');
+        }
+
+        mount(userMore = this.findUserMoreButton()) {
+            if (!this.isProfilePage()) {
+                this.unmount();
+                return false;
+            }
+            this.syncProfileContext();
+            if (userMore) {
+                this.ensureButton(userMore);
+            } else {
+                this.unmountButtonOnly();
+            }
+            this.enterSelectionMode();
+            this.updateMenuLabels();
+            return Boolean(userMore);
+        }
+
+        unmountButtonOnly() {
+            this.closeMenu();
+            this.buttonWrapper?.remove?.();
+            this.buttonWrapper = null;
+            this.button = null;
+        }
+
+        suspend() {
+            this.closeMenu(true);
+            this.disableSelectionMode();
             this.unmountButtonOnly();
         }
-        this.enterSelectionMode();
-        this.updateMenuLabels();
-        return Boolean(userMore);
-    }
 
-    unmountButtonOnly() {
-        this.closeMenu();
-        this.buttonWrapper?.remove?.();
-        this.buttonWrapper = null;
-        this.button = null;
-    }
+        unmount() {
+            this.closeMenu();
+            this.disableSelectionMode();
+            this.unmountButtonOnly();
+        }
 
-    suspend() {
-        this.closeMenu(true);
-        this.disableSelectionMode();
-        this.unmountButtonOnly();
-    }
+        ensureButton(userMore) {
+            const nativeWrapper = userMore.parentElement || null;
+            const parent = nativeWrapper?.parentElement || userMore.parentElement;
+            if (!parent) return;
 
-    unmount() {
-        this.closeMenu();
-        this.disableSelectionMode();
-        this.unmountButtonOnly();
-    }
+            const syncOfficialVisual = () => {
+                const wrapperClass = [
+                    String(nativeWrapper?.className || ""),
+                    `${SCRIPT_PREFIX}-profile-bulk-wrap`,
+                ].filter(Boolean).join(" ");
+                const buttonClass = [String(userMore.className || ""), `${SCRIPT_PREFIX}-profile-bulk-button`]
+                .filter(Boolean)
+                .join(" ");
+                this.buttonWrapper.className = wrapperClass;
+                this.button.className = buttonClass;
 
-    ensureButton(userMore) {
-        const nativeWrapper = userMore.parentElement || null;
-        const parent = nativeWrapper?.parentElement || userMore.parentElement;
-        if (!parent) return;
+                const wrapperStyle = nativeWrapper?.getAttribute?.("style") || "";
+                if (wrapperStyle) this.buttonWrapper.setAttribute("style", wrapperStyle);
+                else this.buttonWrapper.removeAttribute("style");
+                const buttonStyle = userMore?.getAttribute?.("style") || "";
+                if (buttonStyle) this.button.setAttribute("style", buttonStyle);
+                else this.button.removeAttribute("style");
 
-        const syncOfficialVisual = () => {
-            const wrapperClass = [
-                String(nativeWrapper?.className || ""),
-                `${SCRIPT_PREFIX}-profile-bulk-wrap`,
-            ].filter(Boolean).join(" ");
-            const buttonClass = [String(userMore.className || ""), `${SCRIPT_PREFIX}-profile-bulk-button`]
-            .filter(Boolean)
-            .join(" ");
-            this.buttonWrapper.className = wrapperClass;
-            this.button.className = buttonClass;
+                const wrapperRect = nativeWrapper?.getBoundingClientRect?.();
+                const buttonRect = userMore?.getBoundingClientRect?.();
+                const wrapperSize = Math.round(wrapperRect?.width || buttonRect?.width || 40);
+                const wrapperHeight = Math.round(wrapperRect?.height || buttonRect?.height || 40);
+                this.buttonWrapper.style.setProperty("width", `${wrapperSize}px`);
+                this.buttonWrapper.style.setProperty("height", `${wrapperHeight}px`);
+                this.buttonWrapper.style.setProperty("display", "inline-flex", "important");
+                this.buttonWrapper.style.setProperty("align-items", "center", "important");
+                this.buttonWrapper.style.setProperty("justify-content", "center", "important");
+                this.buttonWrapper.style.setProperty("flex", "0 0 auto");
+                this.button.style.setProperty("width", "100%", "important");
+                this.button.style.setProperty("height", "100%", "important");
+                this.button.style.setProperty("display", "flex", "important");
+                this.button.style.setProperty("align-items", "center", "important");
+                this.button.style.setProperty("justify-content", "center", "important");
+                this.button.style.setProperty("padding", "0", "important");
+                this.button.style.setProperty("line-height", "0", "important");
+                this.button.style.setProperty("background", "transparent", "important");
+                this.button.style.setProperty("color", "inherit");
+            };
 
-            const wrapperStyle = nativeWrapper?.getAttribute?.("style") || "";
-            if (wrapperStyle) this.buttonWrapper.setAttribute("style", wrapperStyle);
-            else this.buttonWrapper.removeAttribute("style");
-            const buttonStyle = userMore?.getAttribute?.("style") || "";
-            if (buttonStyle) this.button.setAttribute("style", buttonStyle);
-            else this.button.removeAttribute("style");
-
-            const wrapperRect = nativeWrapper?.getBoundingClientRect?.();
-            const buttonRect = userMore?.getBoundingClientRect?.();
-            const wrapperSize = Math.round(wrapperRect?.width || buttonRect?.width || 40);
-            const wrapperHeight = Math.round(wrapperRect?.height || buttonRect?.height || 40);
-            this.buttonWrapper.style.setProperty("width", `${wrapperSize}px`);
-            this.buttonWrapper.style.setProperty("height", `${wrapperHeight}px`);
-            this.buttonWrapper.style.setProperty("display", "inline-flex", "important");
-            this.buttonWrapper.style.setProperty("align-items", "center", "important");
-            this.buttonWrapper.style.setProperty("justify-content", "center", "important");
-            this.buttonWrapper.style.setProperty("flex", "0 0 auto");
-            this.button.style.setProperty("width", "100%", "important");
-            this.button.style.setProperty("height", "100%", "important");
-            this.button.style.setProperty("display", "flex", "important");
-            this.button.style.setProperty("align-items", "center", "important");
-            this.button.style.setProperty("justify-content", "center", "important");
-            this.button.style.setProperty("padding", "0", "important");
-            this.button.style.setProperty("line-height", "0", "important");
-            this.button.style.setProperty("background", "transparent", "important");
-            this.button.style.setProperty("color", "inherit");
-        };
-
-        if (!this.buttonWrapper) {
-            this.buttonWrapper = createElement(this.document, "div", "");
-            this.button = createElement(this.document, "button", "");
-            this.button.type = "button";
-            this.button.setAttribute("aria-label", this.app.t("bulk_download"));
-            this.button.innerHTML = `
+            if (!this.buttonWrapper) {
+                this.buttonWrapper = createElement(this.document, "div", "");
+                this.button = createElement(this.document, "button", "");
+                this.button.type = "button";
+                this.button.setAttribute("aria-label", this.app.t("bulk_download"));
+                this.button.innerHTML = `
           <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-
             <path d="M12 3v12" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
             <path d="M7 11l5 5 5-5" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></path>
             <path d="M5 20h14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
@@ -7931,8 +8393,9 @@ class ProfilePageBulkAdapter {
 
         findMutationRoot() {
             return (
-                this.document.querySelector?.('[data-e2e="user-post-item-list"]') ||
-                this.document.querySelector?.('[class*="DivVideoFeed"]') ||
+                this.document.querySelector?.('main,[role="main"]') ||
+                this.document.querySelector?.('[class*="DivShareLayoutMain"]') ||
+                this.document.querySelector?.('[data-e2e^="user-"][data-e2e$="-item-list"]') ||
                 this.document.querySelector?.('[class*="DivPostListContainer"]') ||
                 this.document.querySelector?.('a[href*="/video/"],a[href*="/photo/"]')?.parentElement?.parentElement ||
                 this.document.body ||
@@ -7958,7 +8421,9 @@ class ProfilePageBulkAdapter {
                 typeof this.window.MutationObserver === "function" &&
                 mutationRoot
             ) {
-                const observerRoot = mutationRoot.parentElement || mutationRoot;
+                const observerRoot = mutationRoot.matches?.('main,[role="main"],[class*="DivShareLayoutMain"]')
+                ? mutationRoot
+                : mutationRoot.parentElement || mutationRoot;
                 this.mutationRoot = mutationRoot;
                 this.mutationObserver = new this.window.MutationObserver((records) => {
                     if (
@@ -7982,6 +8447,7 @@ class ProfilePageBulkAdapter {
         }
 
         clearSelection() {
+            this.cancelDragSelection(false);
             this.selectedItems.clear();
             this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((box) => {
                 box.classList.remove("selected");
@@ -7993,6 +8459,7 @@ class ProfilePageBulkAdapter {
 
         disableSelectionMode() {
             this.selectionMode = false;
+            this.cancelDragSelection();
             if (this.scanInterval) {
                 this.window.clearInterval?.(this.scanInterval);
                 this.scanInterval = null;
@@ -8052,7 +8519,7 @@ class ProfilePageBulkAdapter {
                     continue;
                 }
                 const card =
-                      anchor.closest?.('[data-e2e="user-post-item"]') ||
+                      anchor.closest?.('[data-e2e^="user-"][data-e2e$="-item"]') ||
                       anchor.closest?.("div") ||
                       anchor;
                 if (!card) {
@@ -8096,7 +8563,7 @@ class ProfilePageBulkAdapter {
             if (!id) return null;
             const card =
                   resolved.card ||
-                  anchor?.closest?.('[data-e2e="user-post-item"]') ||
+                  anchor?.closest?.('[data-e2e^="user-"][data-e2e$="-item"]') ||
                   anchor?.closest?.("div") ||
                   anchor;
             if (!card) return null;
@@ -8145,6 +8612,204 @@ class ProfilePageBulkAdapter {
             });
         }
 
+        setItemSelected(item, selected) {
+            const id = String(item?.id || "");
+            if (!id) return false;
+            if (!selected) return this.selectedItems.delete(id);
+            if (this.selectedItems.has(id)) return false;
+
+            const card = item.card || null;
+            const cardAnchor = card?.querySelector?.('a[href*="/video/"], a[href*="/photo/"]') || null;
+            const fresh = this.extractItemFromAnchor(cardAnchor) || item;
+            const reactFragments = collectLocalReactItems([
+                { element: card, source: "profile-card" },
+                { element: cardAnchor, source: "profile-card-link" },
+            ]).entries
+            .filter((entry) => entry.id === id)
+            .map((entry) => entry.item);
+            this.selectedItems.set(id, {
+                ...item,
+                ...fresh,
+                exactItem: mergeExactItemFragments(reactFragments, id),
+                card: null,
+            });
+            return true;
+        }
+
+        startDragSelection(event, sourceBox) {
+            if (!this.selectionMode || !event?.isPrimary || event.button !== 0) return;
+            const sourceItem = this.checkboxItems.get(sourceBox);
+            if (!sourceItem?.id) return;
+            this.cancelDragSelection();
+            event.preventDefault();
+            event.stopPropagation();
+
+            const drag = {
+                pointerId: event.pointerId,
+                sourceBox,
+                startX: event.clientX,
+                startY: event.clientY,
+                currentX: event.clientX,
+                currentY: event.clientY,
+                held: false,
+                moved: false,
+                active: false,
+                frame: null,
+                overlay: null,
+                selecting: !this.selectedItems.has(String(sourceItem.id)),
+                candidates: [],
+            };
+            const activate = () => {
+                if (this.dragSelection !== drag || drag.active || !drag.held || !drag.moved) return;
+                drag.active = true;
+                drag.candidates = Array.from(
+                    this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`),
+                )
+                    .map((box) => {
+                    const item = this.checkboxItems.get(box);
+                    const rect = (item?.card || box.parentElement)?.getBoundingClientRect?.();
+                    if (!item?.id || !rect?.width || !rect?.height) return null;
+                    const baselineSelected = this.selectedItems.has(String(item.id));
+                    return {
+                        box,
+                        item,
+                        rect,
+                        baselineSelected,
+                        previewSelected: baselineSelected,
+                        inside: false,
+                    };
+                })
+                    .filter(Boolean);
+                drag.overlay = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-drag-select`);
+                if (!drag.selecting) drag.overlay.classList.add("deselecting");
+                drag.overlay.setAttribute("aria-hidden", "true");
+                this.document.body.appendChild(drag.overlay);
+                this.document.body.classList.add(`${SCRIPT_PREFIX}-profile-dragging`);
+                this.scheduleDragSelectionUpdate(drag);
+            };
+            drag.onMove = (moveEvent) => {
+                if (moveEvent.pointerId !== drag.pointerId) return;
+                drag.currentX = moveEvent.clientX;
+                drag.currentY = moveEvent.clientY;
+                drag.moved = drag.moved || Math.hypot(
+                    drag.currentX - drag.startX,
+                    drag.currentY - drag.startY,
+                ) >= 6;
+                activate();
+                if (!drag.active) return;
+                moveEvent.preventDefault();
+                moveEvent.stopPropagation();
+                this.scheduleDragSelectionUpdate(drag);
+            };
+            drag.onEnd = (endEvent) => {
+                if (endEvent.pointerId !== drag.pointerId) return;
+                if (drag.active) {
+                    endEvent.preventDefault();
+                    endEvent.stopPropagation();
+                    drag.currentX = endEvent.clientX;
+                    drag.currentY = endEvent.clientY;
+                    this.updateDragSelection(drag);
+                    this.commitDragSelection(drag);
+                    this.suppressedClickBox = sourceBox;
+                    this.window.setTimeout?.(() => {
+                        if (this.suppressedClickBox === sourceBox) this.suppressedClickBox = null;
+                    }, 0);
+                }
+                this.cancelDragSelection(false);
+            };
+            drag.onCancel = () => this.cancelDragSelection();
+            drag.holdTimer = this.window.setTimeout?.(() => {
+                drag.held = true;
+                activate();
+            }, 260);
+            this.dragSelection = drag;
+            this.document.addEventListener("pointermove", drag.onMove, true);
+            this.document.addEventListener("pointerup", drag.onEnd, true);
+            this.document.addEventListener("pointercancel", drag.onCancel, true);
+            this.window.addEventListener?.("blur", drag.onCancel, true);
+        }
+
+        scheduleDragSelectionUpdate(drag) {
+            if (this.dragSelection !== drag || drag.frame) return;
+            const run = () => {
+                drag.frame = null;
+                this.updateDragSelection(drag);
+            };
+            drag.frame = typeof this.window.requestAnimationFrame === "function"
+                ? this.window.requestAnimationFrame(run)
+            : this.window.setTimeout(run, 16);
+        }
+
+        updateDragSelection(drag) {
+            if (this.dragSelection !== drag || !drag.active || !drag.overlay) return;
+            const left = Math.min(drag.startX, drag.currentX);
+            const top = Math.min(drag.startY, drag.currentY);
+            const right = Math.max(drag.startX, drag.currentX);
+            const bottom = Math.max(drag.startY, drag.currentY);
+            drag.overlay.style.left = `${left}px`;
+            drag.overlay.style.top = `${top}px`;
+            drag.overlay.style.width = `${right - left}px`;
+            drag.overlay.style.height = `${bottom - top}px`;
+
+            drag.candidates.forEach((candidate) => {
+                const { rect } = candidate;
+                const inside = !(
+                    rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom
+                );
+                if (inside === candidate.inside) return;
+                candidate.inside = inside;
+                const selected = inside ? drag.selecting : candidate.baselineSelected;
+                if (selected === candidate.previewSelected) return;
+                candidate.previewSelected = selected;
+                const downloaded = selected &&
+                      this.selectedItems.get(String(candidate.item.id))?.bulkDownloadResult?.status === "success";
+                candidate.box.classList.toggle("selected", selected);
+                candidate.box.classList.toggle("downloaded", downloaded);
+                candidate.box.setAttribute("aria-checked", selected ? "true" : "false");
+                candidate.box.setAttribute(
+                    "aria-label",
+                    downloaded ? this.app.t("download_completed") : this.app.t("bulk_download_selected"),
+                );
+            });
+        }
+
+        commitDragSelection(drag) {
+            let changed = false;
+            drag.candidates.forEach((candidate) => {
+                if (candidate.previewSelected === candidate.baselineSelected) return;
+                if (this.setItemSelected(candidate.item, candidate.previewSelected)) changed = true;
+                this.updateCheckboxState(candidate.box, candidate.item.id);
+            });
+            if (changed) this.updateMenuLabels();
+        }
+
+        cancelDragSelection(restorePreview = true) {
+            const drag = this.dragSelection;
+            if (!drag) return;
+            this.window.clearTimeout?.(drag.holdTimer);
+            if (drag.frame) {
+                if (typeof this.window.cancelAnimationFrame === "function") {
+                    this.window.cancelAnimationFrame(drag.frame);
+                } else {
+                    this.window.clearTimeout?.(drag.frame);
+                }
+            }
+            this.document.removeEventListener("pointermove", drag.onMove, true);
+            this.document.removeEventListener("pointerup", drag.onEnd, true);
+            this.document.removeEventListener("pointercancel", drag.onCancel, true);
+            this.window.removeEventListener?.("blur", drag.onCancel, true);
+            if (restorePreview && drag.active) {
+                drag.candidates.forEach((candidate) => {
+                    if (candidate.previewSelected !== candidate.baselineSelected) {
+                        this.updateCheckboxState(candidate.box, candidate.item.id);
+                    }
+                });
+            }
+            drag.overlay?.remove?.();
+            this.document.body.classList.remove(`${SCRIPT_PREFIX}-profile-dragging`);
+            this.dragSelection = null;
+        }
+
         attachCheckbox(item, size) {
             const card = item.card;
             if (!card) return;
@@ -8173,36 +8838,21 @@ class ProfilePageBulkAdapter {
 
                 const toggleSelected = () => {
                     const nextChecked = !this.selectedItems.has(item.id);
-                    if (nextChecked) {
-                        const cardAnchor = card.querySelector?.('a[href*="/video/"], a[href*="/photo/"]') || null;
-                        const fresh = this.extractItemFromAnchor(cardAnchor) || item;
-                        const reactFragments = collectLocalReactItems([
-                            { element: card, source: "profile-card" },
-                            { element: cardAnchor, source: "profile-card-link" },
-                        ]).entries
-                        .filter((entry) => entry.id === item.id)
-                        .map((entry) => entry.item);
-                        const exactItem = mergeExactItemFragments(reactFragments, item.id);
-                        this.selectedItems.set(item.id, {
-                            ...item,
-                            ...fresh,
-                            exactItem,
-                            card: null,
-                        });
-                    } else {
-                        this.selectedItems.delete(item.id);
-                    }
+                    this.setItemSelected(item, nextChecked);
                     setBoxState(box);
                     this.updateMenuLabels();
                 };
 
                 box.addEventListener("pointerdown", (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
+                    this.startDragSelection(event, box);
                 });
                 box.addEventListener("click", (event) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    if (this.suppressedClickBox === box) {
+                        this.suppressedClickBox = null;
+                        return;
+                    }
                     toggleSelected();
                 });
                 const mark = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-select-mark`);
@@ -8210,6 +8860,7 @@ class ProfilePageBulkAdapter {
                 card.appendChild(box);
             }
 
+            this.checkboxItems.set(box, item);
             card.dataset.tthelperSelectReady = `${item.id}|${size}`;
             setBoxState(box);
         }
@@ -8404,443 +9055,468 @@ class ProfilePageBulkAdapter {
         }
     }
 
-class NotificationCenter {
-    constructor(app) {
-        this.app = app;
-        this.notificationStackEl = null;
-        this.notificationId = 0;
-        this.downloadStatusEl = null;
-        this.downloadStatusHideTimer = null;
-    }
-
-    get document() {
-        return this.app.document;
-    }
-
-    get window() {
-        return this.app.window;
-    }
-
-    t(key) {
-        return this.app.t(key);
-    }
-
-    getNotificationStackElement() {
-        if (this.notificationStackEl?.isConnected) return this.notificationStackEl;
-        const stack = createElement(this.document, "div", `${SCRIPT_PREFIX}-notification-stack`);
-        this.document.body.appendChild(stack);
-        this.notificationStackEl = stack;
-        return stack;
-    }
-
-    removeNotificationCard(card, { immediate = false } = {}) {
-        if (!card || card.dataset.notificationRemoving === "1") return;
-        card.dataset.notificationRemoving = "1";
-        const remove = () => {
-            card.remove();
-        };
-        if (immediate) {
-            remove();
-            return;
+    class NotificationCenter {
+        constructor(app) {
+            this.app = app;
+            this.notificationStackEl = null;
+            this.notificationId = 0;
+            this.downloadStatusEl = null;
+            this.downloadStatusHideCancel = null;
         }
-        card.classList.add("fading");
-        this.window.setTimeout?.(remove, 75);
-    }
 
-    createNotificationCard({ type = "info", title = "", detail = "", meta = "", iconText = "i", download = false, onClose = null } = {}) {
-        const stack = this.getNotificationStackElement();
-        const card = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-card${download ? ` ${SCRIPT_PREFIX}-download-status` : ""}`,
-        );
-        card.classList.add(type);
-        card.dataset.notificationId = String(++this.notificationId);
+        get document() {
+            return this.app.document;
+        }
 
-        const icon = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-icon`,
-        );
-        const main = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-main`,
-        );
-        const head = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-head`,
-        );
-        const titleEl = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-title`,
-            title,
-        );
-        const metaEl = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-meta`,
-            meta,
-        );
-        const detailEl = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-notification-detail`,
-            detail,
-        );
-        const close = createTuxIconButton(
-            this.document,
-            this.t("close"),
-            () => {
-                if (typeof onClose === "function") onClose(card);
-                else this.removeNotificationCard(card);
-            },
-            "close",
-            `${SCRIPT_PREFIX}-notification-close`,
-        );
+        get window() {
+            return this.app.window;
+        }
 
-        icon.textContent = iconText || "i";
+        t(key) {
+            return this.app.t(key);
+        }
 
-        head.append(titleEl, metaEl);
-        main.append(head, detailEl);
-        card.append(icon, main, close);
-        stack.prepend(card);
+        getNotificationStackElement() {
+            if (this.notificationStackEl?.isConnected) return this.notificationStackEl;
+            const stack = createElement(this.document, "div", `${SCRIPT_PREFIX}-notification-stack`);
+            this.document.body.appendChild(stack);
+            this.notificationStackEl = stack;
+            return stack;
+        }
 
-        return { card, icon, titleEl, metaEl, detailEl };
-    }
-
-    getDownloadStatusElement() {
-        if (this.downloadStatusEl?.isConnected) {
-            const stack = this.getNotificationStackElement();
-            if (this.downloadStatusEl.parentElement !== stack) {
-                stack.prepend(this.downloadStatusEl);
+        removeNotificationCard(card, { immediate = false } = {}) {
+            if (!card || card.dataset.notificationRemoving === "1") return;
+            card.dataset.notificationRemoving = "1";
+            const remove = () => {
+                card.remove();
+            };
+            if (immediate) {
+                remove();
+                return;
             }
+            card.classList.add("fading");
+            this.window.setTimeout?.(remove, 75);
+        }
+
+        scheduleNotificationRemoval(card, delay, remove) {
+            let timer = null;
+            const attempt = () => {
+                timer = null;
+                if (card?.matches?.(":hover")) {
+                    timer = this.window.setTimeout?.(attempt, 200);
+                    return;
+                }
+                remove();
+            };
+            timer = this.window.setTimeout?.(attempt, delay);
+            return () => {
+                if (timer) this.window.clearTimeout?.(timer);
+                timer = null;
+            };
+        }
+
+        createNotificationCard({ type = "info", title = "", detail = "", meta = "", iconText = "i", download = false, onClose = null } = {}) {
+            const stack = this.getNotificationStackElement();
+            const card = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-card${download ? ` ${SCRIPT_PREFIX}-download-status` : ""}`,
+            );
+            card.classList.add(type);
+            card.dataset.notificationId = String(++this.notificationId);
+
+            const icon = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-icon`,
+            );
+            const main = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-main`,
+            );
+            const head = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-head`,
+            );
+            const titleEl = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-title`,
+                title,
+            );
+            const metaEl = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-meta`,
+                meta,
+            );
+            const detailEl = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-notification-detail`,
+                detail,
+            );
+            const close = createTuxIconButton(
+                this.document,
+                this.t("close"),
+                () => {
+                    if (typeof onClose === "function") onClose(card);
+                    else this.removeNotificationCard(card);
+                },
+                "close",
+                `${SCRIPT_PREFIX}-notification-close`,
+            );
+
+            icon.textContent = iconText || "i";
+
+            head.append(titleEl, metaEl);
+            main.append(head, detailEl);
+            card.append(icon, main, close);
+            stack.prepend(card);
+
+            return { card, icon, titleEl, metaEl, detailEl };
+        }
+
+        getDownloadStatusElement() {
+            if (this.downloadStatusEl?.isConnected) {
+                const stack = this.getNotificationStackElement();
+                if (this.downloadStatusEl.parentElement !== stack) {
+                    stack.prepend(this.downloadStatusEl);
+                }
+                return this.downloadStatusEl;
+            }
+
+            const refs = this.createNotificationCard({
+                type: "busy",
+                title: "",
+                detail: "",
+                iconText: "↓",
+                download: true,
+                onClose: (card) => {
+                    this.app.requestDownloadCancel?.();
+                    this.stopDownloadTitleDots();
+                    this.removeNotificationCard(card);
+                    if (this.downloadStatusEl === card) this.downloadStatusEl = null;
+                },
+            });
+            this.downloadStatusEl = refs.card;
+            this.downloadStatusIconEl = refs.icon;
+            this.downloadStatusTitleEl = refs.titleEl;
+            this.downloadStatusMetaEl = refs.metaEl;
+            this.downloadStatusDetailEl = refs.detailEl;
+
             return this.downloadStatusEl;
         }
 
-        const refs = this.createNotificationCard({
-            type: "busy",
-            title: "",
-            detail: "",
-            iconText: "↓",
-            download: true,
-            onClose: (card) => {
-                this.app.requestDownloadCancel?.();
-                this.stopDownloadTitleDots();
-                this.removeNotificationCard(card);
-                if (this.downloadStatusEl === card) this.downloadStatusEl = null;
-            },
-        });
-        this.downloadStatusEl = refs.card;
-        this.downloadStatusIconEl = refs.icon;
-        this.downloadStatusTitleEl = refs.titleEl;
-        this.downloadStatusMetaEl = refs.metaEl;
-        this.downloadStatusDetailEl = refs.detailEl;
-
-        return this.downloadStatusEl;
-    }
-
-    stripAnimatedDotsTitle(title = "") {
-        return String(title || "").replace(/[.。…]+$/g, "").trim();
-    }
-
-    stopDownloadTitleDots() {
-        if (this.downloadStatusDotsTimer) {
-            this.window.clearInterval?.(this.downloadStatusDotsTimer);
-            this.downloadStatusDotsTimer = null;
-        }
-        this.downloadStatusDotsBaseTitle = "";
-        this.downloadStatusDotsIndex = 0;
-    }
-
-    startDownloadTitleDots(title = "") {
-        this.stopDownloadTitleDots();
-        this.downloadStatusDotsBaseTitle = this.stripAnimatedDotsTitle(title);
-        this.downloadStatusDotsIndex = 0;
-        const render = () => {
-            if (!this.downloadStatusTitleEl) return;
-            const count = (this.downloadStatusDotsIndex % 3) + 1;
-            this.downloadStatusTitleEl.textContent = `${this.downloadStatusDotsBaseTitle}${".".repeat(count)}`;
-            this.downloadStatusDotsIndex += 1;
-        };
-        render();
-        this.downloadStatusDotsTimer = this.window.setInterval?.(render, 320);
-    }
-
-    setDownloadStatus({ type = "busy", title = "", detail = "", meta = "", autoHideMs = 0 } = {}) {
-        if (this.downloadStatusHideTimer) {
-            this.window.clearTimeout?.(this.downloadStatusHideTimer);
-            this.downloadStatusHideTimer = null;
+        stripAnimatedDotsTitle(title = "") {
+            return String(title || "").replace(/[.。…]+$/g, "").trim();
         }
 
-        const card = this.getDownloadStatusElement();
-        card.className = `${SCRIPT_PREFIX}-notification-card ${SCRIPT_PREFIX}-download-status ${type}`;
-
-        const isActiveDownload = ["busy", "album", "image"].includes(type);
-        if (this.downloadStatusTitleEl) {
-            if (isActiveDownload) this.startDownloadTitleDots(title || "");
-            else {
-                this.stopDownloadTitleDots();
-                this.downloadStatusTitleEl.textContent = title || "";
+        stopDownloadTitleDots() {
+            if (this.downloadStatusDotsTimer) {
+                this.window.clearInterval?.(this.downloadStatusDotsTimer);
+                this.downloadStatusDotsTimer = null;
             }
-        }
-        if (this.downloadStatusMetaEl) this.downloadStatusMetaEl.textContent = meta || "";
-        if (this.downloadStatusDetailEl) this.downloadStatusDetailEl.textContent = detail || "";
-        if (this.downloadStatusIconEl) {
-            this.downloadStatusIconEl.textContent = "";
-            if (type === "success") {
-                this.downloadStatusIconEl.textContent = "✓";
-            } else if (type === "error") {
-                this.downloadStatusIconEl.textContent = "!";
-            } else if (type === "album") {
-                this.downloadStatusIconEl.textContent = "▦";
-            } else if (type === "image") {
-                this.downloadStatusIconEl.textContent = "◧";
-            } else {
-                this.downloadStatusIconEl.textContent = "↓";
-            }
+            this.downloadStatusDotsBaseTitle = "";
+            this.downloadStatusDotsIndex = 0;
         }
 
-        if (autoHideMs > 0) this.hideDownloadStatus(autoHideMs);
-        return card;
-    }
-
-    hideDownloadStatus(delay = 0, immediate = false) {
-        const remove = () => {
-            const card = this.downloadStatusEl;
-            if (!card) return;
+        startDownloadTitleDots(title = "") {
             this.stopDownloadTitleDots();
-            this.removeNotificationCard(card, { immediate });
-            if (this.downloadStatusEl === card) this.downloadStatusEl = null;
-        };
-
-        if (this.downloadStatusHideTimer) {
-            this.window.clearTimeout?.(this.downloadStatusHideTimer);
-            this.downloadStatusHideTimer = null;
+            this.downloadStatusDotsBaseTitle = this.stripAnimatedDotsTitle(title);
+            this.downloadStatusDotsIndex = 0;
+            const render = () => {
+                if (!this.downloadStatusTitleEl) return;
+                const count = (this.downloadStatusDotsIndex % 3) + 1;
+                this.downloadStatusTitleEl.textContent = `${this.downloadStatusDotsBaseTitle}${".".repeat(count)}`;
+                this.downloadStatusDotsIndex += 1;
+            };
+            render();
+            this.downloadStatusDotsTimer = this.window.setInterval?.(render, 320);
         }
 
-        if (immediate || delay <= 0) {
-            remove();
-            return;
-        }
-
-        this.downloadStatusHideTimer = this.window.setTimeout?.(remove, delay);
-    }
-
-    nudgeDownloadStatus(message = this.t("download_already_running")) {
-        const card = this.getDownloadStatusElement();
-        card.classList.remove("attention");
-        void card.offsetWidth;
-        card.classList.add("attention");
-
-        const detailEl = this.downloadStatusDetailEl;
-        const previousDetail = detailEl?.textContent || "";
-        if (detailEl && message) {
-            detailEl.textContent = message;
-        }
-
-        this.window.setTimeout?.(() => card.classList.remove("attention"), 1050);
-        this.window.clearTimeout?.(this.downloadStatusRepeatHintTimer);
-        this.downloadStatusRepeatHintTimer = this.window.setTimeout?.(() => {
-            if (detailEl?.isConnected && detailEl.textContent === message) {
-                detailEl.textContent = previousDetail;
+        setDownloadStatus({ type = "busy", title = "", detail = "", meta = "", autoHideMs = 0 } = {}) {
+            if (this.downloadStatusHideCancel) {
+                this.downloadStatusHideCancel();
+                this.downloadStatusHideCancel = null;
             }
-        }, 1600);
-    }
 
-    showDownloadPreparing(detail = "") {
-        this.setDownloadStatus({
-            type: "busy",
-            title: this.t("download_preparing"),
-            detail,
-        });
-    }
+            const card = this.getDownloadStatusElement();
+            card.className = `${SCRIPT_PREFIX}-notification-card ${SCRIPT_PREFIX}-download-status ${type}`;
 
-    showVideoPreparing(filename = "") {
-        this.setDownloadStatus({
-            type: "busy",
-            title: this.t("preparing_video_download"),
-            detail: filename,
-        });
-    }
+            const isActiveDownload = ["busy", "album", "image"].includes(type);
+            if (this.downloadStatusTitleEl) {
+                if (isActiveDownload) this.startDownloadTitleDots(title || "");
+                else {
+                    this.stopDownloadTitleDots();
+                    this.downloadStatusTitleEl.textContent = title || "";
+                }
+            }
+            if (this.downloadStatusMetaEl) this.downloadStatusMetaEl.textContent = meta || "";
+            if (this.downloadStatusDetailEl) this.downloadStatusDetailEl.textContent = detail || "";
+            if (this.downloadStatusIconEl) {
+                this.downloadStatusIconEl.textContent = "";
+                if (type === "success") {
+                    this.downloadStatusIconEl.textContent = "✓";
+                } else if (type === "error") {
+                    this.downloadStatusIconEl.textContent = "!";
+                } else if (type === "album") {
+                    this.downloadStatusIconEl.textContent = "▦";
+                } else if (type === "image") {
+                    this.downloadStatusIconEl.textContent = "◧";
+                } else {
+                    this.downloadStatusIconEl.textContent = "↓";
+                }
+            }
 
-    showVideoDownloading(filename = "") {
-        this.setDownloadStatus({
-            type: "busy",
-            title: this.t("downloading_video"),
-            detail: filename,
-        });
-    }
-
-    showAlbumProgress(index, total, filename = "") {
-        this.setDownloadStatus({
-            type: "album",
-            title: `${index}/${total} ${this.t("downloading_album")}`,
-            detail: filename,
-            meta: "",
-        });
-    }
-
-    showImageDownloading(filename = "") {
-        this.setDownloadStatus({
-            type: "image",
-            title: this.t("downloading_image"),
-            detail: filename,
-        });
-    }
-
-    showMusicDownloading(filename = "") {
-        this.setDownloadStatus({
-            type: "busy",
-            title: this.t("downloading_music"),
-            detail: filename,
-        });
-    }
-
-    showDownloadSuccess(filename = "") {
-        this.setDownloadStatus({
-            type: "success",
-            title: this.t("download_completed"),
-            detail: filename,
-            autoHideMs: 3000,
-        });
-    }
-
-    showDownloadError(message = "") {
-        this.setDownloadStatus({
-            type: "error",
-            title: this.t("download_failed"),
-            detail: message,
-        });
-    }
-
-    toast(message, options = {}) {
-        const refs = this.createNotificationCard({
-            type: options.type || "info",
-            title: String(message || ""),
-            detail: options.detail || "",
-            meta: options.meta || "",
-            iconText: options.iconText || "i",
-            download: false,
-        });
-        const autoHideMs = Number(options.autoHideMs ?? 3200);
-        if (!options.persist && autoHideMs > 0) {
-            this.window.setTimeout?.(() => this.removeNotificationCard(refs.card), autoHideMs);
+            if (autoHideMs > 0) this.hideDownloadStatus(autoHideMs);
+            return card;
         }
-        return refs.card;
-    }
-}
 
-class TikTokDlApp {
-    constructor(win) {
-        this.window = win;
-        this.document = win.document;
-        this.configStore = new ConfigStore(win.localStorage);
-        this.extractor = new TikTokMediaExtractor(this.document, win);
-        this.currentItemResolver = new CurrentItemResolver(
-            this.document,
-            win,
-            this.extractor,
-        );
-        this.itemDataProvider = new ItemDataProvider(this.document, win);
-        this.actionBarLocator = new ActionBarLocator(this);
-        this.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
-        this.profilePageBulkAdapter = new ProfilePageBulkAdapter(this);
-        this.downloader = new Downloader(win, gmXmlHttpRequest, gmDownload);
-        this.panel = null;
-        this.menu = null;
-        this.launcher = null;
-        this.currentMedia = null;
-        this.currentActionBarHost = null;
-        this.currentPlacementMode = "inactive";
-        this.lastHref = "";
-        this.positionObserver = null;
-        this.positionFrame = null;
-        this.positionPoll = null;
-        this.routeChangeCleanup = null;
-        this.routeChangeFrame = null;
-        this.lastPanelPositionSignature = "";
-        this.lastPanelPositionCheckAt = 0;
-        this.pendingPanelPositionCheck = null;
-        this.outsideMenuBound = false;
-        this.openImageOverlay = null;
-        this.isDownloading = false;
-        this.downloadCancelRequested = false;
-        this.downloadAbortController = null;
-        this.lastProfileBulkRun = null;
-        this.lastProfileBulkResolve = null;
-        this.lastExtractionTrace = null;
-        this.notifications = new NotificationCenter(this);
-        this.commentTranslation = new CommentTranslationController(this);
-        this.menuLifecycle = new MenuLifecycle(win, {
-            onStateChange: () => this.applyPanelState(),
-            onClosed: () => {
-                this.clearPanelMenuPosition();
-                this.mountPanel();
-            },
-        });
-        this.imageDownloadButton = null;
-        this.commentStickerButton = null;
-        this.commentStickerTarget = null;
-        this.imageOverlayWatcherBound = false;
-        this.commentStickerWatcherBound = false;
-        this.lastImageOpenGestureAt = 0;
-        this.tampermonkeyMenuRegistered = false;
+        hideDownloadStatus(delay = 0, immediate = false) {
+            const remove = () => {
+                const card = this.downloadStatusEl;
+                if (!card) return;
+                this.stopDownloadTitleDots();
+                this.removeNotificationCard(card, { immediate });
+                if (this.downloadStatusEl === card) this.downloadStatusEl = null;
+            };
+
+            if (this.downloadStatusHideCancel) {
+                this.downloadStatusHideCancel();
+                this.downloadStatusHideCancel = null;
+            }
+
+            if (immediate || delay <= 0) {
+                remove();
+                return;
+            }
+
+            const statusCard = this.downloadStatusEl;
+            this.downloadStatusHideCancel = this.scheduleNotificationRemoval(statusCard, delay, () => {
+                this.downloadStatusHideCancel = null;
+                remove();
+            });
+        }
+
+        nudgeDownloadStatus(message = this.t("download_already_running")) {
+            const card = this.getDownloadStatusElement();
+            card.classList.remove("attention");
+            void card.offsetWidth;
+            card.classList.add("attention");
+
+            const detailEl = this.downloadStatusDetailEl;
+            const previousDetail = detailEl?.textContent || "";
+            if (detailEl && message) {
+                detailEl.textContent = message;
+            }
+
+            this.window.setTimeout?.(() => card.classList.remove("attention"), 1050);
+            this.window.clearTimeout?.(this.downloadStatusRepeatHintTimer);
+            this.downloadStatusRepeatHintTimer = this.window.setTimeout?.(() => {
+                if (detailEl?.isConnected && detailEl.textContent === message) {
+                    detailEl.textContent = previousDetail;
+                }
+            }, 1600);
+        }
+
+        showDownloadPreparing(detail = "") {
+            this.setDownloadStatus({
+                type: "busy",
+                title: this.t("download_preparing"),
+                detail,
+            });
+        }
+
+        showVideoPreparing(filename = "") {
+            this.setDownloadStatus({
+                type: "busy",
+                title: this.t("preparing_video_download"),
+                detail: filename,
+            });
+        }
+
+        showVideoDownloading(filename = "") {
+            this.setDownloadStatus({
+                type: "busy",
+                title: this.t("downloading_video"),
+                detail: filename,
+            });
+        }
+
+        showAlbumProgress(index, total, filename = "") {
+            this.setDownloadStatus({
+                type: "album",
+                title: `${index}/${total} ${this.t("downloading_album")}`,
+                detail: filename,
+                meta: "",
+            });
+        }
+
+        showImageDownloading(filename = "") {
+            this.setDownloadStatus({
+                type: "image",
+                title: this.t("downloading_image"),
+                detail: filename,
+            });
+        }
+
+        showMusicDownloading(filename = "") {
+            this.setDownloadStatus({
+                type: "busy",
+                title: this.t("downloading_music"),
+                detail: filename,
+            });
+        }
+
+        showDownloadSuccess(filename = "") {
+            this.setDownloadStatus({
+                type: "success",
+                title: this.t("download_completed"),
+                detail: filename,
+                autoHideMs: 3000,
+            });
+        }
+
+        showDownloadError(message = "") {
+            this.setDownloadStatus({
+                type: "error",
+                title: this.t("download_failed"),
+                detail: message,
+            });
+        }
+
+        toast(message, options = {}) {
+            const refs = this.createNotificationCard({
+                type: options.type || "info",
+                title: String(message || ""),
+                detail: options.detail || "",
+                meta: options.meta || "",
+                iconText: options.iconText || "i",
+                download: false,
+            });
+            const autoHideMs = Number(options.autoHideMs ?? 3200);
+            if (!options.persist && autoHideMs > 0) {
+                this.scheduleNotificationRemoval(
+                    refs.card,
+                    autoHideMs,
+                    () => this.removeNotificationCard(refs.card),
+                );
+            }
+            return refs.card;
+        }
     }
 
-    start() {
-        this.injectStyles();
-        this.renderPanel();
-        this.registerTampermonkeyMenu();
-        this.bindHotkey();
-        this.watchRouteChanges();
-        this.watchPanelPosition();
-        this.commentTranslation.start();
-    }
-
-    injectStyles() {
-        if (this.document.getElementById(`${SCRIPT_PREFIX}-style`)) return;
-        const style = createElement(this.document, "style");
-        style.id = `${SCRIPT_PREFIX}-style`;
-        style.textContent = getPanelStyleSheet();
-        this.document.head.appendChild(style);
-    }
-
-    registerTampermonkeyMenu() {
-        if (this.tampermonkeyMenuRegistered || typeof gmRegisterMenuCommand !== "function") return;
-        this.tampermonkeyMenuRegistered = true;
-        try {
-            gmRegisterMenuCommand(this.t("settings"), () => this.openSettings());
-        } catch (_error) {
+    class TikTokDlApp {
+        constructor(win) {
+            this.window = win;
+            this.document = win.document;
+            this.configStore = new ConfigStore(win.localStorage);
+            this.extractor = new TikTokMediaExtractor(this.document, win);
+            this.currentItemResolver = new CurrentItemResolver(
+                this.document,
+                win,
+                this.extractor,
+            );
+            this.itemDataProvider = new ItemDataProvider(this.document, win);
+            this.actionBarLocator = new ActionBarLocator(this);
+            this.profileBulkSelectionState = { profileKey: "", selectedItems: new Map() };
+            this.profilePageBulkAdapter = new ProfilePageBulkAdapter(this);
+            this.downloader = new Downloader(win, gmXmlHttpRequest, gmDownload);
+            this.panel = null;
+            this.menu = null;
+            this.launcher = null;
+            this.currentMedia = null;
+            this.currentActionBarHost = null;
+            this.currentPlacementMode = "inactive";
+            this.lastHref = "";
+            this.positionObserver = null;
+            this.positionFrame = null;
+            this.positionPoll = null;
+            this.routeChangeCleanup = null;
+            this.routeChangeFrame = null;
+            this.lastPanelPositionSignature = "";
+            this.lastPanelPositionCheckAt = 0;
+            this.pendingPanelPositionCheck = null;
+            this.outsideMenuBound = false;
+            this.openImageOverlay = null;
+            this.isDownloading = false;
+            this.downloadCancelRequested = false;
+            this.downloadAbortController = null;
+            this.lastProfileBulkRun = null;
+            this.lastProfileBulkResolve = null;
+            this.lastExtractionTrace = null;
+            this.notifications = new NotificationCenter(this);
+            this.commentTranslation = new CommentTranslationController(this);
+            this.menuLifecycle = new MenuLifecycle(win, {
+                onStateChange: () => this.applyPanelState(),
+                onClosed: () => {
+                    this.clearPanelMenuPosition();
+                    this.mountPanel();
+                },
+            });
+            this.imageDownloadButton = null;
+            this.commentStickerButton = null;
+            this.commentStickerTarget = null;
+            this.imageOverlayWatcherBound = false;
+            this.commentStickerWatcherBound = false;
+            this.lastImageOpenGestureAt = 0;
             this.tampermonkeyMenuRegistered = false;
         }
-    }
 
-    renderPanel() {
-        this.menuLifecycle?.clearPending?.();
-        if (this.menu) this.menu.remove();
-        if (this.panel) this.panel.remove();
-        const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
-        const launcherShell = createElement(this.document, "div", `${SCRIPT_PREFIX}-launcher-shell`);
-        const launcherIconWrapper = createElement(
-            this.document,
-            "span",
-            `${SCRIPT_PREFIX}-launcher-icon-wrapper`,
-        );
-        const launcherContainer = createElement(
-            this.document,
-            "div",
-            `${SCRIPT_PREFIX}-launcher-container`,
-        );
-        const launcher = createElement(
-            this.document,
-            "button",
-            `${SCRIPT_PREFIX}-launcher`,
-        );
-        launcher.type = "button";
-        launcher.innerHTML = `
+        start() {
+            this.injectStyles();
+            this.renderPanel();
+            this.registerTampermonkeyMenu();
+            this.bindHotkey();
+            this.watchRouteChanges();
+            this.watchPanelPosition();
+            this.commentTranslation.start();
+        }
+
+        injectStyles() {
+            if (this.document.getElementById(`${SCRIPT_PREFIX}-style`)) return;
+            const style = createElement(this.document, "style");
+            style.id = `${SCRIPT_PREFIX}-style`;
+            style.textContent = getPanelStyleSheet();
+            this.document.head.appendChild(style);
+        }
+
+        registerTampermonkeyMenu() {
+            if (this.tampermonkeyMenuRegistered || typeof gmRegisterMenuCommand !== "function") return;
+            this.tampermonkeyMenuRegistered = true;
+            try {
+                gmRegisterMenuCommand(this.t("settings"), () => this.openSettings());
+            } catch (_error) {
+                this.tampermonkeyMenuRegistered = false;
+            }
+        }
+
+        renderPanel() {
+            this.menuLifecycle?.clearPending?.();
+            if (this.menu) this.menu.remove();
+            if (this.panel) this.panel.remove();
+            const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
+            const launcherShell = createElement(this.document, "div", `${SCRIPT_PREFIX}-launcher-shell`);
+            const launcherIconWrapper = createElement(
+                this.document,
+                "span",
+                `${SCRIPT_PREFIX}-launcher-icon-wrapper`,
+            );
+            const launcherContainer = createElement(
+                this.document,
+                "div",
+                `${SCRIPT_PREFIX}-launcher-container`,
+            );
+            const launcher = createElement(
+                this.document,
+                "button",
+                `${SCRIPT_PREFIX}-launcher`,
+            );
+            launcher.type = "button";
+            launcher.innerHTML = `
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
           <path d="M12 3v12" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
           <path d="M7 11l5 5 5-5" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -9087,7 +9763,8 @@ class TikTokDlApp {
             ? sourceExtension
             : "webp";
             return normalizeFilename(`${base}_sticker.${extension}`, {
-                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 14,
+                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+                preserveExtension: true,
             });
         }
 
@@ -10236,7 +10913,8 @@ class TikTokDlApp {
                 "jpg",
             );
             return normalizeFilename(`${base}_comment_image.${extension}`, {
-                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 20,
+                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+                preserveExtension: true,
             });
         }
 
@@ -10252,8 +10930,9 @@ class TikTokDlApp {
             const config = this.configStore.get();
             const previewMedia = media?.id ? media : this.getFilenamePreviewMedia();
             const base = buildFilename(previewMedia, config) || `tiktok_frame_${Date.now()}`;
-            return normalizeFilename(`${base}_frame.${extension}`, {
-                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 10,
+            return normalizeFilename(`${base}_frame.${normalizeFileExtension(extension, "png")}`, {
+                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+                preserveExtension: true,
             });
         }
 
@@ -10280,7 +10959,8 @@ class TikTokDlApp {
             ? `${authorName}_live_${timestamp}_frame`
                 : `live_${timestamp}_frame`;
             return normalizeFilename(`${base}.${normalizeFileExtension(extension, "png")}`, {
-                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length) + 10,
+                maxLength: Number(config.filename_max_length || DEFAULT_CONFIG.filename_max_length),
+                preserveExtension: true,
             });
         }
 
@@ -11373,23 +12053,12 @@ class TikTokDlApp {
             const darkBootScreen = this.selectInput(
                 this.t("dark_boot_screen"),
                 "dark_boot_screen",
-
                 config.dark_boot_screen,
                 DARK_BOOT_SCREEN_MODES.map((definition) => [
                     definition.value,
                     this.t(definition.messageKey),
                 ]),
             );
-
-
-
-
-
-
-
-
-
-
 
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
             grid.append(language.wrapper, darkBootScreen.wrapper);
@@ -11523,6 +12192,9 @@ class TikTokDlApp {
                 "filename_max_length",
                 config.filename_max_length,
             );
+            maxLength.min = "8";
+            maxLength.max = "255";
+            maxLength.step = "1";
             const albumIndexFormat = this.selectInput(
                 this.t("album_index_format"),
                 "album_index_format",
@@ -11654,7 +12326,6 @@ class TikTokDlApp {
                     modal.querySelectorAll("[data-config-key]").forEach((input) => {
                         formValues[input.dataset.configKey] = input.value;
                     });
-
                     formValues.show_test_notification_menu = Boolean(showTestMenu.checked);
                     formValues.show_debug_info_menu = Boolean(showDebugInfoMenu.checked);
                     formValues.filename_max_length = Number(formValues.filename_max_length || DEFAULT_CONFIG.filename_max_length);
@@ -11667,6 +12338,10 @@ class TikTokDlApp {
                     formValues.video_source_columns = Array.from(
                         modal.querySelectorAll("[data-source-column]:checked"),
                     ).map((input) => input.dataset.sourceColumn);
+                    if (normalizeHotkey(formValues.shortcut_download) === "M") {
+                        this.notifications.toast(this.t("shortcut_reserved_m"), { type: "error" });
+                        return;
+                    }
                     const shortcutConflict = findShortcutConflict(formValues);
                     if (shortcutConflict) {
                         const labels = {
@@ -12072,17 +12747,10 @@ class TikTokDlApp {
                 }
             };
             const scheduleIfChanged = () => {
+                if (this.pendingPanelPositionCheck) return;
                 const now = Date.now();
                 const elapsed = now - (this.lastPanelPositionCheckAt || 0);
-                if (elapsed >= PANEL_POSITION_CHECK_THROTTLE_MS) {
-                    this.lastPanelPositionCheckAt = now;
-                    const signature = this.getPanelPositionSignature();
-                    if (signature === this.lastPanelPositionSignature) return;
-                    this.lastPanelPositionSignature = signature;
-                    schedule();
-                    return;
-                }
-                if (this.pendingPanelPositionCheck) return;
+                const delay = Math.max(0, PANEL_POSITION_CHECK_THROTTLE_MS - elapsed);
                 this.pendingPanelPositionCheck = this.window.setTimeout(() => {
                     this.pendingPanelPositionCheck = null;
                     this.lastPanelPositionCheckAt = Date.now();
@@ -12090,21 +12758,16 @@ class TikTokDlApp {
                     if (signature === this.lastPanelPositionSignature) return;
                     this.lastPanelPositionSignature = signature;
                     schedule();
-                }, PANEL_POSITION_CHECK_THROTTLE_MS - elapsed);
+                }, delay);
             };
 
-            let imageOverlayFrame = null;
+            let imageOverlayTimer = null;
             const checkImageOverlay = () => {
-                if (imageOverlayFrame) return;
-                const run = () => {
-                    imageOverlayFrame = null;
+                if (imageOverlayTimer) return;
+                imageOverlayTimer = this.window.setTimeout(() => {
+                    imageOverlayTimer = null;
                     this.refreshImageOverlayState();
-                };
-                if (typeof this.window.requestAnimationFrame === "function") {
-                    imageOverlayFrame = this.window.requestAnimationFrame(run);
-                } else {
-                    imageOverlayFrame = this.window.setTimeout(run, 50);
-                }
+                }, PANEL_POSITION_CHECK_THROTTLE_MS);
             };
 
             if (typeof this.window.MutationObserver === "function" && this.document.body) {
@@ -12116,7 +12779,10 @@ class TikTokDlApp {
                         return true;
                     });
                     if (hasExternalMutation) scheduleIfChanged();
-                    checkImageOverlay();
+                    if (
+                        this.openImageOverlay ||
+                        Date.now() - this.lastImageOpenGestureAt <= IMAGE_OVERLAY_RECENT_GESTURE_MS
+                    ) checkImageOverlay();
                 });
                 this.positionObserver.observe(this.document.body, {
                     childList: true,
@@ -12136,150 +12802,33 @@ class TikTokDlApp {
         }
     }
 
-function escapeHtml(value) {
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
-function isDarkBootScreenEnabled(storage = null) {
-    try {
-        const targetStorage = storage || root?.localStorage;
-        const raw = targetStorage?.getItem(CONFIG_KEY);
-        if (!raw) return DEFAULT_CONFIG.dark_boot_screen === "dark";
-        const stored = JSON.parse(raw);
-        return normalizeDarkBootScreenMode(stored?.dark_boot_screen) === "dark";
-
-
-
-
-    } catch (_err) {
-        return DEFAULT_CONFIG.dark_boot_screen === "dark";
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
     }
-}
 
-function installDarkBootScreen() {
-    const doc = root?.document;
-    if (!doc || !isDarkBootScreenEnabled()) return;
+    const INSTALL_FLAG = "__tthelperInstalled__";
 
-    const STYLE_ID = `${SCRIPT_PREFIX}-dark-boot-style`;
-    const OVERLAY_ID = `${SCRIPT_PREFIX}-dark-boot-overlay`;
-    const MAX_HOLD_MS = 6000;
-    const REMOVE_DELAY_MS = 180;
-    const FADE_MS = 140;
-    let removed = false;
-    let removeTimer = 0;
-    let failSafeTimer = 0;
-    let rootObserver = null;
-
-    const clearTimer = (timer) => {
-        if (timer) root.clearTimeout?.(timer);
-    };
-    const removeArtifacts = () => {
-        doc.getElementById(OVERLAY_ID)?.remove?.();
-        doc.getElementById(STYLE_ID)?.remove?.();
-    };
-    const removeOverlay = () => {
-        if (removed) return;
-        removed = true;
-        clearTimer(removeTimer);
-        clearTimer(failSafeTimer);
-        rootObserver?.disconnect?.();
-
-        const overlay = doc.getElementById(OVERLAY_ID);
-        if (!overlay) {
-            removeArtifacts();
-            return;
-        }
-        overlay.dataset.leaving = "true";
-        root.setTimeout?.(removeArtifacts, FADE_MS + 40);
-    };
-    const scheduleRemoval = (delay = REMOVE_DELAY_MS) => {
-        clearTimer(removeTimer);
-        removeTimer = root.setTimeout?.(removeOverlay, delay) || 0;
-    };
-    const initialize = () => {
-        const documentElement = doc.documentElement;
-        if (!documentElement) return false;
-
-        if (!doc.getElementById(STYLE_ID)) {
-            const style = doc.createElement("style");
-            style.id = STYLE_ID;
-            style.textContent = `
-html, body {
-  background: #000 !important;
-}
-#${OVERLAY_ID} {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  margin: 0;
-  padding: 0;
-  background: #000;
-  opacity: 1;
-  pointer-events: none;
-  transition: opacity ${FADE_MS}ms linear;
-  contain: strict;
-}
-#${OVERLAY_ID}[data-leaving="true"] {
-  opacity: 0;
-}
-`;
-                (doc.head || documentElement).appendChild(style);
-            }
-
-            if (!doc.getElementById(OVERLAY_ID)) {
-                const overlay = doc.createElement("div");
-                overlay.id = OVERLAY_ID;
-                overlay.setAttribute("aria-hidden", "true");
-                documentElement.appendChild(overlay);
-            }
-
-            if (doc.readyState === "loading") {
-                doc.addEventListener("DOMContentLoaded", () => scheduleRemoval(), { once: true });
-            } else {
-                scheduleRemoval();
-            }
-            failSafeTimer = root.setTimeout?.(removeOverlay, MAX_HOLD_MS) || 0;
-            return true;
-        };
-
-        if (initialize()) return;
-        const MutationObserverCtor = root?.MutationObserver;
-        if (typeof MutationObserverCtor !== "function") return;
-        rootObserver = new MutationObserverCtor(() => {
-            if (!initialize()) return;
-            rootObserver?.disconnect?.();
+    if (root?.document && !root[INSTALL_FLAG]) {
+        Object.defineProperty(root, INSTALL_FLAG, {
+            value: true,
+            configurable: false,
+            enumerable: false,
+            writable: false,
         });
-        rootObserver.observe(doc, { childList: true, subtree: true });
+
+        const start = () => {
+            const app = new TikTokDlApp(root);
+            app.start();
+        };
+        if (root.document.readyState === "loading") {
+            root.document.addEventListener("DOMContentLoaded", start, { once: true });
+        } else {
+            start();
+        }
     }
-
-const INSTALL_FLAG = "__tthelperInstalled__";
-
-if (root?.document && !root[INSTALL_FLAG]) {
-    Object.defineProperty(root, INSTALL_FLAG, {
-        value: true,
-        configurable: false,
-        enumerable: false,
-        writable: false,
-    });
-
-    try {
-        installDarkBootScreen();
-    } catch (_err) {
-    }
-
-    const start = () => {
-        const app = new TikTokDlApp(root);
-        app.start();
-    };
-    if (root.document.readyState === "loading") {
-        root.document.addEventListener("DOMContentLoaded", start, { once: true });
-    } else {
-        start();
-    }
-}
 })(typeof unsafeWindow !== "undefined" ? unsafeWindow : window);
