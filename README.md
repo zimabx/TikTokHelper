@@ -47,13 +47,22 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 ## Release Notes
 
 <details>
-  <summary>1.1.X</summary>
-
-<h3>1.1.3 Upcoming</h3>
+  <summary>1.2.X</summary>
+<h3>1.2.0</h3>
 <ul>
-<li>Optimized the black splash screen to reduce white flickering during loading. </li>
-<li>Relaxed the download host restrictions to prevent download failures caused by newly added or switched CDN domains. </li>
+<li>Rewritten the comment translation process to improve translation speed and stability, and reduce duplicate requests and rate limiting.</li>
+<li>Batch downloads from the home page now support menus other than “Videos,” and drag-and-drop batch selection and deselection have been added.</li>
+<li>Relaxed download host restrictions to prevent download failures when the official platform adds or switches CDN domains.</li>
+<li>Improved filename cleanup and length limits, and fixed an issue where some titles might generate invalid filenames.</li>
+<li>Fixed an issue where invalid links could cause failures in content recognition, detail retrieval, and downloads.</li>
+<li>Optimized the dark mode splash screen, increased the duration it remains active, and reduced performance overhead.</li>
+<li>Improved the recognition and positional adaptation of tool buttons across different TikTok pages and pop-up windows.</li>
+<li>Notification pop-ups no longer automatically disappear when the mouse hovers over them.</li>
 </ul>
+</details>
+
+<details>
+  <summary>1.1.X</summary>
 <h3>1.1.2</h3>
 <ul>
 <li>Added settings for comment translation activation, supporting manual and automatic activation.</li>
