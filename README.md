@@ -48,7 +48,11 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 
 <details>
   <summary>1.2.X</summary>
-<h3>1.2.0</h3>
+  <h3>1.2.1</h3>
+<ul>
+<li>Compatible with the new full-screen version.</li>
+</ul>
+  <h3>1.2.0</h3>
 <ul>
 <li>Rewritten the comment translation process to improve translation speed and stability, and reduce duplicate requests and rate limiting.</li>
 <li>Batch downloads from the home page now support menus other than “Videos,” and drag-and-drop batch selection and deselection have been added.</li>
@@ -63,7 +67,7 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 
 <details>
   <summary>1.1.X</summary>
-<h3>1.1.2</h3>
+  <h3>1.1.2</h3>
 <ul>
 <li>Added settings for comment translation activation, supporting manual and automatic activation.</li>
 <li>The startup page settings have been changed to a drop-down menu, supporting the original and dark startup pages.</li>
@@ -71,12 +75,12 @@ The default download shortcut is `M`. Other shortcuts are disabled by default an
 <li>Added a feature to download comment stickers; tapping a sticker allows you to download the original file directly.</li>
 <li>Fixed an issue where live stream content was not recognized on the Recommendations page.</li>
 </ul>
-<h3>1.1.1</h3>
+  <h3>1.1.1</h3>
 <ul>
 <li>Adjusted the download button position in fullscreen mode. It now appears below the More button.</li>
 <li>Added a dark startup page that changes the initial white loading background to black.</li>
 </ul>
-<h3>1.1.0</h3>
+  <h3>1.1.0</h3>
 <ul>
 <li>Added PNG / JPG / WEBP formats for frame saving, with an improved frame copy and save workflow.</li>
 <li>Added retry support for failed profile bulk downloads, retrying only failed posts or album images.</li>
