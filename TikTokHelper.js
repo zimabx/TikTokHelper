@@ -5,7 +5,7 @@
 // @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译、自定义文件名和个人主页批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.2.0
+// @version			1.2.1
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -2729,7 +2729,7 @@
         const seen = new Set();
         const entries = [];
         let inspected = 0;
-        const allowedKey = /^(?:memoizedProps|pendingProps|memoizedState|props|item|itemInfo|itemStruct|itemData|aweme|awemeInfo|data|children|child|content|videoData|videoInfo|photoData|photoInfo)$/i;
+        const allowedKey = /^(?:memoizedProps|pendingProps|memoizedState|props|item|itemInfo|itemStruct|itemData|itemSnapshot|aweme|awemeInfo|data|children|child|content|videoData|videoInfo|photoData|photoInfo)$/i;
 
         while (queue.length && inspected < maxObjects) {
             const current = queue.shift();
@@ -5584,7 +5584,12 @@
         getMediaContextElement(element = null) {
             if (!element) return null;
             const cinemaRoot = element.closest?.('[role="dialog"][aria-label="Cinema mode"]');
-            if (cinemaRoot) return cinemaRoot;
+            if (cinemaRoot) {
+                const currentRow = cinemaRoot
+                .querySelector?.('[data-cinema-mode-slot-stage="current"]')
+                ?.closest?.("[data-cinema-mode-snap-row]");
+                return currentRow || cinemaRoot;
+            }
             const selector = [
                 "article",
                 "section[id*='media-card']",
@@ -6103,8 +6108,11 @@
     const PROFILE_BROWSE_ELLIPSIS_SELECTOR = '[data-e2e="browse-ellipsis"]';
     const PROFILE_BROWSE_MEDIA_SELECTOR = '[data-e2e="browse-video"], video, img';
     const CINEMA_MODE_ROOT_SELECTOR = '[role="dialog"][aria-label="Cinema mode"]';
+    const CINEMA_PLAYER_ROOT_SELECTOR = '[data-cinema-mode-player-root="true"]';
     const CINEMA_MORE_BUTTON_SELECTOR =
           'button[data-testid="tux-web-button"][aria-haspopup="dialog"]';
+    const CINEMA_CLOSE_BUTTON_SELECTOR =
+          'button[data-testid="tux-web-button"][aria-label="Close"]';
 
     function isActionBarClassName(className = "") {
         const value = String(className || "");
@@ -6164,12 +6172,31 @@
         return doc?.querySelector?.(CINEMA_MODE_ROOT_SELECTOR) || null;
     }
 
-    function getVisibleCinemaMoreButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
+    function getVisibleCinemaPlayerRoot(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
         const win = doc?.defaultView || root;
         const viewportWidth = Number(win?.innerWidth || 0);
         const viewportHeight = Number(win?.innerHeight || 0);
         if (!cinema?.querySelectorAll || !viewportWidth || !viewportHeight) return null;
-        return Array.from(cinema.querySelectorAll(CINEMA_MORE_BUTTON_SELECTOR))
+        return Array.from(cinema.querySelectorAll(CINEMA_PLAYER_ROOT_SELECTOR)).find((player) => {
+            const rect = player.getBoundingClientRect?.();
+            return Boolean(
+                rect?.width > 0 &&
+                rect?.height > 0 &&
+                getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.5
+            );
+        }) || null;
+    }
+
+    function getVisibleCinemaControl(
+        selector,
+        doc = root?.document,
+        scope = getVisibleCinemaPlayerRoot(doc) || getCinemaModeRoot(doc),
+    ) {
+        const win = doc?.defaultView || root;
+        const viewportWidth = Number(win?.innerWidth || 0);
+        const viewportHeight = Number(win?.innerHeight || 0);
+        if (!scope?.querySelectorAll || !viewportWidth || !viewportHeight) return null;
+        return Array.from(scope.querySelectorAll(selector))
             .map((button) => button.closest?.('[data-testid="tux-web-button-container"]') || button)
             .find((anchor) => {
             const rect = anchor.getBoundingClientRect?.();
@@ -6179,6 +6206,16 @@
                 getVisibleRectRatio(rect, viewportWidth, viewportHeight) >= 0.5
             );
         }) || null;
+    }
+
+    function getVisibleCinemaMoreButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
+        const player = getVisibleCinemaPlayerRoot(doc, cinema);
+        return getVisibleCinemaControl(CINEMA_MORE_BUTTON_SELECTOR, doc, player || cinema);
+    }
+
+    function getVisibleCinemaCloseButton(doc = root?.document, cinema = getCinemaModeRoot(doc)) {
+        const player = getVisibleCinemaPlayerRoot(doc, cinema);
+        return player ? getVisibleCinemaControl(CINEMA_CLOSE_BUTTON_SELECTOR, doc, player) : null;
     }
 
     function getTikTokPageType(locationLike = root?.location, doc = root?.document) {
@@ -10167,7 +10204,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return true;
         }
 
-        mountPanelLeftOfButton(anchor, placementMode) {
+        mountPanelLeftOfButton(anchor, placementMode, mirrorSurface = null) {
             if (!this.panel || !anchor) return false;
             if (this.panel.parentElement !== this.document.body) {
                 this.document.body.appendChild(this.panel);
@@ -10182,14 +10219,27 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const viewportWidth = this.window.innerWidth || 0;
             const viewportHeight = this.window.innerHeight || 0;
             const cinemaPlacement = placementMode === "cinema";
+            const mirrorRect = mirrorSurface?.getBoundingClientRect?.();
+            const mirroredCinemaPlacement = Boolean(
+                cinemaPlacement && mirrorRect?.width > 0 && mirrorRect?.height > 0
+            );
             const preferredLeft = rect.left - size - margin;
             const fallbackLeft = rect.right + margin;
-            const left = cinemaPlacement
+            const left = mirroredCinemaPlacement
+            ? clampNumber(
+                mirrorRect.right - (rect.left - mirrorRect.left) - size,
+                margin,
+                Math.max(margin, viewportWidth - size - margin),
+                rect.left,
+            )
+            : cinemaPlacement
             ? clampNumber(rect.left + rect.width / 2 - size / 2, margin, Math.max(margin, viewportWidth - size - margin), rect.left)
             : preferredLeft >= margin
             ? preferredLeft
             : Math.min(Math.max(fallbackLeft, margin), Math.max(margin, viewportWidth - size - margin));
-            const top = cinemaPlacement
+            const top = mirroredCinemaPlacement
+            ? clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top)
+            : cinemaPlacement
             ? clampNumber(rect.bottom + margin, margin, Math.max(margin, viewportHeight - size - margin), rect.bottom + margin)
             : clampNumber(rect.top + rect.height / 2 - size / 2, margin, Math.max(margin, viewportHeight - size - margin), rect.top);
 
@@ -10226,19 +10276,26 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         resolvePanelPlacement() {
             const cinemaRoot = getCinemaModeRoot(this.document);
             if (cinemaRoot) {
-                const anchor = getVisibleCinemaMoreButton(this.document, cinemaRoot);
+                const player = getVisibleCinemaPlayerRoot(this.document, cinemaRoot);
+                const moreButton = getVisibleCinemaMoreButton(this.document, cinemaRoot);
+                const anchor = moreButton || getVisibleCinemaCloseButton(this.document, cinemaRoot);
+                const mirrorSurface = moreButton ? null : player;
                 const rect = this.actionBarLocator.getElementRect(anchor);
+                const surfaceRect = this.actionBarLocator.getElementRect(mirrorSurface);
                 return {
                     surface: "cinema",
                     mode: !this.openImageOverlay && anchor ? "cinema" : "inactive",
                     anchor,
+                    mirrorSurface,
                     signature: rect
                     ? [
-                        "cinema",
+                        moreButton ? "cinema-more" : "cinema-close-mirror",
                         Math.round(rect.left),
                         Math.round(rect.top),
                         Math.round(rect.width),
                         Math.round(rect.height),
+                        Math.round(surfaceRect?.left || 0),
+                        Math.round(surfaceRect?.right || 0),
                     ].join(":")
                     : "cinema:no-anchor",
                 };
@@ -10302,7 +10359,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.profilePageBulkAdapter?.suspend?.();
                 if (
                     placement.mode === "cinema" &&
-                    this.mountPanelLeftOfButton(placement.anchor, "cinema")
+                    this.mountPanelLeftOfButton(
+                        placement.anchor,
+                        "cinema",
+                        placement.mirrorSurface,
+                    )
                 ) return;
                 this.hidePanelForInactivePlacement();
                 return;
