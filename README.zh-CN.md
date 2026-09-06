@@ -44,6 +44,10 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 
 <details>
   <summary>1.2.X</summary>
+  <h3>1.2.1</h3>
+<ul>
+<li>兼容新版全屏模式。</li>
+</ul>
   <h3>1.2.0</h3>
 <ul>
 <li>重构评论翻译，提升翻译的速度、稳定性，并减少重复请求和限流。</li>
