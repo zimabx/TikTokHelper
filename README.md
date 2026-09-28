@@ -41,8 +41,6 @@ After installation, TikTokHelper adds a small floating button near the active Ti
 - **Settings**: changes language, automatic theme behavior, video quality preference, filename rules, source columns, and shortcuts.
 - **Translate**: Click the translate button to the right of the input field to translate the current comment.
 
-The default download shortcut is `M`. Other shortcuts are disabled by default and can be configured in Settings.
-
 ## Release Notes
 
 <details>
