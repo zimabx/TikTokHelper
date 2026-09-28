@@ -6,7 +6,7 @@
 
 TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 TikTok 页面中加入一个轻量操作面板，让你可以在当前页面直接保存媒体、截取视频帧、查看作品详情，并自定义下载文件名。
 
-<img width="200" alt="image" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_download_btn.png" />
+<img width="200" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_download_btn.png" />
 
 ## 功能
 
@@ -20,10 +20,6 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 - 选择视频源偏好
 - 使用模板自定义下载文件名
 - 配置快捷键
-
-<p align="left">
-  <img width="300" alt="image" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_homepage_dlbtn.png" />
-</p>
 
 ## 安装
 
