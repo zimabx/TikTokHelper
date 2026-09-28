@@ -13,7 +13,8 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 - 下载当前视频/图集
 - 截取当前视频帧
 - 查看当前作品媒体信息
-- 主页批量下载
+- 主页批量下载<p align="left"><img width="300" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_homepage_dlbtn.png" /></p>
+- 拖放式批量选择与取消选择<p align="left"><img width="180" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_hp_drag_selected.png" /></p>
 - 评论区翻译
 - 评论区图片保存
 - 选择视频源偏好
