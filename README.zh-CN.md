@@ -20,6 +20,9 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 - 选择视频源偏好
 - 使用模板自定义下载文件名
 - 配置快捷键
+- BETA : Playlists 批量下载
+- BETA : Short Drama 全集下载<p align="left"><img width="180" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_episodes.png" /></p>
+
 
 ## 安装
 
@@ -39,6 +42,12 @@ TikTokHelper 是一个用于 TikTok Web 的浏览器用户脚本。它会在 Tik
 
 <details>
   <summary>1.2.X</summary>
+  <h3>1.2.2</h3>
+<ul>
+<li>新增测试功能：Playlists 批量下载。</li>
+<li>新增测试功能：Short Drama 全集下载——可显示"简介"和"剧集"，且能获取有效短剧信息时，会显示“下载全集”选项。</li>
+<li>新增全选功能——可一次性选中个人主页当前<b>已加载</b>的所有视频和图集。</li>
+</ul>
   <h3>1.2.1</h3>
 <ul>
 <li>兼容新版全屏模式。</li>
