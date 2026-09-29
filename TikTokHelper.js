@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name			TikTokHelper
 // @name:zh-CN		TikTokHelper - TikTok 下载助手
-// @description		Add compact TikTok tools for video and photo downloads, frame capture, media details, comment translation, customizable filenames, and profile bulk downloads.
-// @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译、自定义文件名和个人主页批量下载。
+// @description		Add compact TikTok tools for video and photo downloads, frame capture, media details, comment translation and bulk downloads.
+// @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译和批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.2.1
+// @version			1.2.2
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -17,6 +17,10 @@
 // @noframes
 // @run-at          document-start
 // ==/UserScript==
+
+// New test feature: Playlists batch download.
+// New test feature: Short Drama full-series download — displays About and Episodes, and when valid short drama information is retrieved, a "Download all episodes" option appears.
+// New Select All feature — allows selecting all currently **loaded** videos and image collections on a profile page in one go.
 
 (function (root) {
     "use strict";
@@ -535,11 +539,20 @@
             bulk_selected_count: "Selected",
             bulk_type_video: "Video",
             bulk_type_album: "Album",
+            bulk_type_episode: "Episode",
             bulk_type_unknown: "Unknown",
             bulk_downloading: "Bulk downloading",
             bulk_download_done: "Bulk download finished",
             bulk_download_result_detailed: "Success ${success}, failed ${failed}.",
             bulk_download_cancelled: "Bulk download cancelled",
+            short_drama_download_all: "Download all episodes (${count})",
+            short_drama_confirm_title: "${title} · ${count} Episodes",
+            short_drama_loading: "Loading episodes",
+            short_drama_load_failed: "Could not load the complete episode list.",
+            playlist_download: "Download playlist",
+            playlist_confirm_title: "${title} · ${count} posts",
+            playlist_loading: "Loading playlist",
+            playlist_load_failed: "Could not load the complete playlist.",
             show_test_notification_menu: "Show notification test items",
             show_debug_info_menu: "Show test info item",
             template: "Template",
@@ -724,11 +737,20 @@
             bulk_selected_count: "已选择",
             bulk_type_video: "视频",
             bulk_type_album: "图集",
+            bulk_type_episode: "剧集",
             bulk_type_unknown: "待识别",
             bulk_downloading: "批量下载中",
             bulk_download_done: "批量下载完成",
             bulk_download_result_detailed: "成功 ${success}，失败 ${failed}。",
             bulk_download_cancelled: "批量下载已取消",
+            short_drama_download_all: "下载全集（${count} 集）",
+            short_drama_confirm_title: "${title} · ${count} 集",
+            short_drama_loading: "正在加载剧集",
+            short_drama_load_failed: "无法加载完整剧集列表。",
+            playlist_download: "下载播放列表",
+            playlist_confirm_title: "${title} · ${count} 个作品",
+            playlist_loading: "正在加载播放列表",
+            playlist_load_failed: "无法加载完整播放列表。",
             show_test_notification_menu: "显示通知测试菜单项",
             show_debug_info_menu: "显示获取测试信息菜单项",
             template: "模板",
@@ -2050,6 +2072,19 @@
         );
     }
 
+    function getShortDramaDescriptor(media = {}) {
+        const raw = media?.raw || media;
+        const info = raw?.dramaInfo || raw?.drama_info || {};
+        const dramaId = String(info.dramaID || info.dramaId || info.drama_id || "");
+        const total = Number(info.numVideos || info.totalEpisodeCount || info.total_episode_count || 0);
+        if (!/^\d{15,22}$/.test(dramaId) || !Number.isInteger(total) || total <= 1) return null;
+        return {
+            dramaId,
+            title: String(info.dramaName || info.drama_name || media?.desc || "Short Drama").trim(),
+            total,
+        };
+    }
+
     function getVideoIdFromUrl(url) {
         const text = String(url || "");
         const match = text.match(/\/(?:video|photo)\/(\d+)/);
@@ -2062,6 +2097,15 @@
         } catch (_err) {
             return "";
         }
+    }
+
+    function getPlaylistDescriptorFromUrl(url) {
+        const match = String(url || "").match(/\/playlist\/([^/?#]+)-(\d{15,22})(?:[/?#]|$)/);
+        if (!match) return null;
+        return {
+            mixId: match[2],
+            title: safeDecodeURIComponent(match[1]).trim() || "Playlist",
+        };
     }
 
     function pickVideoElementSource(videoElement) {
@@ -3461,6 +3505,7 @@
         const shareInfo = mergeAliases(["share_info", "shareInfo"]);
         const awemeControl = mergeAliases(["aweme_control", "awemeControl"]);
         const download = mergeAliases(["downloadInfo", "download_info", "download"]);
+        const dramaInfo = mergeAliases(["dramaInfo", "drama_info"]);
 
         if (Object.keys(author).length) merged.author = author;
         if (Object.keys(authorStats).length) merged.authorStats = authorStats;
@@ -3471,6 +3516,7 @@
         if (Object.keys(shareInfo).length) merged.shareInfo = shareInfo;
         if (Object.keys(awemeControl).length) merged.awemeControl = awemeControl;
         if (Object.keys(download).length) merged.download = download;
+        if (Object.keys(dramaInfo).length) merged.dramaInfo = dramaInfo;
 
         for (const key of ["challenges", "textExtra", "contents"]) {
             const arrays = exact.map((item) => item?.[key]).filter((value) => Array.isArray(value));
@@ -6760,6 +6806,28 @@ body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
   transform: rotate(45deg);
   box-sizing: border-box;
 }
+.${SCRIPT_PREFIX}-profile-playlist-download {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--tux-v2-color-ui-image-overlay-black-a50);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+.${SCRIPT_PREFIX}-profile-playlist-download:hover { background: var(--tux-v2-color-ui-image-overlay-black-a80); }
+.${SCRIPT_PREFIX}-profile-playlist-download:focus-visible { outline: 2px solid var(--tux-v2-color-ui-image-overlay-white-a75); outline-offset: 2px; }
+.${SCRIPT_PREFIX}-profile-playlist-download:disabled { opacity: 0.55; cursor: wait; }
+.${SCRIPT_PREFIX}-profile-playlist-download svg { width: 18px; height: 18px; pointer-events: none; }
 .${SCRIPT_PREFIX}-bulk-confirm-modal { width: min(860px, calc(100vw - 42px)); max-height: min(720px, calc(100vh - 42px)); }
 .${SCRIPT_PREFIX}-bulk-list {
   display: grid;
@@ -8143,6 +8211,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.dragSelection = null;
             this.suppressedClickBox = null;
             this.checkboxItems = new WeakMap();
+            this.playlistButtons = new WeakMap();
             this.menuLifecycle = new MenuLifecycle(app.window, {
                 onClosed: () => {
                     this.buttonWrapper?.classList?.remove?.(`${SCRIPT_PREFIX}-profile-bulk-open`);
@@ -8322,6 +8391,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.openConfirmModal();
             });
 
+            this.selectAllLoadedButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button secondary`, "");
+            this.selectAllLoadedButton.addEventListener("click", () => {
+                this.selectAllLoadedItems();
+            });
+
             this.cancelSelectionButton = createElement(this.document, "button", `${SCRIPT_PREFIX}-button secondary`, "");
             this.cancelSelectionButton.addEventListener("click", () => {
                 this.closeMenu(true);
@@ -8334,7 +8408,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.app.openSettings();
             });
 
-            menu.append(this.downloadSelectedButton, this.cancelSelectionButton, this.settingsButton);
+            menu.append(
+                this.downloadSelectedButton,
+                this.selectAllLoadedButton,
+                this.cancelSelectionButton,
+                this.settingsButton,
+            );
             this.document.body.appendChild(menu);
             this.menu = menu;
             this.menuLifecycle.attach(menu, menu);
@@ -8415,6 +8494,17 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.downloadSelectedButton.textContent = `${this.app.t("bulk_download_selected")}（${count}）`;
                 this.downloadSelectedButton.disabled = false;
             }
+            if (this.selectAllLoadedButton) {
+                const loadedBoxes = Array.from(
+                    this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`),
+                );
+                const hasUnselectedLoadedItem = loadedBoxes.some((box) => {
+                    const item = this.checkboxItems.get(box);
+                    return Boolean(item?.id) && !this.selectedItems.has(String(item.id));
+                });
+                this.selectAllLoadedButton.textContent = this.app.t("select_all");
+                this.selectAllLoadedButton.disabled = !hasUnselectedLoadedItem;
+            }
             if (this.cancelSelectionButton) {
                 this.cancelSelectionButton.textContent = this.app.t("bulk_cancel_selection");
                 this.cancelSelectionButton.disabled = count <= 0;
@@ -8483,6 +8573,24 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
         }
 
+        selectAllLoadedItems() {
+            if (!this.selectionMode || !this.isProfilePage()) return;
+            this.cancelDragSelection(false);
+
+            // Synchronize selection controls for cards already present in the DOM only.
+            // This does not scroll the page or request/load additional profile items.
+            this.scanVisibleCards();
+
+            let changed = false;
+            this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((box) => {
+                const item = this.checkboxItems.get(box);
+                if (!item?.id) return;
+                if (this.setItemSelected(item, true)) changed = true;
+                this.updateCheckboxState(box, item.id);
+            });
+            if (changed) this.updateMenuLabels();
+        }
+
         clearSelection() {
             this.cancelDragSelection(false);
             this.selectedItems.clear();
@@ -8509,8 +8617,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.mutationObserver = null;
             this.mutationRoot = null;
             this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-select-box`).forEach((node) => node.remove());
+            this.document.querySelectorAll(`.${SCRIPT_PREFIX}-profile-playlist-download`).forEach((node) => node.remove());
             this.document.querySelectorAll(`[data-tthelper-select-ready]`).forEach((node) => {
                 node.removeAttribute("data-tthelper-select-ready");
+            });
+            this.document.querySelectorAll(`[data-tthelper-playlist-ready]`).forEach((node) => {
+                node.removeAttribute("data-tthelper-playlist-ready");
             });
         }
 
@@ -8519,6 +8631,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const run = () => {
                 this.scanFrame = null;
                 this.scanVisibleCards();
+                this.scanPlaylistCards();
             };
             if (typeof this.window.requestAnimationFrame === "function") {
                 this.scanFrame = this.window.requestAnimationFrame(run);
@@ -8588,6 +8701,54 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 durationMs: Date.now() - startedAt,
             };
             this.updateMenuLabels();
+        }
+
+        scanPlaylistCards() {
+            if (!this.selectionMode || !this.isProfilePage()) return;
+            const scanRoot = this.findMutationRoot() || this.document;
+            const anchors = Array.from(scanRoot.querySelectorAll?.('a[href*="/playlist/"]') || []);
+            for (const anchor of anchors) {
+                const playlist = getPlaylistDescriptorFromUrl(
+                    anchor?.href || anchor?.getAttribute?.("href") || "",
+                );
+                if (!playlist) continue;
+                let button = anchor.querySelector?.(`.${SCRIPT_PREFIX}-profile-playlist-download`);
+                if (anchor.dataset.tthelperPlaylistReady === playlist.mixId && button) continue;
+
+                const currentPosition = getComputedStyleSafe(this.window, anchor)?.position || "";
+                if (!currentPosition || currentPosition === "static") anchor.style.position = "relative";
+                if (!button) {
+                    button = createElement(
+                        this.document,
+                        "button",
+                        `${SCRIPT_PREFIX}-profile-playlist-download`,
+                    );
+                    button.type = "button";
+                    button.innerHTML = `
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+            <path d="M12 3v12" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
+            <path d="M7 11l5 5 5-5" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M5 20h14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
+          </svg>
+        `;
+                    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+                    button.addEventListener("click", (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const current = this.playlistButtons.get(button);
+                        if (!current || button.disabled) return;
+                        button.disabled = true;
+                        void this.app.openPlaylistBulk(current).finally(() => {
+                            if (button.isConnected) button.disabled = false;
+                        });
+                    });
+                    anchor.appendChild(button);
+                }
+                button.setAttribute("aria-label", `${this.app.t("playlist_download")}: ${playlist.title}`);
+                button.title = this.app.t("playlist_download");
+                this.playlistButtons.set(button, playlist);
+                anchor.dataset.tthelperPlaylistReady = playlist.mixId;
+            }
         }
 
         extractItemFromAnchor(anchor, resolved = {}) {
@@ -8903,6 +9064,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         getItemTypeLabel(item) {
+            if (item?.shortDramaEpisode) return this.app.t("bulk_type_episode");
             const identity = parseTikTokItemIdentityFromUrl(
                 item?.pageUrl || item?.href || "",
             );
@@ -8932,13 +9094,18 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
         }
 
-        openConfirmModal() {
-            const items = Array.from(this.selectedItems.values());
+        openConfirmModal(itemsOverride = null, options = {}) {
+            const items = Array.isArray(itemsOverride)
+            ? itemsOverride.filter(Boolean)
+            : Array.from(this.selectedItems.values());
             if (!items.length) {
                 this.app.notifications.toast(this.app.t("bulk_no_selection"));
                 return;
             }
-            const modal = this.app.createModal(this.app.t("bulk_confirm_title"), { closeOnBackdrop: false });
+            const modal = this.app.createModal(
+                options.title || this.app.t("bulk_confirm_title"),
+                { closeOnBackdrop: false },
+            );
             modal.classList.add(`${SCRIPT_PREFIX}-bulk-confirm-modal`);
             const main = modal.querySelector("main");
             const selected = new Set(
@@ -8953,11 +9120,15 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const selectionActions = createElement(this.document, "div", `${SCRIPT_PREFIX}-row`);
             const actions = createElement(this.document, "div", `${SCRIPT_PREFIX}-row`);
             const rowControls = new Map();
+            const reopenOptions = {
+                reopenItems: items,
+                reopenTitle: options.title || "",
+            };
             const close = this.app.actionButton(this.app.t("cancel"), () => modal.close?.(), "secondary");
             const start = this.app.actionButton(this.app.t("bulk_start_download"), () => {
                 const finalItems = items.filter((item) => selected.has(item.id));
                 modal.close?.();
-                this.app.downloadProfileBulkItems(finalItems);
+                this.app.downloadProfileBulkItems(finalItems, reopenOptions);
             }, "primary");
             const retryItems = items.filter((item) =>
                                             ["failed", "partial"].includes(item.bulkDownloadResult?.status),
@@ -8965,7 +9136,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const retryFailed = retryItems.length
             ? this.app.actionButton(this.app.t("bulk_retry_failed"), () => {
                 modal.close?.();
-                this.app.downloadProfileBulkItems(retryItems, { retryFailedOnly: true });
+                this.app.downloadProfileBulkItems(retryItems, {
+                    ...reopenOptions,
+                    retryFailedOnly: true,
+                });
             }, "secondary")
             : null;
             const continueItems = items.filter((item) =>
@@ -8974,7 +9148,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const continueDownload = continueItems.length
             ? this.app.actionButton(this.app.t("bulk_continue_download"), () => {
                 modal.close?.();
-                this.app.downloadProfileBulkItems(continueItems, { resumeCancelled: true });
+                this.app.downloadProfileBulkItems(continueItems, {
+                    ...reopenOptions,
+                    resumeCancelled: true,
+                });
             }, "secondary")
             : null;
             const updateCount = () => {
@@ -9027,7 +9204,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     this.getProfileKey().replace(/^@/, "") ||
                     "-",
                 ).trim();
-                const description = String(media?.desc || item.desc || item.pageUrl || item.id || "").trim();
+                const description = String(
+                    item.shortDramaEpisode
+                    ? item.desc
+                    : media?.desc || item.desc || item.pageUrl || item.id || "",
+                ).trim();
                 const musicTitle = String(media?.music?.title || "").trim();
                 const musicAuthor = String(media?.music?.authorName || "").trim();
                 const musicText = musicTitle
@@ -9466,6 +9647,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.menu = null;
             this.launcher = null;
             this.currentMedia = null;
+            this.currentShortDrama = null;
+            this.shortDramaRefreshToken = 0;
             this.currentActionBarHost = null;
             this.currentPlacementMode = "inactive";
             this.lastHref = "";
@@ -9597,6 +9780,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.runMenuAction(() => this.downloadVideo());
             });
 
+            const shortDramaButton = makeMenuButton("", `${SCRIPT_PREFIX}-button`, () => {
+                this.runMenuAction(() => this.openShortDramaBulk());
+            });
+            shortDramaButton.hidden = true;
+
             const frameButton = makeMenuButton(this.t("frame_capture"), secondaryButtonClass, () => {
                 this.runMenuAction(() => this.openFrameCapture());
             });
@@ -9634,6 +9822,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
             const menuItems = [
                 downloadButton,
+                shortDramaButton,
                 frameButton,
                 detailsButton,
                 settingsButton,
@@ -9651,6 +9840,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.menuLifecycle.attach(panel, menu);
             this.launcher = launcher;
             this.downloadButtonEl = downloadButton;
+            this.shortDramaButtonEl = shortDramaButton;
             this.frameButtonEl = frameButton;
             this.detailsButtonEl = detailsButton;
             this.settingsButtonEl = settingsButton;
@@ -9899,6 +10089,285 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return getMessage(key, this.configStore.get(), this.window.navigator);
         }
 
+        getTikTokApiUrl(pathname, params = {}) {
+            const url = new this.window.URL(
+                pathname,
+                this.window.location.origin,
+            );
+            const reusableParams = new Set([
+                "WebIdLastTime", "aid", "app_language", "app_name", "browser_language",
+                "browser_name", "browser_online", "browser_platform", "browser_version",
+                "channel", "clientABVersions", "cookie_enabled", "data_collection_enabled",
+                "device_id", "device_platform", "focus_state", "history_len", "is_fullscreen",
+                "is_page_visible", "language", "odinId", "os", "priority_region", "referer",
+                "region", "root_referer", "screen_height", "screen_width", "storeRegion",
+                "tz_name", "user_is_login", "verifyFp", "webcast_language",
+            ]);
+            const resources = this.window.performance?.getEntriesByType?.("resource") || [];
+            for (let index = resources.length - 1; index >= 0; index -= 1) {
+                try {
+                    const source = new this.window.URL(resources[index].name);
+                    if (source.origin !== url.origin || !source.pathname.startsWith("/api/")) continue;
+                    source.searchParams.forEach((value, key) => {
+                        if (reusableParams.has(key)) url.searchParams.set(key, value);
+                    });
+                    break;
+                } catch (_err) {}
+            }
+
+            const navigator = this.window.navigator || {};
+            const language = String(this.document.documentElement?.lang || navigator.language || "en");
+            const defaults = {
+                aid: "1988",
+                app_language: language.split("-")[0],
+                app_name: "tiktok_web",
+                browser_language: language,
+                browser_name: "Mozilla",
+                browser_online: String(navigator.onLine !== false),
+                browser_platform: navigator.platform || "Win32",
+                browser_version: navigator.userAgent || "",
+                channel: "tiktok_web",
+                cookie_enabled: String(navigator.cookieEnabled !== false),
+                data_collection_enabled: "true",
+                device_platform: "web_pc",
+                focus_state: String(this.document.hasFocus?.() !== false),
+                from_page: "video",
+                is_fullscreen: String(Boolean(this.document.fullscreenElement)),
+                is_page_visible: String(!this.document.hidden),
+                language: language.split("-")[0],
+                os: /win/i.test(navigator.platform || navigator.userAgent || "") ? "windows" : "",
+                screen_height: String(this.window.screen?.height || this.window.innerHeight || 0),
+                screen_width: String(this.window.screen?.width || this.window.innerWidth || 0),
+                tz_name: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+                webcast_language: language.split("-")[0],
+            };
+            Object.entries(defaults).forEach(([key, value]) => {
+                if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+            });
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+            });
+            return url;
+        }
+
+        getShortDramaEpisodeApiUrl(dramaId, cursor, count) {
+            return this.getTikTokApiUrl("/api/drama/episode/item_list/", {
+                dramaID: dramaId,
+                cursor,
+                count,
+                coverFormat: 2,
+                from_page: "video",
+            });
+        }
+
+        async fetchTikTokApiJson(url) {
+            const controller = new this.window.AbortController();
+            const timeout = this.window.setTimeout(() => controller.abort(), 20000);
+            try {
+                const response = await this.window.fetch(url, {
+                    credentials: "include",
+                    headers: { Accept: "application/json" },
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                const statusCode = Number(data?.statusCode ?? data?.status_code ?? 0);
+                if (statusCode !== 0) {
+                    throw new Error(data?.status_msg || `TikTok API status ${statusCode}`);
+                }
+                return data;
+            } finally {
+                this.window.clearTimeout(timeout);
+            }
+        }
+
+        async fetchShortDramaEpisodePage(dramaId, cursor, count) {
+            return this.fetchTikTokApiJson(this.getShortDramaEpisodeApiUrl(dramaId, cursor, count));
+        }
+
+        async loadShortDramaEpisodes(drama) {
+            const byId = new Map();
+            let cursor = "0";
+            let total = drama.total;
+            let hasMore = true;
+            for (let page = 0; page < 100 && hasMore && byId.size < total; page += 1) {
+                const data = await this.fetchShortDramaEpisodePage(
+                    drama.dramaId,
+                    cursor,
+                    Math.min(24, Math.max(1, total - byId.size)),
+                );
+                const list = ensureArray(data?.itemList);
+                const cursorNumber = Number(cursor) || 0;
+                list.forEach((item, index) => {
+                    const id = String(getVideoItemId(item) || "");
+                    if (!id) return;
+                    byId.set(id, {
+                        item,
+                        episodeNumber: cursorNumber + index + 1,
+                    });
+                });
+                total = Number(data?.totalEpisodeCount) || total;
+                const nextCursor = String(data?.cursor ?? cursorNumber + list.length);
+                const hasMoreValue = data?.hasMore ?? data?.has_more;
+                hasMore = hasMoreValue === true || hasMoreValue === 1 || hasMoreValue === "1";
+                if (hasMore && (!list.length || nextCursor === cursor)) {
+                    throw new Error("TikTok returned a stalled episode page");
+                }
+                cursor = nextCursor;
+            }
+            if (byId.size < total) throw new Error(`${byId.size}/${total}`);
+
+            const width = String(total).length;
+            return Array.from(byId.values())
+            .sort((left, right) => left.episodeNumber - right.episodeNumber)
+            .map(({ item, episodeNumber }) => {
+                const id = String(getVideoItemId(item));
+                const uniqueId = String(item?.author?.uniqueId || item?.authorInfo?.uniqueId || "");
+                const pageUrl = uniqueId
+                ? `${this.window.location.origin}/@${encodeURIComponent(uniqueId)}/video/${id}`
+                : `${this.window.location.origin}/video/${id}`;
+                const media = normalizeMediaItem(item, pageUrl, this.configStore.get());
+                const episodeText = String(episodeNumber).padStart(width, "0");
+                return {
+                    id,
+                    pageUrl,
+                    href: pageUrl,
+                    exactItem: item,
+                    coverUrl: media?.cover?.url || "",
+                    desc: `${this.t("bulk_type_episode")} ${episodeNumber}`,
+                    shortDramaEpisode: true,
+                    episodeNumber,
+                    downloadFilenameBase: `${drama.title} - EP${episodeText}`,
+                };
+            });
+        }
+
+        async loadPlaylistItems(playlist) {
+            const detail = await this.fetchTikTokApiJson(this.getTikTokApiUrl("/api/mix/detail/", {
+                mixId: playlist.mixId,
+                from_page: "user",
+            }));
+            const mixInfo = detail?.mixInfo || detail?.mix_info || {};
+            const title = String(mixInfo.name || mixInfo.mixName || playlist.title || "Playlist").trim();
+            const total = Number(mixInfo.videoCount || mixInfo.video_count || 0);
+            const byId = new Map();
+            let cursor = "0";
+            let hasMore = true;
+            for (let page = 0; page < 100 && hasMore; page += 1) {
+                const data = await this.fetchTikTokApiJson(this.getTikTokApiUrl("/api/mix/item_list/", {
+                    mixId: playlist.mixId,
+                    cursor,
+                    count: 30,
+                    coverFormat: 2,
+                    from_page: "user",
+                }));
+                const list = ensureArray(data?.itemList);
+                list.forEach((item) => {
+                    const id = String(getVideoItemId(item) || "");
+                    if (id && !byId.has(id)) byId.set(id, item);
+                });
+                const nextCursor = String(data?.cursor ?? (Number(cursor) || 0) + list.length);
+                const hasMoreValue = data?.hasMore ?? data?.has_more;
+                hasMore = hasMoreValue === true || hasMoreValue === 1 || hasMoreValue === "1";
+                if (hasMore && (!list.length || nextCursor === cursor)) {
+                    throw new Error("TikTok returned a stalled playlist page");
+                }
+                cursor = nextCursor;
+            }
+            if (!byId.size || hasMore || (total > 0 && byId.size < total)) {
+                throw new Error(`${byId.size}/${total || "?"}`);
+            }
+
+            const config = this.configStore.get();
+            return {
+                title,
+                items: Array.from(byId.values()).map((item, index) => {
+                    const id = String(getVideoItemId(item));
+                    const uniqueId = String(item?.author?.uniqueId || item?.authorInfo?.uniqueId || "");
+                    const media = normalizeMediaItem(item, "", config);
+                    const type = media?.isImagePost ? "photo" : "video";
+                    const pageUrl = uniqueId
+                    ? `${this.window.location.origin}/@${encodeURIComponent(uniqueId)}/${type}/${id}`
+                    : `${this.window.location.origin}/${type}/${id}`;
+                    return {
+                        id,
+                        pageUrl,
+                        href: pageUrl,
+                        exactItem: item,
+                        coverUrl: media?.cover?.url || "",
+                        desc: media?.desc || `${title} ${index + 1}`,
+                    };
+                }),
+            };
+        }
+
+        async refreshShortDramaMenuItem() {
+            const token = ++this.shortDramaRefreshToken;
+            const href = this.window.location.href;
+            this.currentShortDrama = null;
+            this.applyPanelState();
+            try {
+                const media = await this.waitForCurrentMedia();
+                if (token !== this.shortDramaRefreshToken || href !== this.window.location.href) return;
+                const drama = getShortDramaDescriptor(media);
+                this.currentShortDrama = drama ? { ...drama, href } : null;
+                this.applyPanelState();
+                this.updatePanelMenuPosition();
+            } catch (_err) {
+                if (token === this.shortDramaRefreshToken) this.applyPanelState();
+            }
+        }
+
+        async openShortDramaBulk() {
+            const drama = this.currentShortDrama?.href === this.window.location.href
+            ? this.currentShortDrama
+            : getShortDramaDescriptor(await this.waitForCurrentMedia());
+            if (!drama) throw new Error(this.t("short_drama_load_failed"));
+            this.notifications.setDownloadStatus({
+                type: "busy",
+                title: this.t("short_drama_loading"),
+                detail: drama.title,
+            });
+            try {
+                const items = await this.loadShortDramaEpisodes(drama);
+                this.notifications.hideDownloadStatus(0, true);
+                this.profilePageBulkAdapter.openConfirmModal(items, {
+                    title: this.t("short_drama_confirm_title")
+                    .replace("${title}", drama.title)
+                    .replace("${count}", String(items.length)),
+                });
+            } catch (err) {
+                this.notifications.hideDownloadStatus(0, true);
+                this.notifications.toast(this.t("short_drama_load_failed"), {
+                    type: "error",
+                    detail: err?.message || String(err),
+                });
+            }
+        }
+
+        async openPlaylistBulk(playlist) {
+            this.notifications.setDownloadStatus({
+                type: "busy",
+                title: this.t("playlist_loading"),
+                detail: playlist.title,
+            });
+            try {
+                const result = await this.loadPlaylistItems(playlist);
+                this.notifications.hideDownloadStatus(0, true);
+                this.profilePageBulkAdapter.openConfirmModal(result.items, {
+                    title: this.t("playlist_confirm_title")
+                    .replace("${title}", result.title)
+                    .replace("${count}", String(result.items.length)),
+                });
+            } catch (err) {
+                this.notifications.hideDownloadStatus(0, true);
+                this.notifications.toast(this.t("playlist_load_failed"), {
+                    type: "error",
+                    detail: err?.message || String(err),
+                });
+            }
+        }
+
         applyPanelState() {
             if (!this.panel) return;
             const config = this.configStore.get();
@@ -9943,6 +10412,15 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.downloadButtonEl.textContent = this.t("download");
                 this.downloadButtonEl.hidden = isLiveMenuContext;
             }
+            if (this.shortDramaButtonEl) {
+                const drama = this.currentShortDrama?.href === this.window.location.href
+                ? this.currentShortDrama
+                : null;
+                this.shortDramaButtonEl.textContent = drama
+                ? this.t("short_drama_download_all").replace("${count}", String(drama.total))
+                : "";
+                this.shortDramaButtonEl.hidden = isLiveMenuContext || !drama;
+            }
             if (this.frameButtonEl) this.frameButtonEl.textContent = this.t("frame_capture");
             if (this.detailsButtonEl) {
                 this.detailsButtonEl.textContent = this.t("details");
@@ -9971,9 +10449,11 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
             if (shouldOpen) {
                 this.currentMedia = null;
+                this.currentShortDrama = null;
                 this.menuLifecycle.open(() => {
                     this.updatePanelMenuPosition();
                 });
+                this.refreshShortDramaMenuItem();
                 return;
             }
             this.menuLifecycle.close();
@@ -11826,7 +12306,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             if (this.downloadCancelRequested || signal?.aborted) {
                 return cancelledResult([], [], [], 1);
             }
-            const filename = this.getFilename(
+            const filename = context.filename || this.getFilename(
                 media,
                 media.video.format || "mp4",
             );
@@ -11955,11 +12435,21 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                         ? resumeImageIndexes
                         : [];
                         const mergingAlbumAssets = retryingAlbumAssets || resumingAlbumAssets;
+                        const filename = item.downloadFilenameBase
+                        ? normalizeFilename(
+                            `${item.downloadFilenameBase}.${normalizeFileExtension(media.video?.format, "mp4")}`,
+                            {
+                                maxLength: this.configStore.get().filename_max_length,
+                                preserveExtension: true,
+                            },
+                        )
+                        : "";
                         const result = await this.downloadResolvedMedia(media, {
                             bulk: true,
                             index: index + 1,
                             total: queue.length,
                             imageIndexes: requestedImageIndexes,
+                            filename,
                             signal,
                         });
                         const resultSuccessfulAssets = ensureArray(result?.successfulAssets);
@@ -12084,7 +12574,12 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.finishDownloadOperation();
                 this.profilePageBulkAdapter?.refreshCheckboxStates?.();
             }
-            if (cancelled || failed) this.profilePageBulkAdapter?.openConfirmModal?.();
+            if (cancelled || failed) {
+                this.profilePageBulkAdapter?.openConfirmModal?.(
+                    options.reopenItems,
+                    { title: options.reopenTitle || "" },
+                );
+            }
         }
 
         requestDownloadCancel() {
@@ -12724,6 +13219,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     this.lastHref = win.location.href;
                     win.setTimeout?.(() => {
                         this.currentMedia = null;
+                        this.currentShortDrama = null;
+                        this.shortDramaRefreshToken += 1;
                         this.clearCommentStickerTarget();
                         this.mountPanel();
                         this.applyPanelState();
