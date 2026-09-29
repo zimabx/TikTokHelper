@@ -24,6 +24,8 @@ TikTokHelper is a browser userscript for TikTok Web. It adds a compact action pa
 - Choose a preferred video source.
 - Customize download filenames with templates.
 - Configure keyboard shortcuts.
+- BETA : Playlists batch download.
+- BETA : Short Drama full-series download.<p align="left"><img width="180" src="https://raw.githubusercontent.com/zimabx/TikTokHelper/main/src/img/th_episodes.png" /></p>
 
 
 
@@ -45,6 +47,12 @@ After installation, TikTokHelper adds a small floating button near the active Ti
 
 <details>
   <summary>1.2.X</summary>
+  <h3>1.2.2</h3>
+<ul>
+<li>New test feature: Playlists batch download.</li>
+<li>New test feature: Short Drama full-series download — displays About and Episodes, and when valid short drama information is retrieved, a "Download all episodes" option appears.</li>
+<li>New Select All feature — allows selecting all currently <b>loaded</b> videos and image collections on a profile page in one go.</li>
+</ul>
   <h3>1.2.1</h3>
 <ul>
 <li>Compatible with the new full-screen version.</li>
