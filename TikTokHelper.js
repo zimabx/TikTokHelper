@@ -5,7 +5,7 @@
 // @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译和批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.2.2
+// @version			1.2.3
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -18,9 +18,12 @@
 // @run-at          document-start
 // ==/UserScript==
 
-// New test feature: Playlists batch download.
-// New test feature: Short Drama full-series download — displays About and Episodes, and when valid short drama information is retrieved, a "Download all episodes" option appears.
-// New Select All feature — allows selecting all currently **loaded** videos and image collections on a profile page in one go.
+// Changelog
+// Reduced the delay before the download button appears when switching videos in the For You feed.
+// Fixed the profile download button appearing in the wrong position during loading and jumping into place afterward.
+// Refined download menus with content-based sizing, consistent hover corner rounding, and a shorter selection label that keeps the count on one line.
+// Removed unnecessary settings hints and made the checkbox size slider more compact and easier to use.
+
 
 (function (root) {
     "use strict";
@@ -407,7 +410,6 @@
             translation_display_replace: "Replace with translation",
             translation_provider_google: "Google (free)",
             translation_provider_bing: "Bing (free)",
-            comment_translation_note: "Support for AI or API keys may be added in the future.",
             translate_comments: "Translate",
             show_original_comments: "Original",
             show_translated_comments: "Translation",
@@ -526,10 +528,9 @@
             download_already_running: "A download is already running. Please wait.",
             advanced_section: "Developer options",
             profile_bulk_section: "Profile bulk download",
-            profile_bulk_checkbox_size: "Profile selection checkbox size",
-            tooltip_profile_bulk_checkbox_size: "Size of the bottom-right selection checkbox on profile video cards. Range: 18–40 px.",
+            profile_bulk_checkbox_size: "Checkbox size",
             bulk_download: "Bulk download",
-            bulk_download_selected: "Download selected",
+            bulk_download_selected: "Download",
             bulk_cancel_selection: "Cancel selection",
             bulk_confirm_title: "Confirm selected videos",
             bulk_start_download: "Start download",
@@ -605,7 +606,6 @@
             translation_display_replace: "译文替换",
             translation_provider_google: "谷歌（免费）",
             translation_provider_bing: "必应（免费）",
-            comment_translation_note: "后续可能会支持接入 AI 或 API Key",
             translate_comments: "翻译",
             show_original_comments: "原文",
             show_translated_comments: "译文",
@@ -724,8 +724,7 @@
             download_already_running: "当前已有下载任务，请等待完成。",
             advanced_section: "开发者选项",
             profile_bulk_section: "个人主页批量下载",
-            profile_bulk_checkbox_size: "个人页复选框大小",
-            tooltip_profile_bulk_checkbox_size: "个人主页作品卡片右下角复选框的大小，范围：18–40 px。",
+            profile_bulk_checkbox_size: "复选框大小",
             bulk_download: "批量下载",
             bulk_download_selected: "下载选中",
             bulk_cancel_selection: "取消选择",
@@ -6272,6 +6271,10 @@
         if (pathname === "/" || /^\/(?:foryou|feed|recommend)(?:\/|$)/i.test(pathname)) {
             return "recommend";
         }
+        // A loading profile must not inherit controls left behind by the previous feed.
+        if (/^\/@[^/]+$/.test(pathname)) {
+            return getVisibleProfileBrowseDialog(doc) ? "profile-dialog" : "profile";
+        }
         if (hasVisibleRecommendFeedActionBar(doc)) return "recommend";
         if (getVisibleProfileBrowseDialog(doc)) return "profile-dialog";
         if (/^\/@[^/]+\/(?:video|photo)\/\d+/i.test(pathname) || /^\/(?:video|photo)\//i.test(pathname)) {
@@ -6316,13 +6319,13 @@
         return (visibleWidth * visibleHeight) / area;
     }
 
-    function isUsableActionBarRect(rect, viewportWidth = 0, viewportHeight = 0) {
+    function isUsableActionBarRect(rect, viewportWidth = 0, viewportHeight = 0, minimumVisibleRatio = 0.62) {
         if (!rect || !viewportWidth || !viewportHeight) return false;
         const edges = getRectEdges(rect);
         if (edges.width < 32 || edges.width > 140) return false;
         if (edges.height < 120 || edges.height > viewportHeight * 1.25) return false;
         if (edges.left < viewportWidth * 0.18 || edges.right > viewportWidth + 24) return false;
-        if (getVisibleRectRatio(edges, viewportWidth, viewportHeight) < 0.62) return false;
+        if (getVisibleRectRatio(edges, viewportWidth, viewportHeight) < minimumVisibleRatio) return false;
         return true;
     }
 
@@ -6452,7 +6455,7 @@
 
     function getPanelCoreStyleSheet() {
         return `
-:where(.${SCRIPT_PREFIX}-panel, .${SCRIPT_PREFIX}-menu, .${SCRIPT_PREFIX}-modal, .${SCRIPT_PREFIX}-notification-card, .${SCRIPT_PREFIX}-image-button, .${SCRIPT_PREFIX}-sticker-button, .${SCRIPT_PREFIX}-profile-bulk-menu) {
+:where(.${SCRIPT_PREFIX}-panel, .${SCRIPT_PREFIX}-menu, .${SCRIPT_PREFIX}-modal, .${SCRIPT_PREFIX}-notification-card, .${SCRIPT_PREFIX}-image-button, .${SCRIPT_PREFIX}-sticker-button) {
   font-family: var(--tux-fontFamilyParagraph, "TikTokFont", Arial, Tahoma, PingFangSC, sans-serif);
 }
 .${SCRIPT_PREFIX}-panel {
@@ -6721,6 +6724,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
   transform: none;
 }
 .${SCRIPT_PREFIX}-profile-bulk-wrap {
+  position: static;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -6728,6 +6732,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
   box-sizing: border-box;
 }
 .${SCRIPT_PREFIX}-profile-bulk-button {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  margin: 0 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -6747,7 +6755,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-save-button:hover
   display: block;
   pointer-events: none;
 }
-.${SCRIPT_PREFIX}-profile-bulk-menu { width: 160px; }
 .${SCRIPT_PREFIX}-profile-select-box {
   position: absolute;
   right: 8px;
@@ -6970,33 +6977,23 @@ body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
   accent-color: var(--tux-v2-color-ui-shape-primary);
   order: -1;
 }
-.${SCRIPT_PREFIX}-profile-slider-field { grid-column: 1 / -1; display: grid; gap: 10px; }
-.${SCRIPT_PREFIX}-profile-slider-head {
-  display: flex;
+.${SCRIPT_PREFIX}-profile-slider-field {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 160px) auto;
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  width: 100%;
 }
-.${SCRIPT_PREFIX}-profile-slider-head label { margin: 0; flex: 0 0 auto; }
-.${SCRIPT_PREFIX}-profile-slider-desc {
-  min-width: 0;
-  color: var(--tux-v2-color-ui-text-3);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.${SCRIPT_PREFIX}-field.${SCRIPT_PREFIX}-profile-slider-field > label { margin: 0; white-space: nowrap; }
 .${SCRIPT_PREFIX}-profile-slider-value {
-  margin-left: auto;
-  flex: 0 0 auto;
-  min-width: 48px;
+  min-width: 36px;
   text-align: right;
   color: var(--tux-v2-color-ui-text-primary);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
-.${SCRIPT_PREFIX}-profile-slider-field input[type="range"] { width: 100%; accent-color: var(--tux-v2-color-ui-shape-primary); }
+.${SCRIPT_PREFIX}-profile-slider-field input[type="range"] { width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; accent-color: var(--tux-v2-color-ui-shape-primary); }
 .${SCRIPT_PREFIX}-menu {
   position: absolute;
   z-index: 2147483601;
@@ -7006,7 +7003,8 @@ body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
   transform-origin: var(--${SCRIPT_PREFIX}-menu-origin, 50% 50%);
   display: none;
   visibility: hidden;
-  width: 208px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   overflow: hidden;
   padding: 4px;
   border-radius: 16px;
@@ -7018,7 +7016,7 @@ body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
   box-sizing: border-box;
   will-change: transform, opacity, filter;
 }
-.${SCRIPT_PREFIX}-menu.open, .${SCRIPT_PREFIX}-menu.closing { display: block; }
+.${SCRIPT_PREFIX}-menu.open, .${SCRIPT_PREFIX}-menu.closing { display: grid; }
 .${SCRIPT_PREFIX}-menu.open[data-placement], .${SCRIPT_PREFIX}-menu.closing[data-placement] { visibility: visible; }
 .${SCRIPT_PREFIX}-menu.open:not(.closing)[data-placement] { animation: ${SCRIPT_PREFIX}-menu-slide-fade-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 .${SCRIPT_PREFIX}-menu.closing[data-placement] { pointer-events: none; animation: ${SCRIPT_PREFIX}-menu-slide-fade-out 105ms cubic-bezier(0.4, 0, 1, 1) both; }
@@ -7057,7 +7055,7 @@ body.${SCRIPT_PREFIX}-profile-dragging { user-select: none !important; }
   text-align: left;
   font-family: inherit;
 }
-.${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button { width: 100%; min-height: 52px; border-radius: 8px; background: transparent; font-size: 16px; }
+.${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button { width: auto; min-width: 0; white-space: nowrap; min-height: 52px; border-radius: inherit; background: transparent; font-size: 16px; }
 .${SCRIPT_PREFIX}-button.secondary { background: transparent; }
 .${SCRIPT_PREFIX}-button:hover { background: var(--tux-v2-color-ui-shape-neutral-3); color: var(--tux-v2-color-ui-text-1); }
 .${SCRIPT_PREFIX}-menu .${SCRIPT_PREFIX}-button:hover { background: var(--tux-v2-color-ui-shape-neutral-4); }
@@ -8162,16 +8160,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 }
                 return score;
             };
-            const hosts = Array.from(this.app.document.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR))
-            .filter((element) => !this.app.isOwnUiElement?.(element))
-            .filter((element) => isActionBarClassName(element.className))
-            .map((element) => this.getElementRect(element))
-            .filter((rect) => {
-                if (!this.isVisibleActionBarRect(rect)) return false;
-                const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || [])
-                .filter((button) => !this.app.panel?.contains(button));
-                return buttons.length >= 2;
-            })
+            const hosts = this.getActionBarCandidates()
+            .filter((rect) => this.isVisibleActionBarRect(rect))
             .sort((left, right) => {
                 const leftScore = scoreHostRect(left);
                 const rightScore = scoreHostRect(right);
@@ -8182,6 +8172,19 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 );
             });
             return hosts[0]?.element || null;
+        }
+
+        getActionBarCandidates() {
+            return Array.from(this.app.document.querySelectorAll(RECOMMEND_ACTION_BAR_SELECTOR))
+            .filter((element) => !this.app.isOwnUiElement?.(element))
+            .filter((element) => isActionBarClassName(element.className))
+            .map((element) => this.getElementRect(element))
+            .filter((rect) => {
+                if (!rect) return false;
+                const buttons = Array.from(rect.element.querySelectorAll?.("button,[role='button'],a") || [])
+                .filter((button) => !this.app.isOwnUiElement?.(button));
+                return buttons.length >= 2;
+            });
         }
 
 
@@ -8261,24 +8264,39 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             state.profileKey = profileKey;
         }
 
-        findUserMoreButton() {
-            return this.document.querySelector('[data-e2e="user-more"]');
+        findButtonPlacement() {
+            for (const host of this.document.querySelectorAll('.user-profile-header [class*="DivButtonPanelWrapper"]')) {
+                const anchor = host.querySelector('[data-e2e="user-more"]');
+                const children = Array.from(host.children).filter((child) => child !== this.buttonWrapper);
+                const reference = children.find((child) => child === anchor || child.contains(anchor)) || children.at(-1);
+                if (!reference) continue;
+                const rect = reference.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) return { host, reference, anchor: anchor || reference };
+            }
+            for (const anchor of this.document.querySelectorAll('[data-e2e="user-more"]')) {
+                const rect = anchor.getBoundingClientRect();
+                const reference = anchor.parentElement;
+                const host = reference?.parentElement;
+                if (host && rect.width > 0 && rect.height > 0) return { host, reference, anchor };
+            }
+            return null;
         }
 
-        mount(userMore = this.findUserMoreButton()) {
+        mount(placement = this.findButtonPlacement()) {
             if (!this.isProfilePage()) {
                 this.unmount();
                 return false;
             }
             this.syncProfileContext();
-            if (userMore) {
-                this.ensureButton(userMore);
+            if (placement?.anchor) {
+                this.ensureButton(placement);
             } else {
                 this.unmountButtonOnly();
             }
             this.enterSelectionMode();
             this.updateMenuLabels();
-            return Boolean(userMore);
+            if (this.menuLifecycle.isOpen) this.positionMenu();
+            return Boolean(placement?.anchor);
         }
 
         unmountButtonOnly() {
@@ -8300,33 +8318,23 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.unmountButtonOnly();
         }
 
-        ensureButton(userMore) {
-            const nativeWrapper = userMore.parentElement || null;
-            const parent = nativeWrapper?.parentElement || userMore.parentElement;
-            if (!parent) return;
+        ensureButton({ host, reference, anchor }) {
+            if (!host || !reference || !anchor) return;
 
             const syncOfficialVisual = () => {
-                const wrapperClass = [
-                    String(nativeWrapper?.className || ""),
-                    `${SCRIPT_PREFIX}-profile-bulk-wrap`,
-                ].filter(Boolean).join(" ");
-                const buttonClass = [String(userMore.className || ""), `${SCRIPT_PREFIX}-profile-bulk-button`]
+                const nativeClass = anchor.matches('[data-e2e="user-more"]') ? anchor.className : "";
+                const buttonClass = [nativeClass, `${SCRIPT_PREFIX}-profile-bulk-button`]
                 .filter(Boolean)
                 .join(" ");
-                this.buttonWrapper.className = wrapperClass;
                 this.button.className = buttonClass;
 
-                const wrapperStyle = nativeWrapper?.getAttribute?.("style") || "";
-                if (wrapperStyle) this.buttonWrapper.setAttribute("style", wrapperStyle);
-                else this.buttonWrapper.removeAttribute("style");
-                const buttonStyle = userMore?.getAttribute?.("style") || "";
-                if (buttonStyle) this.button.setAttribute("style", buttonStyle);
-                else this.button.removeAttribute("style");
+                const wrapperStyle = this.window.getComputedStyle(reference);
+                this.buttonWrapper.style.backgroundColor = wrapperStyle.backgroundColor;
+                this.buttonWrapper.style.borderRadius = wrapperStyle.borderRadius;
 
-                const wrapperRect = nativeWrapper?.getBoundingClientRect?.();
-                const buttonRect = userMore?.getBoundingClientRect?.();
-                const wrapperSize = Math.round(wrapperRect?.width || buttonRect?.width || 40);
-                const wrapperHeight = Math.round(wrapperRect?.height || buttonRect?.height || 40);
+                const buttonRect = anchor.getBoundingClientRect();
+                const wrapperSize = Math.round(buttonRect?.width || 40);
+                const wrapperHeight = Math.round(buttonRect?.height || 40);
                 this.buttonWrapper.style.setProperty("width", `${wrapperSize}px`);
                 this.buttonWrapper.style.setProperty("height", `${wrapperHeight}px`);
                 this.buttonWrapper.style.setProperty("display", "inline-flex", "important");
@@ -8345,7 +8353,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
 
             if (!this.buttonWrapper) {
-                this.buttonWrapper = createElement(this.document, "div", "");
+                this.buttonWrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-bulk-wrap`);
                 this.button = createElement(this.document, "button", "");
                 this.button.type = "button";
                 this.button.setAttribute("aria-label", this.app.t("bulk_download"));
@@ -8365,15 +8373,14 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
 
             syncOfficialVisual();
-            const reference = nativeWrapper || userMore;
-            if (this.buttonWrapper.parentElement !== parent || this.buttonWrapper.previousSibling !== reference) {
-                parent.insertBefore(this.buttonWrapper, reference.nextSibling);
+            if (this.buttonWrapper.parentElement !== host || this.buttonWrapper.previousSibling !== reference) {
+                host.insertBefore(this.buttonWrapper, reference.nextSibling);
             }
         }
 
         ensureMenu() {
             if (this.menu) return this.menu;
-            const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu ${SCRIPT_PREFIX}-profile-bulk-menu`);
+            const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
             menu.addEventListener("pointerdown", (event) => event.stopPropagation());
             menu.addEventListener("click", (event) => {
                 if (menu.classList.contains("closing")) {
@@ -8577,8 +8584,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             if (!this.selectionMode || !this.isProfilePage()) return;
             this.cancelDragSelection(false);
 
-            // Synchronize selection controls for cards already present in the DOM only.
-            // This does not scroll the page or request/load additional profile items.
             this.scanVisibleCards();
 
             let changed = false;
@@ -9646,6 +9651,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.panel = null;
             this.menu = null;
             this.launcher = null;
+            this.feedLaunchers = new Map();
+            this.menuActionAnchor = null;
             this.currentMedia = null;
             this.currentShortDrama = null;
             this.shortDramaRefreshToken = 0;
@@ -9673,6 +9680,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             this.menuLifecycle = new MenuLifecycle(win, {
                 onStateChange: () => this.applyPanelState(),
                 onClosed: () => {
+                    this.menuActionAnchor = null;
                     this.clearPanelMenuPosition();
                     this.mountPanel();
                 },
@@ -9714,10 +9722,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
         }
 
-        renderPanel() {
-            this.menuLifecycle?.clearPending?.();
-            if (this.menu) this.menu.remove();
-            if (this.panel) this.panel.remove();
+        createLauncherPanel() {
             const panel = createElement(this.document, "div", `${SCRIPT_PREFIX}-panel`);
             const launcherShell = createElement(this.document, "div", `${SCRIPT_PREFIX}-launcher-shell`);
             const launcherIconWrapper = createElement(
@@ -9736,6 +9741,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 `${SCRIPT_PREFIX}-launcher`,
             );
             launcher.type = "button";
+            launcher.setAttribute("aria-label", this.t("menu"));
             launcher.innerHTML = `
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
           <path d="M12 3v12" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
@@ -9745,11 +9751,27 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
       `;
             launcher.addEventListener("click", (event) => {
                 event.stopPropagation();
+                if (panel !== this.panel) {
+                    const host = panel.parentElement;
+                    if (!host?.isConnected) return;
+                    this.closeMenu(true);
+                    this.mountPanelInActionBar(host);
+                }
                 this.toggleMenu();
             });
             launcherContainer.appendChild(launcher);
             launcherIconWrapper.appendChild(launcherContainer);
             launcherShell.appendChild(launcherIconWrapper);
+            panel.append(launcherShell);
+            return { panel, launcher };
+        }
+
+        renderPanel() {
+            this.menuLifecycle?.clearPending?.();
+            this.syncFeedLaunchers(false);
+            if (this.menu) this.menu.remove();
+            if (this.panel) this.panel.remove();
+            const { panel, launcher } = this.createLauncherPanel();
 
             const menu = createElement(this.document, "div", `${SCRIPT_PREFIX}-menu`);
             menu.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -9833,7 +9855,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 testErrorButton,
             ];
             menu.append(...menuItems);
-            panel.append(launcherShell);
             this.document.body.appendChild(menu);
             this.panel = panel;
             this.menu = menu;
@@ -10448,6 +10469,9 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             if (!this.panel || !this.menu) return;
             const shouldOpen = force === null ? !this.menuLifecycle.isOpen : Boolean(force);
             if (shouldOpen) {
+                this.menuActionAnchor = this.currentPlacementMode === "recommend"
+                    ? this.currentActionBarHost
+                    : this.getCurrentActionAnchor();
                 this.currentMedia = null;
                 this.currentShortDrama = null;
                 this.menuLifecycle.open(() => {
@@ -10466,8 +10490,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         runMenuAction(action) {
+            const anchor = this.getCurrentActionAnchor();
             this.closeMenu(true);
             const run = () => {
+                this.menuActionAnchor = anchor?.isConnected ? anchor : null;
                 try {
                     const result = action?.();
                     result?.catch?.((err) => {
@@ -10475,6 +10501,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                     });
                 } catch (err) {
                     this.notifications?.toast?.(err?.message || String(err), { type: "error" });
+                } finally {
+                    this.menuActionAnchor = null;
                 }
             };
             if (typeof this.window.requestAnimationFrame === "function") {
@@ -10527,7 +10555,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         isOwnUiElement(element) {
             return Boolean(
                 element &&
-                (this.panel?.contains?.(element) ||
+                (element.closest?.(`.${SCRIPT_PREFIX}-panel`) ||
+                 this.panel?.contains?.(element) ||
                  this.menu?.contains?.(element) ||
                  this.imageDownloadButton?.contains?.(element) ||
                  element === this.panel ||
@@ -10607,8 +10636,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             return best;
         }
 
-        syncEmbeddedButtonMetrics(host) {
-            if (!this.panel || !host) return;
+        syncEmbeddedButtonMetrics(host, panel = this.panel) {
+            if (!panel || !host) return;
             const sample = this.getEmbeddedNativeButtonSample(host);
             const nativeControl = sample?.control || null;
             const controlRect = sample?.controlRect || nativeControl?.getBoundingClientRect?.();
@@ -10616,15 +10645,50 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             const controlSize = Math.round(clampNumber(rawControlSize, 28, 64, 48));
             const iconSize = Math.round(clampNumber(controlSize * 0.62, 18, 28, Math.round(controlSize * 0.55)));
 
-            this.panel.style.width = `${controlSize}px`;
-            this.panel.style.height = `${controlSize}px`;
-            this.panel.style.flexBasis = `${controlSize}px`;
-            const icon = this.launcher?.querySelector?.("svg");
+            panel.style.width = `${controlSize}px`;
+            panel.style.height = `${controlSize}px`;
+            panel.style.flexBasis = `${controlSize}px`;
+            const launcher = panel.querySelector(`.${SCRIPT_PREFIX}-launcher`);
+            const icon = launcher?.querySelector?.("svg");
             if (icon) {
                 icon.style.width = `${iconSize}px`;
                 icon.style.height = `${iconSize}px`;
             }
-            this.launcher.className = `${SCRIPT_PREFIX}-launcher`;
+            if (launcher) launcher.className = `${SCRIPT_PREFIX}-launcher`;
+        }
+
+        syncFeedLaunchers(enabled) {
+            const viewportWidth = this.window.innerWidth || 0;
+            const viewportHeight = this.window.innerHeight || 0;
+            const candidates = enabled ? this.actionBarLocator.getActionBarCandidates().filter((rect) =>
+                isUsableActionBarRect(rect, viewportWidth, viewportHeight, 0) &&
+                rect.bottom >= -viewportHeight && rect.top <= viewportHeight * 2,
+            ) : [];
+            const hosts = new Set(candidates.map((rect) => rect.element));
+            for (const [host, panel] of this.feedLaunchers) {
+                if (hosts.has(host)) continue;
+                panel.remove();
+                this.feedLaunchers.delete(host);
+            }
+            for (const host of hosts) {
+                let panel = this.feedLaunchers.get(host);
+                if (!panel) {
+                    panel = this.createLauncherPanel().panel;
+                    panel.classList.add("embedded");
+                    this.feedLaunchers.set(host, panel);
+                }
+                panel.querySelector(`.${SCRIPT_PREFIX}-launcher`).setAttribute("aria-label", this.t("menu"));
+                if (this.panel?.parentElement !== host && panel.parentElement !== host) {
+                    host.insertBefore(panel, this.actionBarLocator.getActionBarInsertionReference(host));
+                }
+                this.syncEmbeddedButtonMetrics(host, panel);
+            }
+        }
+
+        restoreFeedLauncher() {
+            const host = this.panel?.parentElement;
+            const replacement = this.feedLaunchers.get(host);
+            if (replacement && replacement.parentElement !== host) host.replaceChild(replacement, this.panel);
         }
 
         clearEmbeddedButtonMetrics() {
@@ -10672,7 +10736,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             }
             const reference = this.actionBarLocator.getActionBarInsertionReference(host);
             if (this.panel.parentElement !== host || this.panel.nextSibling !== reference) {
-                host.insertBefore(this.panel, reference || host.firstChild);
+                this.restoreFeedLauncher();
+                const replacement = this.feedLaunchers.get(host);
+                if (replacement?.parentElement === host) host.replaceChild(this.panel, replacement);
+                else host.insertBefore(this.panel, reference || host.firstChild);
             }
             this.currentPlacementMode = "recommend";
             this.currentActionBarHost = host;
@@ -10686,6 +10753,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         mountPanelLeftOfButton(anchor, placementMode, mirrorSurface = null) {
             if (!this.panel || !anchor) return false;
+            this.menuActionAnchor = null;
+            this.restoreFeedLauncher();
             if (this.panel.parentElement !== this.document.body) {
                 this.document.body.appendChild(this.panel);
             }
@@ -10739,6 +10808,8 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         hidePanelForInactivePlacement() {
             if (!this.panel) return;
+            this.menuActionAnchor = null;
+            this.restoreFeedLauncher();
             if (this.panel.parentElement !== this.document.body) {
                 this.document.body.appendChild(this.panel);
             }
@@ -10801,24 +10872,24 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 };
             }
             if (pageType === "profile") {
-                const userMore = this.profilePageBulkAdapter?.findUserMoreButton?.()
-                || this.document.querySelector?.('[data-e2e="user-more"]');
-                const rect = this.actionBarLocator.getElementRect(userMore);
-                const parent = userMore?.parentElement?.parentElement || userMore?.parentElement || null;
+                const placement = this.profilePageBulkAdapter?.findButtonPlacement() || {};
+                const rect = this.actionBarLocator.getElementRect(placement.anchor);
                 return {
+                    ...placement,
                     surface: pageType,
                     mode: pageType,
-                    anchor: userMore,
                     signature: rect
-                    ? `profile-more:${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${parent?.children?.length || 0}`
-            : "profile-no-user-more",
+                    ? `profile-controls:${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)},${placement.host.children.length}`
+                    : "profile-no-controls",
                 };
             }
             if (pageType !== "recommend" || this.openImageOverlay) {
                 return { surface: pageType, mode: "inactive", signature: "" };
             }
 
-            const host = this.actionBarLocator.findActionBarHost();
+            const host = this.menuLifecycle.isOpen && this.menuActionAnchor?.isConnected
+                ? this.menuActionAnchor
+                : this.actionBarLocator.findActionBarHost();
             const rect = this.actionBarLocator.getElementRect(host);
             const childCount = this.actionBarLocator.getNativeActionChildren(host).length;
             return {
@@ -10831,10 +10902,10 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
         }
 
-        mountPanel() {
+        mountPanel(placement = this.resolvePanelPlacement()) {
             if (!this.panel) return;
+            this.syncFeedLaunchers(placement.surface === "recommend" && !this.openImageOverlay);
 
-            const placement = this.resolvePanelPlacement();
             if (placement.surface === "cinema") {
                 this.profilePageBulkAdapter?.suspend?.();
                 if (
@@ -10861,7 +10932,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
             if (placement.surface === "profile") {
                 this.hidePanelForInactivePlacement();
-                this.profilePageBulkAdapter?.mount?.(placement.anchor);
+                this.profilePageBulkAdapter?.mount?.(placement);
                 return;
             }
 
@@ -10876,6 +10947,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         getCurrentActionAnchor() {
+            if (this.menuActionAnchor?.isConnected) return this.menuActionAnchor;
             const placement = this.resolvePanelPlacement();
             if (!["recommend", "cinema", "profile-dialog"].includes(placement.mode)) {
                 return null;
@@ -10884,39 +10956,30 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
         }
 
         getCurrentLiveContextText(anchorElement = null) {
-            const visibleMedia = this.extractor?.getVisibleMediaElement?.() || null;
-            const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
+            const anchorContext = this.extractor?.getMediaContextElement?.(anchorElement) || null;
+            const visibleMedia = anchorContext ? null : this.extractor?.getVisibleMediaElement?.() || null;
+            const visibleVideo = anchorContext ? null : this.extractor?.getVisibleVideoElement?.() || null;
             const context =
-                  this.extractor?.getMediaContextElement?.(anchorElement) ||
+                  anchorContext ||
                   this.extractor?.getMediaContextElement?.(visibleMedia) ||
                   this.extractor?.getMediaContextElement?.(visibleVideo) ||
                   null;
-            const actionText = unique([
+            const actionText = anchorContext ? anchorElement?.textContent || "" : context ? "" : unique([
                 anchorElement?.textContent || "",
                 this.currentActionBarHost?.textContent || "",
             ]).join(" ");
-            const contextText = unique([
-                context?.textContent || "",
+            const contextText = context ? context.textContent || "" : unique([
                 visibleMedia?.parentElement?.textContent || "",
                 visibleVideo?.parentElement?.textContent || "",
             ]).join(" ");
-            return { actionText, contextText };
+            return { context, actionText, contextText };
         }
 
         isCurrentLiveContext(anchorElement = null) {
             if (this.getCurrentPageType() === "live") return true;
 
-            const visibleMedia = this.extractor?.getVisibleMediaElement?.() || null;
-            const visibleVideo = this.extractor?.getVisibleVideoElement?.() || null;
-            const contexts = [...new Set([
-                this.extractor?.getMediaContextElement?.(anchorElement),
-                this.extractor?.getMediaContextElement?.(visibleMedia),
-                this.extractor?.getMediaContextElement?.(visibleVideo),
-            ].filter(Boolean))];
-            if (contexts.some((context) => hasStrongLiveContextStructure(context))) return true;
-
-            const { actionText, contextText } = this.getCurrentLiveContextText(anchorElement);
-            return isLikelyLiveContextText(actionText, contextText);
+            const { context, actionText, contextText } = this.getCurrentLiveContextText(anchorElement);
+            return hasStrongLiveContextStructure(context) || isLikelyLiveContextText(actionText, contextText);
         }
 
         captureMediaContext(anchorElement = null) {
@@ -12692,36 +12755,24 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 ]),
             );
 
-            const note = createElement(
-                this.document,
-                "div",
-                `${SCRIPT_PREFIX}-settings-note full`,
-                this.t("comment_translation_note"),
-            );
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
             grid.append(
                 provider.wrapper,
                 target.wrapper,
                 displayMode.wrapper,
                 autoOpen.wrapper,
-                note,
             );
             return grid;
         }
 
         buildSettingsProfileBulkGrid(config) {
             const wrapper = createElement(this.document, "div", `${SCRIPT_PREFIX}-field ${SCRIPT_PREFIX}-profile-slider-field`);
-            const head = createElement(this.document, "div", `${SCRIPT_PREFIX}-profile-slider-head`);
             const label = createElement(this.document, "label", "", this.t("profile_bulk_checkbox_size"));
-            const desc = createElement(
-                this.document,
-                "span",
-                `${SCRIPT_PREFIX}-profile-slider-desc`,
-                this.t("tooltip_profile_bulk_checkbox_size"),
-            );
             const valueEl = createElement(this.document, "span", `${SCRIPT_PREFIX}-profile-slider-value`);
             const slider = createElement(this.document, "input");
             slider.type = "range";
+            slider.id = `${SCRIPT_PREFIX}-profile-checkbox-size`;
+            label.htmlFor = slider.id;
             slider.dataset.configKey = "profile_bulk_checkbox_size";
             slider.min = "18";
             slider.max = "40";
@@ -12732,8 +12783,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
             slider.addEventListener("input", updateValue);
             updateValue();
-            head.append(label, desc, valueEl);
-            wrapper.append(head, slider);
+            wrapper.append(label, slider, valueEl);
             slider.wrapper = wrapper;
 
             const grid = createElement(this.document, "div", `${SCRIPT_PREFIX}-settings-grid`);
@@ -13277,8 +13327,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             };
         }
 
-        getPanelPositionSignature() {
-            const placement = this.resolvePanelPlacement();
+        getPanelPositionSignature(placement = this.resolvePanelPlacement()) {
             return [
                 this.window.location?.href || "",
                 placement.surface,
@@ -13291,11 +13340,26 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
 
         watchPanelPosition() {
             if (this.positionObserver) return;
+            let lastPlacementSurface = "";
             const schedule = () => {
                 if (this.positionFrame) return;
                 const run = () => {
                     this.positionFrame = null;
-                    this.mountPanel();
+                    const placement = this.resolvePanelPlacement();
+                    lastPlacementSurface = placement.surface;
+                    const signature = this.getPanelPositionSignature(placement);
+                    const hostChanged = placement.mode === "recommend" &&
+                        this.panel?.parentElement !== placement.host;
+                    const profileAnchorChanged = placement.mode === "profile" && placement.anchor && (
+                        this.profilePageBulkAdapter?.buttonWrapper?.parentElement !== placement.host ||
+                        this.profilePageBulkAdapter?.buttonWrapper?.previousSibling !== placement.reference
+                    );
+                    if (signature === this.lastPanelPositionSignature && !hostChanged && !profileAnchorChanged) {
+                        this.syncFeedLaunchers(placement.surface === "recommend" && !this.openImageOverlay);
+                        return;
+                    }
+                    this.lastPanelPositionSignature = signature;
+                    this.mountPanel(placement);
                     this.applyPanelState();
                 };
                 if (typeof this.window.requestAnimationFrame === "function") {
@@ -13312,9 +13376,6 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.pendingPanelPositionCheck = this.window.setTimeout(() => {
                     this.pendingPanelPositionCheck = null;
                     this.lastPanelPositionCheckAt = Date.now();
-                    const signature = this.getPanelPositionSignature();
-                    if (signature === this.lastPanelPositionSignature) return;
-                    this.lastPanelPositionSignature = signature;
                     schedule();
                 }, delay);
             };
@@ -13332,11 +13393,35 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 this.positionObserver = new this.window.MutationObserver((records) => {
                     const hasExternalMutation = records.some((record) => {
                         const target = record.target;
-                        if (this.panel?.contains?.(target)) return false;
+                        if (this.isOwnUiElement(target)) return false;
                         if (this.notifications?.notificationStackEl?.contains?.(target)) return false;
+                        const changedNodes = [...record.addedNodes, ...record.removedNodes];
+                        if (changedNodes.length && changedNodes.every((node) => this.isOwnUiElement(node))) return false;
                         return true;
                     });
-                    if (hasExternalMutation) scheduleIfChanged();
+                    if (hasExternalMutation) {
+                        const feedControlsAdded = lastPlacementSurface === "recommend" &&
+                            records.some((record) => {
+                                const host = record.target.closest?.(RECOMMEND_ACTION_BAR_SELECTOR);
+                                const needsLauncher = host && this.panel?.parentElement !== host &&
+                                    this.feedLaunchers.get(host)?.parentElement !== host;
+                                return Array.from(record.addedNodes).some((node) =>
+                                    !this.isOwnUiElement(node) && (
+                                        needsLauncher || node.matches?.(RECOMMEND_ACTION_BAR_SELECTOR) ||
+                                        node.querySelector?.(RECOMMEND_ACTION_BAR_SELECTOR)
+                                    ),
+                                );
+                            });
+                        const profileControlsAdded = lastPlacementSurface === "profile" &&
+                            records.some((record) => Array.from(record.addedNodes).some((node) =>
+                                !this.isOwnUiElement(node) && (
+                                    node.matches?.('[data-e2e="user-more"],[class*="DivButtonPanelWrapper"]') ||
+                                    node.querySelector?.('[data-e2e="user-more"],[class*="DivButtonPanelWrapper"]')
+                                ),
+                            ));
+                        if (feedControlsAdded || profileControlsAdded) schedule();
+                        else scheduleIfChanged();
+                    }
                     if (
                         this.openImageOverlay ||
                         Date.now() - this.lastImageOpenGestureAt <= IMAGE_OVERLAY_RECENT_GESTURE_MS

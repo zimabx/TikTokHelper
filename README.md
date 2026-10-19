@@ -1,6 +1,6 @@
 # TikTokHelper
 
-[Simplified Chinese](README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
 Provide Feedback: [supportURL](https://github.com/zimabx/TikTokHelper/issues)
 
@@ -47,6 +47,13 @@ After installation, TikTokHelper adds a small floating button near the active Ti
 
 <details>
   <summary>1.2.X</summary>
+  <h3>1.2.3</h3>
+<ul>
+<li>Reduced the delay before the download button appears when switching videos in the For You feed.</li>
+<li>Fixed the profile download button appearing in the wrong position during loading and jumping into place afterward.</li>
+<li>Refined download menus with content-based sizing, consistent hover corner rounding, and a shorter selection label that keeps the count on one line.</li>
+<li>Removed unnecessary settings hints and made the checkbox size slider more compact and easier to use.</li>
+</ul>
   <h3>1.2.2</h3>
 <ul>
 <li>New test feature: Playlists batch download.</li>
