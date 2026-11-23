@@ -5,7 +5,7 @@
 // @description:zh-CN	为 TikTok 网页端添加紧凑工具，支持视频与图集下载、视频帧截取、媒体详情、评论翻译和批量下载。
 // @namespace		https://github.com/zimabx/TikTokHelper
 // @supportURL		https://github.com/zimabx/TikTokHelper/issues
-// @version			1.2.3
+// @version			1.2.4
 // @author			zimabx
 // @match           https://*.tiktok.com/*
 // @icon            https://www.google.com/s2/favicons?sz=64&domain=tiktok.com
@@ -19,11 +19,7 @@
 // ==/UserScript==
 
 // Changelog
-// Reduced the delay before the download button appears when switching videos in the For You feed.
-// Fixed the profile download button appearing in the wrong position during loading and jumping into place afterward.
-// Refined download menus with content-based sizing, consistent hover corner rounding, and a shorter selection label that keeps the count on one line.
-// Removed unnecessary settings hints and made the checkbox size slider more compact and easier to use.
-
+// Compatible with the new version of the page
 
 (function (root) {
     "use strict";
@@ -3181,13 +3177,19 @@
             if (!compared.candidate && !compared.ambiguousIds.length) {
                 const reactIds = unique(nearbyEntries.map((entry) => entry.id));
                 const wrapperIds = this.collectWrapperIds(context, mediaElement, anchorElement);
+                const anchoringChrome =
+                      anchorElement?.closest?.('[data-e2e="anchoring-chrome-host"]') ||
+                      context?.closest?.('[data-e2e="anchoring-player-column"]')
+                      ?.querySelector?.('[data-e2e="anchoring-chrome-host"]') ||
+                      null;
+                const authorDomScopes = [context, anchoringChrome, anchorElement].filter(Boolean);
                 const structuredDomUsernames = unique([
                     pageUsername,
-                    ...collectStructuredAuthorUsernamesInElement(context || anchorElement),
+                    ...authorDomScopes.flatMap((scope) => collectStructuredAuthorUsernamesInElement(scope)),
                 ]);
                 const allDomUsernames = unique([
                     pageUsername,
-                    ...collectAuthorUsernamesInElement(context || anchorElement),
+                    ...authorDomScopes.flatMap((scope) => collectAuthorUsernamesInElement(scope)),
                 ]);
                 const pageDataCandidates = collectPageDataCandidates(this.document, this.window);
                 const corroboration = [];
@@ -5657,6 +5659,22 @@
                 if (this.isMediaContextElement(current)) return current;
                 current = current.parentElement || null;
             }
+            const anchoringRoot = element.closest?.(
+                '[data-e2e="anchoring-chrome-host"], [data-e2e="anchoring-player-column"]',
+            );
+            if (anchoringRoot) {
+                const playerColumn =
+                      element.closest?.('[data-e2e="anchoring-player-column"]') || anchoringRoot;
+                const mediaElement =
+                      this.getContextMediaElement(playerColumn) || this.getVisibleMediaElement();
+                const mediaClosest = mediaElement?.closest?.(selector);
+                if (mediaClosest) return mediaClosest;
+                let mediaCurrent = mediaElement?.parentElement || null;
+                while (mediaCurrent && mediaCurrent !== this.document?.body) {
+                    if (this.isMediaContextElement(mediaCurrent)) return mediaCurrent;
+                    mediaCurrent = mediaCurrent.parentElement || null;
+                }
+            }
             return null;
         }
 
@@ -6322,7 +6340,7 @@
     function isUsableActionBarRect(rect, viewportWidth = 0, viewportHeight = 0, minimumVisibleRatio = 0.62) {
         if (!rect || !viewportWidth || !viewportHeight) return false;
         const edges = getRectEdges(rect);
-        if (edges.width < 32 || edges.width > 140) return false;
+        if (edges.width < 18 || edges.width > 140) return false;
         if (edges.height < 120 || edges.height > viewportHeight * 1.25) return false;
         if (edges.left < viewportWidth * 0.18 || edges.right > viewportWidth + 24) return false;
         if (getVisibleRectRatio(edges, viewportWidth, viewportHeight) < minimumVisibleRatio) return false;
@@ -10579,7 +10597,7 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                 const action = getOfficialActionMetricElement(child);
                 if (!action) continue;
                 const actionRect = action.getBoundingClientRect?.();
-                if (!actionRect || actionRect.width < 24 || actionRect.height < 32) continue;
+                if (!actionRect || actionRect.width < 18 || actionRect.height < 32) continue;
                 const visual = getBestSquareMetricElement(action) || getOfficialActionButtonCandidate(action) || action;
                 const visualRect = visual?.getBoundingClientRect?.();
                 if (!visualRect || visualRect.width < 20 || visualRect.height < 20) continue;
@@ -10979,7 +10997,20 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
             if (this.getCurrentPageType() === "live") return true;
 
             const { context, actionText, contextText } = this.getCurrentLiveContextText(anchorElement);
-            return hasStrongLiveContextStructure(context) || isLikelyLiveContextText(actionText, contextText);
+            const anchoringChrome =
+                  anchorElement?.closest?.('[data-e2e="anchoring-chrome-host"]') ||
+                  context?.closest?.('[data-e2e="anchoring-player-column"]')
+                  ?.querySelector?.('[data-e2e="anchoring-chrome-host"]') ||
+                  null;
+            return (
+                hasStrongLiveContextStructure(context) ||
+                hasStrongLiveContextStructure(anchoringChrome) ||
+                hasStrongLiveContextStructure(anchorElement) ||
+                isLikelyLiveContextText(
+                    actionText,
+                    anchoringChrome ? `${contextText} ${anchoringChrome.textContent || ""}` : contextText,
+                )
+            );
         }
 
         captureMediaContext(anchorElement = null) {
@@ -11545,11 +11576,17 @@ button.TUXButton.${SCRIPT_PREFIX}-icon-button.${SCRIPT_PREFIX}-details-close {
                   this.extractor.getMediaContextElement(video) ||
                   video?.parentElement ||
                   null;
-            const nickname = findLiveNicknameInReact([video?.parentElement, context]);
+            const anchoringChrome =
+                  context?.closest?.('[data-e2e="anchoring-player-column"]')
+                  ?.querySelector?.('[data-e2e="anchoring-chrome-host"]') ||
+                  null;
+            const nickname = findLiveNicknameInReact([video?.parentElement, context, anchoringChrome]);
             if (nickname) return nickname;
             const authorLink =
                   context?.querySelector?.('a[data-e2e="video-author-avatar"][href*="/@"][href*="/live"]') ||
                   context?.querySelector?.('a[href*="/@"][href*="/live"]') ||
+                  anchoringChrome?.querySelector?.('a[data-e2e="video-author-avatar"][href*="/@"][href*="/live"]') ||
+                  anchoringChrome?.querySelector?.('a[href*="/@"][href*="/live"]') ||
                   null;
             return getAuthorFromUrl(authorLink?.href || authorLink?.getAttribute?.("href") || "");
         }
